@@ -25,11 +25,15 @@ import { openInEditor } from './editor.js';
 import { agentPath, iconsDir, outDir, sampleDir } from './paths.js';
 import { SettingsStore } from './settings.js';
 import { AppTray } from './tray.js';
+import { sameOrigin } from '../shared/urls.js';
 import { APP_ORIGIN, createMainWindow, hardenSession, micaSupported, registerAppScheme, serveRenderer } from './window.js';
 
 
 const devUrl = process.env.ELECTRON_RENDERER_URL ?? null;
 const isDev = !app.isPackaged;
+
+// A separate profile (settings, window state, instance lock), e.g. for end-to-end tests.
+if (process.env.CAPMAC_STUDIO_USER_DATA) app.setPath('userData', path.resolve(process.env.CAPMAC_STUDIO_USER_DATA));
 
 /**
  * One capmac Studio at a time. In development the previous instance may
@@ -176,12 +180,7 @@ function onEnginePrompt(prompt: PromptRequest): void {
 
 function trusted(event: IpcMainInvokeEvent): boolean {
   const url = event.senderFrame?.url ?? '';
-  try {
-    const origin = new URL(url).origin;
-    return origin === APP_ORIGIN || (devUrl !== null && origin === new URL(devUrl).origin);
-  } catch {
-    return false;
-  }
+  return sameOrigin(url, APP_ORIGIN) || (devUrl !== null && sameOrigin(url, devUrl));
 }
 
 function handle<C extends AppChannel>(channel: C, fn: (payload: z.output<(typeof appChannels)[C]>, event: IpcMainInvokeEvent) => Promise<AppResults[C]> | AppResults[C]): void {

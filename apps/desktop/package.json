@@ -14,7 +14,7 @@
     "dist": "node scripts/build.mjs && electron-builder --config electron-builder.yml",
     "icons": "node scripts/icons.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test:e2e": "playwright test --config playwright.config.ts"
+    "test:e2e": "node scripts/build.mjs && playwright test --config playwright.config.ts"
   },
   "devDependencies": {
     "@capmac/core": "0.1.0",

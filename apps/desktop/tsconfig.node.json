@@ -15,5 +15,5 @@
     "verbatimModuleSyntax": true,
     "noEmit": true
   },
-  "include": ["src/main", "src/preload", "src/engine", "src/shared", "src/globals.d.ts"]
+  "include": ["src/main", "src/preload", "src/engine", "src/shared", "src/globals.d.ts", "e2e", "playwright.config.ts"]
 }

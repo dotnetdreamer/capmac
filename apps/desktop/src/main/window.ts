@@ -3,6 +3,7 @@ import { promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, nativeTheme, protocol, screen, session } from 'electron';
+import { sameOrigin } from '../shared/urls.js';
 import { rendererDir } from './paths.js';
 
 export const TITLE_BAR_HEIGHT = 40;
@@ -175,13 +176,12 @@ export function createMainWindow(options: { preload: string; url: string; icon: 
   const contents = win.webContents;
   // capmac Studio never opens other windows or navigates away from itself.
   contents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  const allowed = new URL(options.url).origin;
   contents.on('will-navigate', (event, url) => {
-    if (new URL(url).origin !== allowed) event.preventDefault();
+    if (!sameOrigin(url, options.url)) event.preventDefault();
   });
   contents.on('will-attach-webview', (event) => event.preventDefault());
   contents.on('will-redirect', (event, url) => {
-    if (new URL(url).origin !== allowed) event.preventDefault();
+    if (!sameOrigin(url, options.url)) event.preventDefault();
   });
 
   nativeTheme.on('updated', () => {

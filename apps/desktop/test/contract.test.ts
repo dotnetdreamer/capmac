@@ -1,0 +1,43 @@
+import { describe, expect, it } from 'vitest';
+import { appChannels, DEFAULT_SETTINGS, engineMethods, inputEventSchema, settingsPatchSchema, settingsSchema } from '../src/shared/contract';
+
+// Main validates every request from the renderer against these schemas.
+describe('IPC validation', () => {
+  it('opens only https links', () => {
+    const openExternal = appChannels['app:open-external'];
+    expect(openExternal.safeParse({ url: 'https://github.com/cameroncooke/AXe' }).success).toBe(true);
+    for (const url of ['http://example.com', 'file:///C:/Windows/System32/calc.exe', 'javascript:alert(1)', 'ms-settings:privacy', 'not a url']) {
+      expect(openExternal.safeParse({ url }).success, url).toBe(false);
+    }
+  });
+
+  it('rejects unknown fields', () => {
+    expect(appChannels['app:visibility'].safeParse({ visible: true }).success).toBe(true);
+    expect(appChannels['app:visibility'].safeParse({ visible: true, extra: 1 }).success).toBe(false);
+    expect(engineMethods['sessions.start'].safeParse({ projectPath: 'C:\\apps\\hello', mode: 'run', sneaky: true }).success).toBe(false);
+  });
+
+  it('accepts only known session modes and device ids', () => {
+    const start = engineMethods['sessions.start'];
+    expect(start.safeParse({ projectPath: 'C:\\apps\\hello', mode: 'live', target: 'A1B2C3D4-0000-0000-0000-000000000000' }).success).toBe(true);
+    expect(start.safeParse({ projectPath: 'C:\\apps\\hello', mode: 'shell' }).success).toBe(false);
+    expect(start.safeParse({ projectPath: 'C:\\apps\\hello', mode: 'run', target: 'booted; rm -rf ~' }).success).toBe(false);
+  });
+
+  it('keeps simulator input in range', () => {
+    expect(inputEventSchema.safeParse({ kind: 'tap', x: 0.5, y: 0.25 }).success).toBe(true);
+    expect(inputEventSchema.safeParse({ kind: 'tap', x: 1.5, y: 0.25 }).success).toBe(false);
+    expect(inputEventSchema.safeParse({ kind: 'swipe', x1: 0, y1: 0, x2: 1, y2: 1, durationMs: 5 }).success).toBe(false);
+    expect(inputEventSchema.safeParse({ kind: 'key', key: 'return' }).success).toBe(true);
+    expect(inputEventSchema.safeParse({ kind: 'key', key: 'F13' }).success).toBe(false);
+    expect(inputEventSchema.safeParse({ kind: 'text', text: '' }).success).toBe(false);
+  });
+
+  it('validates settings, defaults included', () => {
+    expect(settingsSchema.safeParse(DEFAULT_SETTINGS).success).toBe(true);
+    expect(settingsPatchSchema.safeParse({ theme: 'dark' }).success).toBe(true);
+    expect(settingsPatchSchema.safeParse({ theme: 'purple' }).success).toBe(false);
+    expect(settingsPatchSchema.safeParse({ consoleLimit: 50 }).success).toBe(false);
+    expect(settingsPatchSchema.safeParse({ password: 'hunter2' }).success).toBe(false);
+  });
+});
