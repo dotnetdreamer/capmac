@@ -1,0 +1,20 @@
+{
+  "name": "hello-capacitor",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Smallest useful Capacitor app for trying capmac: Vite, one plugin, console logs.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/device": "^8.0.3",
+    "@capacitor/ios": "^8.5.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
+    "vite": "^8.3.4"
+  }
+}

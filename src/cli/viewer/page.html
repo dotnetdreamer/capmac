@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>capmac screen</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --text: #16181d; --muted: #6b7280; --border: #e3e5ea;
+    --accent: #3a7afe; --ok: #1f9d55; --warn: #c27c0e; --err: #d64545; --device: #101114; --shadow: 0 20px 50px rgba(15,23,42,.18);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e0f12; --panel: #17191e; --text: #e8eaee; --muted: #8b93a1; --border: #262a31;
+      --accent: #6b9bff; --ok: #3fbf7f; --warn: #e0a43a; --err: #f06b6b; --device: #000; --shadow: 0 20px 60px rgba(0,0,0,.55);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e0f12; --panel: #17191e; --text: #e8eaee; --muted: #8b93a1; --border: #262a31;
+    --accent: #6b9bff; --ok: #3fbf7f; --warn: #e0a43a; --err: #f06b6b; --device: #000; --shadow: 0 20px 60px rgba(0,0,0,.55);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; flex-direction: column; overflow: hidden; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--panel); }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.live { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+  .dot.err { background: var(--err); }
+  .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .spacer { flex: 1; }
+  button { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  main { flex: 1; display: flex; min-height: 0; }
+  .stage { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; min-width: 0; position: relative; }
+  .device { background: var(--device); padding: 12px; border-radius: 46px; box-shadow: var(--shadow); height: 100%; max-height: 900px; aspect-ratio: var(--ratio, 0.4615); display: flex; }
+  .screen { position: relative; flex: 1; border-radius: 36px; overflow: hidden; background: #000; outline: none; }
+  .screen:focus-visible { box-shadow: 0 0 0 3px var(--accent); }
+  .screen img { width: 100%; height: 100%; object-fit: contain; display: block; user-select: none; -webkit-user-drag: none; touch-action: none; }
+  .screen.input img { cursor: pointer; }
+  .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #cfd3da; font-size: 13px; padding: 24px; pointer-events: none; }
+  .ripple { position: absolute; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 50%; background: rgba(255,255,255,.45); pointer-events: none; animation: ripple .45s ease-out forwards; }
+  @keyframes ripple { from { transform: scale(.4); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
+  .banner { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 999px; font-size: 12px; max-width: calc(100% - 32px); }
+  aside { width: 420px; max-width: 45vw; border-left: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  aside.hidden { display: none; }
+  .tabs { display: flex; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border); align-items: center; }
+  .tabs button { padding: 3px 9px; font-size: 12px; border-radius: 999px; }
+  .tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .log { flex: 1; overflow: auto; font: 12px/1.45 var(--mono); padding: 8px 10px; white-space: pre-wrap; word-break: break-word; }
+  .line { padding: 1px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
+  .line .tag { display: inline-block; min-width: 30px; color: var(--muted); }
+  .line.warn { color: var(--warn); } .line.error { color: var(--err); } .line.debug, .line.bridge { color: var(--muted); }
+  .empty { color: var(--muted); padding: 16px 4px; font-family: system-ui, sans-serif; }
+  .kbd { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); display: none; gap: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 6px; box-shadow: var(--shadow); }
+  .kbd.show { display: flex; }
+  .kbd input { font: inherit; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; width: 260px; background: var(--bg); color: var(--text); }
+  @media (max-width: 760px) { aside { display: none; } .device { max-height: 640px; } }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1 id="title">capmac screen</h1>
+  <span class="meta" id="meta">connecting…</span>
+  <span class="spacer"></span>
+  <button id="home" title="Home (H)">⌂ Home</button>
+  <button id="lock" title="Lock / side button">⏻</button>
+  <button id="type" title="Type text (T)">⌨ Type</button>
+  <button id="shot" title="Save screenshot (S)">⤓ Screenshot</button>
+  <button id="toggleLogs" title="Show / hide console (L)">☰ Console</button>
+</header>
+<main>
+  <div class="stage">
+    <div class="device" id="device">
+      <div class="screen" id="screen" tabindex="0" aria-label="Simulator screen">
+        <img id="img" alt="">
+        <div class="overlay" id="overlay">Connecting to the simulator…</div>
+      </div>
+    </div>
+    <div class="banner" id="banner" hidden></div>
+    <form class="kbd" id="kbd"><input id="kbdText" placeholder="Text to type on the simulator" autocomplete="off"><button type="submit">Send</button></form>
+  </div>
+  <aside id="logs">
+    <div class="tabs">
+      <button data-filter="all" class="active">All</button>
+      <button data-filter="js">JS</button>
+      <button data-filter="error">Errors</button>
+      <span class="spacer"></span>
+      <button id="clear">Clear</button>
+    </div>
+    <div class="log" id="log"><div class="empty">App logs appear here while capmac is attached.</div></div>
+  </aside>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const img = $('img'), screenEl = $('screen'), overlay = $('overlay'), dot = $('dot'), meta = $('meta'), banner = $('banner');
+  let info = null, frames = 0, lastFpsAt = performance.now(), filter = 'all';
+
+  async function post(path, body) {
+    const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json().catch(() => ({}));
+  }
+
+  async function loadInfo() {
+    try {
+      info = await (await fetch('/api/info')).json();
+      document.title = info.title || 'capmac screen';
+      $('title').textContent = info.title || 'capmac screen';
+      const input = info.screen && info.screen.input;
+      screenEl.classList.toggle('input', !!input);
+      for (const id of ['home', 'lock', 'type']) $(id).disabled = !input;
+      if (info.screen && !input) {
+        banner.hidden = false;
+        banner.textContent = 'View only — install AXe on the Mac for touch input: capmac doctor --fix';
+      } else banner.hidden = true;
+    } catch { /* retry on next frame */ }
+  }
+
+  function startStream() {
+    img.src = '/stream?ts=' + Date.now();
+  }
+  img.addEventListener('load', () => {
+    frames++;
+    overlay.style.display = 'none';
+    dot.className = 'dot live';
+    if (img.naturalWidth && img.naturalHeight) $('device').style.setProperty('--ratio', String(img.naturalWidth / img.naturalHeight));
+    if (!info || !info.screen) loadInfo();
+  });
+  img.addEventListener('error', () => {
+    dot.className = 'dot err';
+    overlay.style.display = 'flex';
+    overlay.textContent = 'Lost the screen stream — reconnecting…';
+    setTimeout(startStream, 1500);
+  });
+  setInterval(() => {
+    const now = performance.now();
+    const fps = frames / ((now - lastFpsAt) / 1000);
+    frames = 0; lastFpsAt = now;
+    if (info) meta.textContent = `${info.target} · ${fps.toFixed(1)} fps · ${info.screen ? info.screen.source : '…'}`;
+  }, 1000);
+
+  function point(e) {
+    const r = img.getBoundingClientRect();
+    const iw = img.naturalWidth || r.width, ih = img.naturalHeight || r.height;
+    const scale = Math.min(r.width / iw, r.height / ih);
+    const w = iw * scale, h = ih * scale;
+    const ox = r.left + (r.width - w) / 2, oy = r.top + (r.height - h) / 2;
+    return { x: Math.min(1, Math.max(0, (e.clientX - ox) / w)), y: Math.min(1, Math.max(0, (e.clientY - oy) / h)), px: e.clientX - r.left, py: e.clientY - r.top };
+  }
+  function ripple(p) {
+    const el = document.createElement('div');
+    el.className = 'ripple'; el.style.left = p.px + 'px'; el.style.top = p.py + 'px';
+    screenEl.appendChild(el); setTimeout(() => el.remove(), 500);
+  }
+  function send(event) {
+    if (!info || !info.screen || !info.screen.input) return;
+    post('/api/input', event).catch((err) => console.warn('input failed', err));
+  }
+
+  let down = null;
+  img.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    img.setPointerCapture(e.pointerId);
+    down = { ...point(e), t: performance.now() };
+    screenEl.focus();
+  });
+  img.addEventListener('pointerup', (e) => {
+    if (!down) return;
+    const up = point(e);
+    const dt = performance.now() - down.t;
+    const dist = Math.hypot(up.x - down.x, up.y - down.y);
+    if (dist < 0.015) {
+      ripple(up);
+      send(dt > 500 ? { kind: 'swipe', x1: down.x, y1: down.y, x2: up.x, y2: up.y, durationMs: Math.min(dt, 2000) } : { kind: 'tap', x: up.x, y: up.y });
+    } else {
+      send({ kind: 'swipe', x1: down.x, y1: down.y, x2: up.x, y2: up.y, durationMs: Math.max(80, Math.min(dt, 1500)) });
+    }
+    down = null;
+  });
+  let wheelAcc = 0, wheelTimer = null, wheelPoint = null;
+  img.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    wheelAcc += e.deltaY; wheelPoint = point(e);
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(() => {
+      const dy = Math.max(-0.5, Math.min(0.5, -wheelAcc / 1200));
+      const p = wheelPoint; wheelAcc = 0;
+      send({ kind: 'swipe', x1: p.x, y1: p.y, x2: p.x, y2: Math.min(0.98, Math.max(0.02, p.y + dy)), durationMs: 180 });
+    }, 90);
+  }, { passive: false });
+
+  let textBuf = '', textTimer = null;
+  screenEl.addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const special = { Enter: 'return', Backspace: 'delete', Tab: 'tab', Escape: 'escape' }[e.key];
+    if (special) {
+      e.preventDefault();
+      if (textBuf) { send({ kind: 'text', text: textBuf }); textBuf = ''; }
+      send({ kind: 'key', key: special });
+      return;
+    }
+    if (e.key.length === 1) {
+      e.preventDefault();
+      textBuf += e.key;
+      clearTimeout(textTimer);
+      textTimer = setTimeout(() => { send({ kind: 'text', text: textBuf }); textBuf = ''; }, 200);
+    }
+  });
+
+  $('home').onclick = () => send({ kind: 'button', button: 'home' });
+  $('lock').onclick = () => send({ kind: 'button', button: 'lock' });
+  $('type').onclick = () => { $('kbd').classList.toggle('show'); $('kbdText').focus(); };
+  $('kbd').onsubmit = (e) => { e.preventDefault(); const t = $('kbdText').value; if (t) send({ kind: 'text', text: t }); $('kbdText').value = ''; };
+  $('shot').onclick = () => { const a = document.createElement('a'); a.href = '/api/frame.jpg?ts=' + Date.now(); a.download = 'simulator-' + new Date().toISOString().replace(/[:.]/g, '-') + '.jpg'; a.click(); };
+  $('toggleLogs').onclick = () => $('logs').classList.toggle('hidden');
+  document.addEventListener('keydown', (e) => {
+    if (document.activeElement === screenEl || document.activeElement === $('kbdText')) return;
+    if (e.key === 'h' || e.key === 'H') $('home').click();
+    if (e.key === 's' || e.key === 'S') $('shot').click();
+    if (e.key === 'l' || e.key === 'L') $('toggleLogs').click();
+    if (e.key === 't' || e.key === 'T') { e.preventDefault(); $('type').click(); }
+  });
+
+  // Console panel (Server-Sent Events).
+  const log = $('log');
+  const MAX_LINES = 2000;
+  function addLine(entry) {
+    if (log.firstElementChild && log.firstElementChild.classList.contains('empty')) log.innerHTML = '';
+    const el = document.createElement('div');
+    el.className = 'line ' + entry.level + ' ' + entry.kind;
+    el.dataset.kind = entry.kind; el.dataset.level = entry.level;
+    const tag = document.createElement('span'); tag.className = 'tag';
+    tag.textContent = entry.kind === 'console' ? 'js' : entry.kind === 'capacitor' ? 'cap' : entry.kind === 'bridge' ? '↔' : 'ios';
+    el.append(tag, document.createTextNode(' ' + entry.text));
+    applyFilter(el);
+    const stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
+    log.appendChild(el);
+    while (log.childElementCount > MAX_LINES) log.firstElementChild.remove();
+    if (stick) log.scrollTop = log.scrollHeight;
+  }
+  function applyFilter(el) {
+    const show = filter === 'all' || (filter === 'js' && el.dataset.kind === 'console') || (filter === 'error' && el.dataset.level === 'error');
+    el.style.display = show ? '' : 'none';
+  }
+  document.querySelectorAll('[data-filter]').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('[data-filter]').forEach((x) => x.classList.remove('active'));
+    b.classList.add('active'); filter = b.dataset.filter;
+    log.querySelectorAll('.line').forEach(applyFilter);
+  }));
+  $('clear').onclick = () => { log.innerHTML = ''; };
+  const events = new EventSource('/api/logs');
+  events.onmessage = (m) => { try { addLine(JSON.parse(m.data)); } catch {} };
+
+  loadInfo();
+  startStream();
+})();
+</script>
+</body>
+</html>

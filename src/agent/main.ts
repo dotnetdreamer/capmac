@@ -1,0 +1,77 @@
+/**
+ * capmac agent: runs on the Mac, one process per operation, driven over an
+ * SSH exec channel by the Windows CLI. Uses only Node.js built-ins.
+ */
+import type { AgentErrorInfo } from '../shared/protocol.js';
+import { AgentIO } from './io.js';
+import { opArchive, opDownload } from './ops/archive.js';
+import { opBuild } from './ops/build.js';
+import { opBoot, opDeploy, opLogs } from './ops/deploy.js';
+import { opClean, opExec, opKeychain, opOpenXcode, opPull, opRelay } from './ops/misc.js';
+import { opPrepare } from './ops/prepare.js';
+import { keychainLocked, opProbe } from './ops/probe.js';
+import { toolEnv } from './env.js';
+import { opScreen } from './ops/screen.js';
+import { opSync } from './ops/sync.js';
+import { opInstallTools, opTargets } from './ops/targets.js';
+import { AgentError, killAll } from './proc.js';
+import { AGENT_VERSION } from './version.js';
+
+type Handler = (params: any, io: AgentIO) => Promise<unknown>;
+
+const OPS: Record<string, Handler> = {
+  probe: () => opProbe(),
+  sync: opSync,
+  prepare: opPrepare,
+  build: opBuild,
+  archive: opArchive,
+  download: opDownload,
+  deploy: opDeploy,
+  boot: opBoot,
+  logs: opLogs,
+  targets: () => opTargets(),
+  screen: opScreen,
+  exec: opExec,
+  pull: opPull,
+  keychain: (params) => opKeychain(params),
+  'keychain-status': async () => ({ locked: await keychainLocked(await toolEnv()) }),
+  clean: opClean,
+  'open-xcode': (params) => opOpenXcode(params),
+  relay: opRelay,
+  'install-tools': opInstallTools,
+  version: async () => ({ version: AGENT_VERSION, node: process.version, platform: process.platform, arch: process.arch }),
+};
+
+function toErrorInfo(err: unknown): AgentErrorInfo {
+  if (err instanceof AgentError) {
+    return { message: err.message, code: err.code, hint: err.hint, tail: err.tail };
+  }
+  const e = err as { message?: string; code?: string } | undefined;
+  return { message: e?.message ?? String(err), code: typeof e?.code === 'string' ? e.code : undefined };
+}
+
+async function main(): Promise<void> {
+  const io = new AgentIO(process.stdin, process.stdout);
+  let exitCode = 0;
+  try {
+    const params = await io.nextJson('params');
+    const handler = OPS[params.op];
+    if (!handler) throw new AgentError(`Unknown operation "${params.op}" (agent ${AGENT_VERSION})`, 'BAD_REQUEST');
+    const data = await handler(params, io);
+    io.send({ t: 'result', ok: true, data: data ?? null });
+  } catch (err) {
+    exitCode = 1;
+    const info = toErrorInfo(err);
+    if (io.signal.aborted && !info.code) info.code = 'CANCELLED';
+    io.send({ t: 'result', ok: false, error: info });
+  }
+  await io.flush();
+  killAll();
+  process.exit(exitCode);
+}
+
+process.on('unhandledRejection', (reason) => {
+  process.stderr.write(`capmac agent: unhandled rejection: ${String((reason as Error)?.stack ?? reason)}\n`);
+});
+
+void main();

@@ -1,0 +1,50 @@
+{
+  "name": "capmac",
+  "version": "0.1.0",
+  "description": "Pair to Mac for Capacitor: build, run, live-reload and see your iOS app on a remote Mac, straight from Windows.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "capmac": "./bin/capmac.js"
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20.10"
+  },
+  "keywords": [
+    "capacitor",
+    "ios",
+    "xcode",
+    "windows",
+    "remote",
+    "pair-to-mac",
+    "simulator",
+    "live-reload"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "bonjour-service": "^1.4.4",
+    "commander": "^15.0.0",
+    "ignore": "^7.0.12",
+    "multicast-dns": "^7.2.5",
+    "picocolors": "^1.1.1",
+    "ssh2": "^1.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/ssh2": "^1.15.6",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}
