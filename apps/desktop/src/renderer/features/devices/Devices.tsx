@@ -149,9 +149,17 @@ export function Devices() {
   if (macs.length === 0) {
     return (
       <div className="page">
-        <EmptyState icon="phone" title="Pair a Mac to see its simulators" actions={<Button variant="accent" onClick={() => navigate({ name: 'onboarding' })}>Pair a Mac</Button>}>
-          Simulators and iPhones are attached to your Mac; capmac lists them here with their live state.
-        </EmptyState>
+        <div className="page__inner">
+          <header className="page__header">
+            <div>
+              <h1 className="page__title">Devices</h1>
+              <p className="page__subtitle">Simulators and iPhones on your Mac, live.</p>
+            </div>
+          </header>
+          <EmptyState icon="phone" title="Pair a Mac to see its simulators" actions={<Button variant="accent" icon="add" onClick={() => navigate({ name: 'onboarding' })}>Pair a Mac</Button>}>
+            Simulators and iPhones are attached to your Mac; capmac lists them here with their live state.
+          </EmptyState>
+        </div>
       </div>
     );
   }

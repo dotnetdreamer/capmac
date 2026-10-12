@@ -109,7 +109,7 @@ export function buildCommands(): Command[] {
       keywords: 'hello example demo',
       run: () =>
         void call('projects.createSample', {}).then(async ({ path: sample }) => {
-          if (await openProject(sample)) void startSession(sample, 'run');
+          if ((await openProject(sample)) && useMacs.getState().macs.length > 0) void startSession(sample, 'run');
         }),
     },
   );

@@ -144,7 +144,8 @@ function SampleButton({ variant = 'standard' }: { variant?: 'standard' | 'subtle
         setBusy(true);
         try {
           const { path } = await call('projects.createSample', {});
-          if (await openProject(path)) void startSession(path, 'run');
+          // Without a Mac, open it: the workspace shows how to pair one.
+          if ((await openProject(path)) && useMacs.getState().macs.length > 0) void startSession(path, 'run');
         } catch (err) {
           toast({ tone: 'critical', title: 'Could not create the sample app', body: errorInfo(err).message });
         } finally {

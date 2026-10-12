@@ -51,7 +51,12 @@ export async function startSession(path: string, mode: 'run' | 'live', options: 
   const prefs = projectPrefs(path);
   const mac = macFor(path);
   if (!mac) {
-    failStart(path, { message: 'No Mac is selected for this project.', hint: useMacs.getState().macs.length ? 'Pick a Mac in the toolbar.' : 'Pair your Mac first (Macs › Pair a Mac).', expected: true });
+    if (useMacs.getState().macs.length === 0) {
+      // Nothing failed: there is just no Mac yet. The workspace already says so.
+      toast({ tone: 'info', title: 'Pair a Mac first', body: 'capmac Studio builds and runs your app with Xcode on a Mac.', action: { label: 'Pair a Mac', run: () => useApp.getState().navigate({ name: 'onboarding' }) } });
+      return;
+    }
+    failStart(path, { message: 'No Mac is selected for this project.', hint: 'Pick a Mac in the toolbar.', expected: true });
     return;
   }
   const settings = useApp.getState().settings;
