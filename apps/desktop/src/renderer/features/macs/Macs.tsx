@@ -173,6 +173,13 @@ export function Macs() {
   useEffect(() => {
     if (!expanded && macs[0]) setExpanded((macs.find((m) => m.isDefault) ?? macs[0]).name);
   }, [macs, expanded]);
+  // Check connected Macs once per session: it fills in macOS, chip and simulators, and finds problems early.
+  useEffect(() => {
+    const { health, runHealth } = useMacs.getState();
+    for (const m of macs) {
+      if ((m.state === 'connected' || m.state === 'restored') && !health[m.name]) void runHealth(m.name);
+    }
+  }, [macs]);
   return (
     <div className="page">
       <div className="page__inner">

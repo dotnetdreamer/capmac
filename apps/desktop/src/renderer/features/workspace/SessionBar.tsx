@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { MacSummary } from '../../../shared/contract';
+import type { ErrorInfo, MacSummary } from '../../../shared/contract';
 import { emitWorkspace } from '../../app/commands';
 import { rebuild, relaunch, startSession } from '../../state/actions';
 import { isActive, isBusy, type RunState } from '../../state/runs';
@@ -107,6 +107,16 @@ function RunCard({ run }: { run: RunState }) {
   );
 }
 
+/**
+ * The engine's hint for a failed build is written for the terminal ("re-run with
+ * --verbose"); here the problems, the output and the build log are one click away.
+ */
+function hintFor(error: ErrorInfo, run: RunState, errors: number): string | undefined {
+  if (error.code !== 'BUILD_FAILED') return error.hint;
+  if (errors > 0) return run.mode === 'live' ? 'Fix it and save: capmac rebuilds as soon as the file changes.' : 'Fix it, then run again.';
+  return run.buildLogPath ? 'The output and the full build log show what went wrong.' : error.hint;
+}
+
 function FailureCard({ path, run }: { path: string; run: RunState }) {
   const [details, setDetails] = useState(false);
   const error = run.error!;
@@ -140,7 +150,7 @@ function FailureCard({ path, run }: { path: string; run: RunState }) {
           </>
         }
       >
-        {error.hint}
+        {hintFor(error, run, errors)}
       </InfoBar>
       {details && error.details && <pre className="session-error__details selectable">{error.details.join('\n')}</pre>}
     </div>

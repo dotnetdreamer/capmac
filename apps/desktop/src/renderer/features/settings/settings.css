@@ -1,5 +1,8 @@
-.settings {
+/* Same column as the other pages (titles line up); the rows themselves stay readable. */
+.settings > * {
   max-width: 880px;
+}
+.settings {
   .section-title {
     margin: var(--s-6) 0 var(--s-2);
   }

@@ -67,33 +67,49 @@ function SimulatorRow({ mac, t }: { mac: string; t: Target }) {
 }
 
 function DeviceRow({ t }: { t: Target }) {
+  const menu = usePopover();
+  const connected = t.state === 'connected';
   const devOff = t.developerMode === 'disabled';
+  // Only say something when there is something to do.
+  const hint = devOff
+    ? 'Turn on Developer Mode on the iPhone: Settings › Privacy & Security › Developer Mode.'
+    : t.paired === false
+      ? 'Connect it to the Mac, unlock it and tap Trust.'
+      : !connected
+        ? 'Plug it into the Mac, or keep it unlocked on the same Wi-Fi.'
+        : null;
   return (
-    <li className="device-row device-row--device">
+    <li className={`device-row${hint ? ' has-hint' : ''}`}>
       <span className="device-row__glyph">
         <Icon name={targetGlyph(t)} size={20} />
       </span>
       <span className="device-row__name">
         <span className="truncate">{t.name}</span>
-        {t.model && <span className="device-row__model truncate">{t.model}</span>}
+        {t.model && simplify(t.model) !== simplify(t.name) && <span className="device-row__model truncate">{t.model}</span>}
       </span>
       <span className="device-row__os">{t.os}</span>
-      <span className="device-row__badges">
-        <Badge tone={t.state === 'connected' ? 'success' : 'neutral'} icon={t.state !== 'connected' ? 'plugDisconnected' : t.connection === 'network' ? 'wifi' : 'usb'}>
-          {t.state === 'connected' ? (t.connection === 'network' ? 'Wi-Fi' : 'USB') : 'Not connected'}
-        </Badge>
-        <Badge tone={devOff ? 'caution' : t.developerMode === 'enabled' ? 'success' : 'neutral'}>Developer Mode {devOff ? 'off' : t.developerMode === 'enabled' ? 'on' : 'unknown'}</Badge>
-        {t.paired === false && <Badge tone="caution">Not paired</Badge>}
+      <span className={`device-row__state${connected ? ' is-on' : ''}`}>
+        {connected ? <StatusDot tone="ok" /> : <Icon name="plugDisconnected" size={14} className="faint" />}
+        {connected ? (t.connection === 'network' ? 'Connected over Wi-Fi' : 'Connected by USB') : 'Not connected'}
       </span>
-      <span className="device-row__hint">
-        {devOff
-          ? 'On the iPhone: Settings › Privacy & Security › Developer Mode.'
-          : t.paired === false
-            ? 'Connect it to the Mac and tap Trust.'
-            : t.state !== 'connected'
-              ? 'Plug it into the Mac or keep it on the same Wi-Fi, unlocked.'
-              : 'Ready for Run and Live.'}
+      <span className="device-row__actions">
+        {devOff ? (
+          <Badge tone="caution">Developer Mode off</Badge>
+        ) : t.paired === false ? (
+          <Badge tone="caution">Not trusted</Badge>
+        ) : (
+          t.developerMode === 'enabled' && <Badge tone="success">Developer Mode on</Badge>
+        )}
+        <button type="button" className="icon-btn icon-btn--sm" aria-label={`More for ${t.name}`} aria-haspopup="menu" {...menu.triggerProps}>
+          <Icon name="more" size={16} />
+        </button>
+        <Menu
+          state={menu}
+          label={`${t.name} actions`}
+          items={[{ id: 'udid', label: 'Copy UDID', icon: 'copy', hint: t.udid.slice(0, 8), onSelect: () => void navigator.clipboard.writeText(t.udid).then(() => toast({ tone: 'success', title: 'UDID copied' })) }]}
+        />
       </span>
+      {hint && <span className="device-row__hint">{hint}</span>}
     </li>
   );
 }

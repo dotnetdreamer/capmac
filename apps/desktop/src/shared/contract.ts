@@ -223,7 +223,7 @@ export const inputEventSchema = z.discriminatedUnion('kind', [
 export type ScreenPortMessage =
   | { type: 'frame'; data: ArrayBuffer; seq: number }
   | { type: 'info'; info: ScreenInfo }
-  | { type: 'state'; state: 'connecting' | 'streaming' | 'ended'; error?: ErrorInfo };
+  | { type: 'state'; state: 'connecting' | 'streaming' | 'reconnecting' | 'ended'; error?: ErrorInfo };
 
 // ─── App (main process) ────────────────────────────────────────────────────
 

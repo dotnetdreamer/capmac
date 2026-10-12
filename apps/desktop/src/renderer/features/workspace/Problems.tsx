@@ -88,7 +88,8 @@ function Group({ g, root, defaultOpen }: { g: FileGroup; root: string; defaultOp
   const [open, setOpen] = useState(defaultOpen);
   const name = g.file ? relativeTo(g.file, root) : 'General';
   const base = name.split(/[\\/]/).pop();
-  const dir = name.slice(0, name.length - (base?.length ?? 0));
+  // The folder next to the file name, as VS Code shows it ("ios\App\App").
+  const dir = name.slice(0, name.length - (base?.length ?? 0)).replace(/[\\/]+$/, '');
   return (
     <li className="problem-group">
       <button type="button" className="problem-group__head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
@@ -112,12 +113,17 @@ function Group({ g, root, defaultOpen }: { g: FileGroup; root: string; defaultOp
   );
 }
 
+/** Problems listed on their own: errors anywhere, warnings in your code (and in dependencies when the setting says so). */
+export function isListed(d: Diagnostic, showDeps: boolean): boolean {
+  return Boolean(d.own) || d.severity === 'error' || showDeps;
+}
+
 export function Problems({ path, run }: { path: string; run: RunState | undefined }) {
   const showDeps = useApp((s) => s.settings?.dependencyWarnings ?? false);
   const [depsOpen, setDepsOpen] = useState(false);
   const diags = run?.diagnostics ?? [];
-  const own = useMemo(() => diags.filter((d) => d.own || d.severity === 'error' || showDeps), [diags, showDeps]);
-  const deps = useMemo(() => diags.filter((d) => !(d.own || d.severity === 'error' || showDeps)), [diags, showDeps]);
+  const own = useMemo(() => diags.filter((d) => isListed(d, showDeps)), [diags, showDeps]);
+  const deps = useMemo(() => diags.filter((d) => !isListed(d, showDeps)), [diags, showDeps]);
   const groups = useMemo(() => group(own), [own]);
   const errors = diags.filter((d) => d.severity === 'error').length;
 

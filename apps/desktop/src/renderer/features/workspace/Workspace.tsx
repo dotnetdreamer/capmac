@@ -13,7 +13,7 @@ import { ErrorBoundary } from '../../ui/ErrorBoundary';
 import { EmptyState, InfoBar, Spinner } from '../../ui/Feedback';
 import { Console } from './Console';
 import { BuildIpaDialog, BuildLogDialog } from './Dialogs';
-import { Problems } from './Problems';
+import { isListed, Problems } from './Problems';
 import { SessionBar } from './SessionBar';
 import { SimulatorPane } from './Simulator';
 import { automaticTarget } from './TargetPicker';
@@ -113,6 +113,9 @@ export function Workspace({ path }: { path: string }) {
   }, [targets, prefs?.target, run?.target]);
 
   const errors = run?.diagnostics.filter((d) => d.severity === 'error').length ?? 0;
+  // The tab counts what the Problems list shows, not the dependency warnings folded away.
+  const showDeps = useApp((s) => s.settings?.dependencyWarnings ?? false);
+  const listed = run?.diagnostics.filter((d) => isListed(d, showDeps)).length ?? 0;
   useEffect(() => {
     if (run?.status === 'failed' && errors > 0) setTab('problems');
   }, [run?.status, run?.runNumber, errors]);
@@ -235,7 +238,7 @@ export function Workspace({ path }: { path: string }) {
                   </button>
                   <button type="button" role="tab" id="tab-problems" aria-selected={tab === 'problems'} aria-controls="tabpanel-problems" className={`tab${tab === 'problems' ? ' is-selected' : ''}`} onClick={() => setTab('problems')}>
                     Problems
-                    {(run?.diagnostics.length ?? 0) > 0 && <span className={`count ${errors ? 'count--error' : 'count--warn'}`}>{errors || run!.diagnostics.length}</span>}
+                    {listed > 0 && <span className={`count ${errors ? 'count--error' : 'count--warn'}`}>{errors || listed}</span>}
                   </button>
                 </div>
                 <div className="pane__body" role="tabpanel" id={tab === 'console' ? 'tabpanel-console' : 'tabpanel-problems'} aria-labelledby={tab === 'console' ? 'tab-console' : 'tab-problems'}>

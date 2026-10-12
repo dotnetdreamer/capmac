@@ -694,7 +694,9 @@
     border: 0;
     padding: 0;
     background: transparent;
+    /* The field around it shows focus (accent underline). */
     outline: none;
+    box-shadow: none;
     font: var(--type-body);
     &::placeholder {
       color: var(--text-3);

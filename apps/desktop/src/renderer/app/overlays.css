@@ -37,7 +37,9 @@
     height: 100%;
     border: 0;
     background: transparent;
+    /* The palette itself shows focus. */
     outline: none;
+    box-shadow: none;
     font: var(--type-body-lg);
     font-size: 15px;
     &::placeholder {

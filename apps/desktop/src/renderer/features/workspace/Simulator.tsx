@@ -16,7 +16,7 @@ interface Stats {
   kbps: number;
 }
 
-type StreamState = { kind: 'connecting' } | { kind: 'streaming' } | { kind: 'ended'; error?: ErrorInfo };
+type StreamState = { kind: 'connecting' } | { kind: 'streaming' } | { kind: 'reconnecting' } | { kind: 'ended'; error?: ErrorInfo };
 
 const PADDING = 11;
 
@@ -84,7 +84,7 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
       else if (m.type === 'first-frame') setHasFrame(true);
       else if (m.type === 'stats') setStats({ fps: m.fps, kbps: m.kbps });
       else if (m.type === 'info') setInfo(m.info);
-      else if (m.type === 'state') setState(m.state === 'ended' ? { kind: 'ended', error: m.error } : m.state === 'streaming' ? { kind: 'streaming' } : { kind: 'connecting' });
+      else if (m.type === 'state') setState(m.state === 'ended' ? { kind: 'ended', error: m.error } : { kind: m.state });
     };
     setState({ kind: 'connecting' });
     setHasFrame(false);
@@ -115,12 +115,19 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
   useLayoutEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
+    // Resize in the next frame: resizing the device inside the observer's own callback
+    // makes Chromium report a ResizeObserver loop.
+    let raf = 0;
     const observer = new ResizeObserver(([entry]) => {
       const { width, height } = entry!.contentRect;
-      setBox({ width, height });
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => setBox((b) => (b.width === width && b.height === height ? b : { width, height })));
     });
     observer.observe(stage);
-    return () => observer.disconnect();
+    return () => {
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+    };
   }, []);
   const aspect = frameSize ? frameSize.width / frameSize.height : 0.46;
   const pad = frame ? PADDING : 0;
@@ -213,6 +220,8 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
   }, [mac, target.udid]);
 
   const ended = state.kind === 'ended';
+  // The connection dropped: keep the last frame, dimmed, until the stream resumes.
+  const reconnecting = state.kind === 'reconnecting';
   return (
     <div className="sim">
       <div ref={stageRef} className="sim__stage">
@@ -234,8 +243,8 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
             {ripples.map((r) => (
               <span key={r.id} className="sim__ripple" style={{ left: r.x, top: r.y }} />
             ))}
-            {(!hasFrame || ended) && (
-              <div className="sim__overlay">
+            {(!hasFrame || ended || reconnecting) && (
+              <div className={`sim__overlay${reconnecting && hasFrame ? ' is-dimmed' : ''}`}>
                 {ended ? (
                   <>
                     <Icon name="plugDisconnected" size={20} />
@@ -248,7 +257,7 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
                 ) : (
                   <>
                     <Spinner size={20} />
-                    <span>Connecting to {target.name}…</span>
+                    <span>{reconnecting ? 'Reconnecting to the Mac…' : `Connecting to ${target.name}…`}</span>
                   </>
                 )}
               </div>
@@ -317,6 +326,8 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
             </>
           ) : state.kind === 'ended' ? (
             'Disconnected'
+          ) : reconnecting ? (
+            'Reconnecting…'
           ) : (
             'Connecting…'
           )}

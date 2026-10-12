@@ -101,7 +101,7 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
         )}
         <Tooltip content={runHint ?? (live ? 'Restart live reload' : 'Live reload: edit and see changes instantly')} shortcut="F5">
           <Button variant={live ? 'standard' : 'accent'} icon="flash" iconFilled busy={busy && run?.mode === 'live'} disabled={!canRun} onClick={() => void startSession(path, 'live')} aria-keyshortcuts="F5">
-            {live ? 'Live' : 'Live'}
+            Live
             {live && !busy && <StatusDot tone="live" pulse />}
           </Button>
         </Tooltip>

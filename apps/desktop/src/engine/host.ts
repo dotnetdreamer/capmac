@@ -371,6 +371,10 @@ function openScreen(streamId: string, mac: string, udid: string, port: MessagePo
     },
     onLog: (level, message) => emit({ mac, streamId }, { type: 'log', level: level === 'info' ? 'note' : level, message: `Screen: ${message}` }),
     onEnd: (error) => post({ type: 'state', state: 'ended', error }),
+    onState: (state) => {
+      if (state === 'streaming') inFlight = 0;
+      post({ type: 'state', state });
+    },
   });
   port.on('message', (e) => {
     const message = e.data as { type?: string; seq?: number; event?: unknown };

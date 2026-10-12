@@ -21,8 +21,10 @@ export interface ScreenHandlers {
   onFrame(jpeg: Buffer): void;
   onInfo?(info: ScreenInfo): void;
   onLog?(level: 'info' | 'warn' | 'error', message: string): void;
-  /** The stream stopped (error is undefined when it was stopped on purpose or the connection dropped). */
+  /** The stream stopped (error is undefined when it was stopped on purpose). */
   onEnd?(error?: ErrorInfo): void;
+  /** Frames are flowing (again), or the connection dropped and the stream resumes when it is back. */
+  onState?(state: 'streaming' | 'reconnecting'): void;
 }
 
 export class ScreenStream {
@@ -34,7 +36,10 @@ export class ScreenStream {
 
   constructor(private readonly link: MacLink, readonly udid: string, private readonly options: ScreenStreamOptions, private readonly handlers: ScreenHandlers) {
     this.unsubscribe = link.onChange((state) => {
-      if (state === 'lost') this.call = null;
+      if (state === 'lost' || state === 'reconnecting') {
+        this.call = null;
+        if (this.active) this.handlers.onState?.('reconnecting');
+      }
       if ((state === 'restored' || state === 'connected') && this.active) void this.ensure().catch(() => undefined);
     });
   }
@@ -75,6 +80,7 @@ export class ScreenStream {
         return;
       }
       this.call = call;
+      this.handlers.onState?.('streaming');
       call.result.then(
         () => {
           if (this.call === call) this.call = null;
@@ -83,8 +89,9 @@ export class ScreenStream {
         (err) => {
           if (this.call === call) this.call = null;
           const info = toErrorInfo(err);
-          // A dropped connection is not the stream's fault; it restarts on reconnect.
-          this.handlers.onEnd?.(info.cancelled || this.link.state === 'lost' || this.link.state === 'reconnecting' ? undefined : info);
+          // A dropped connection is not the stream's fault: it restarts when the link is back.
+          if (this.active && (this.link.state === 'lost' || this.link.state === 'reconnecting')) this.handlers.onState?.('reconnecting');
+          else this.handlers.onEnd?.(info.cancelled ? undefined : info);
         },
       );
     })().finally(() => {

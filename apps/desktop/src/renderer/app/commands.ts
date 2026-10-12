@@ -77,6 +77,16 @@ export function buildCommands(): Command[] {
   }
 
   const recents = app.settings?.recentProjects ?? [];
+  if (!path) {
+    // Away from a project: run the recent ones straight from here.
+    for (const recent of recents.slice(0, 3)) {
+      const start = (mode: 'run' | 'live') => () => void startSession(recent.path, mode).then(() => app.navigate({ name: 'project', path: recent.path }));
+      commands.push(
+        { id: `run:${recent.path}`, title: `Run ${recent.name}`, group: 'Session', icon: 'play', keywords: `build launch start ${recent.appId}`, run: start('run') },
+        { id: `live:${recent.path}`, title: `Live reload ${recent.name}`, group: 'Session', icon: 'flash', keywords: `dev hmr watch ${recent.appId}`, run: start('live') },
+      );
+    }
+  }
   commands.push(
     { id: 'home', title: 'Go to Home', group: 'Navigation', icon: 'home', run: nav('home') },
     { id: 'devices', title: 'Go to Devices', group: 'Navigation', icon: 'phone', keywords: 'simulators boot', run: nav('devices') },

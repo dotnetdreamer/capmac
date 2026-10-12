@@ -25,6 +25,7 @@
   border-top-left-radius: var(--r-layer);
   overflow: hidden;
   outline: none;
+  box-shadow: none;
 }
 .view-loading {
   flex: 1;
