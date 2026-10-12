@@ -1,0 +1,20 @@
+{
+  "name": "@capmac/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "capmac's engine (shared by the CLI and capmac Studio), the wire protocol and the Mac agent. Consumed as TypeScript source and bundled by each front end.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./engine": "./src/engine/index.ts",
+    "./*": "./src/*.ts",
+    "./scripts/agent-build": "./scripts/agent-build.mjs",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "bonjour-service": "^1.4.4",
+    "ignore": "^7.0.12",
+    "multicast-dns": "^7.2.5",
+    "ssh2": "^1.17.0"
+  }
+}

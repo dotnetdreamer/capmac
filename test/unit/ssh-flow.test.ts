@@ -104,7 +104,7 @@ ${stdout}${stderr}`);
 
 describe.skipIf(!canRun)('SSH flow against an in-process server', () => {
   beforeAll(async () => {
-    execFileSync(process.execPath, [path.join(ROOT, 'scripts', 'build.mjs')], { cwd: ROOT });
+    execFileSync(process.execPath, [path.join(ROOT, 'packages', 'cli', 'scripts', 'build.mjs')], { cwd: ROOT });
     work = await fs.mkdtemp(path.join(os.tmpdir(), 'capmac-ssh-'));
     fakeHome = path.join(work, 'home');
     configDir = path.join(work, 'config');
@@ -175,7 +175,7 @@ describe.skipIf(!canRun)('SSH flow against an in-process server', () => {
   }, 60_000);
 
   it('tunnels a local port to the remote side', async () => {
-    const { MacSession } = await import('../../src/cli/session.js');
+    const { MacSession } = await import('../../packages/core/src/engine/session.js');
     process.env.CAPMAC_CONFIG_DIR = configDir;
     const web = http.createServer((_req, res) => res.end('served from Windows'));
     await new Promise<void>((resolve) => web.listen(0, '127.0.0.1', () => resolve()));
@@ -196,6 +196,27 @@ describe.skipIf(!canRun)('SSH flow against an in-process server', () => {
     } finally {
       session.close();
       web.close();
+    }
+  }, 60_000);
+
+  it('dials back in when the connection drops (MacLink)', async () => {
+    const { MacLink } = await import('../../packages/core/src/engine/link.js');
+    const { nonInteractivePrompter } = await import('../../packages/core/src/engine/context.js');
+    process.env.CAPMAC_CONFIG_DIR = configDir;
+    const states: string[] = [];
+    const ctx = { emit: (e: { type: string; state?: string }) => e.type === 'connection' && states.push(e.state!), prompter: nonInteractivePrompter, verbose: false };
+    const link = new MacLink('testmac', ctx as never, { retryMs: 200 });
+    try {
+      const first = await link.session();
+      const restored = new Promise<void>((resolve) => link.onChange((state) => state === 'restored' && resolve()));
+      link.dropConnection();
+      await restored;
+      const second = await link.session();
+      expect(second).not.toBe(first);
+      expect((await second.conn.runScript('echo still-here\n')).stdout).toContain('still-here');
+      expect(states).toEqual(['connecting', 'connected', 'lost', 'restored']);
+    } finally {
+      link.close();
     }
   }, 60_000);
 });

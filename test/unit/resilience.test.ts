@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { parseJsonLoose } from '../../src/agent/proc.js';
-import { EventRenderer } from '../../src/cli/render.js';
-import { resolveMacAddress } from '../../src/cli/resolve.js';
+import { parseJsonLoose } from '../../packages/core/src/agent/proc.js';
+import { resolveMacAddress } from '../../packages/core/src/engine/resolve.js';
+import { AppLogClassifier } from '../../packages/core/src/engine/translate.js';
+import { TerminalReporter } from '../../packages/cli/src/terminal.js';
 
 describe('parseJsonLoose', () => {
   it('parses clean JSON and JSON surrounded by tool chatter', () => {
@@ -35,20 +36,21 @@ describe('resolveMacAddress', () => {
   }, 15_000);
 });
 
-describe('EventRenderer app lines', () => {
+describe('app lines (engine classifier + terminal renderer)', () => {
   it('keeps multi-line console messages together', () => {
     const lines: string[] = [];
-    const renderer = new EventRenderer({});
-    renderer.onAppLine = null;
+    const classifier = new AppLogClassifier();
+    const renderer = new TerminalReporter({});
     const original = process.stdout.write.bind(process.stdout);
     (process.stdout as any).write = (chunk: any) => {
       lines.push(String(chunk));
       return true;
     };
     try {
-      renderer.appLine('⚡️  [error] - TypeError: boom');
-      renderer.appLine('    at main.js:10:5');
-      renderer.appLine('2026-10-12 14:34:31.216 App[1:2] native NSLog line');
+      for (const raw of ['⚡️  [error] - TypeError: boom', '    at main.js:10:5', '2026-10-12 14:34:31.216 App[1:2] native NSLog line']) {
+        const entry = classifier.classify(raw);
+        if (entry) renderer.appLine(entry);
+      }
     } finally {
       (process.stdout as any).write = original;
     }

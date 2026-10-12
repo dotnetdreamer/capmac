@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { classifyChange, summarizeChanges } from '../../src/shared/classify.js';
-import { classifyAppLine } from '../../src/shared/app-log.js';
-import { PathMapper } from '../../src/shared/paths.js';
+import { classifyChange, summarizeChanges } from '../../packages/core/src/shared/classify.js';
+import { classifyAppLine } from '../../packages/core/src/shared/app-log.js';
+import { PathMapper } from '../../packages/core/src/shared/paths.js';
 
 describe('classifyChange', () => {
   const ctx = { projectRel: '', webDir: 'dist', iosDir: 'ios' };

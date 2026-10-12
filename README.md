@@ -143,9 +143,19 @@ Add `--verbose` to any command to see full tool output. Build logs are kept on t
 
 ```powershell
 npm install
-npm run build      # dist/cli.js (CLI) and dist/agent.mjs (Mac agent)
+npm run build      # packages/cli/dist: cli.js (CLI), agent.mjs (Mac agent), viewer.html
 npm test           # unit tests + an SSH round-trip test against an in-process server
+npm run typecheck
 node bin/capmac.js --help
 ```
+
+The repo is an npm workspace:
+
+| Folder | What |
+|---|---|
+| `packages/core` | `@capmac/core` (private): the engine both front ends share, the wire protocol (`src/shared`) and the Mac agent (`src/agent`). Consumed as TypeScript source; the engine reports through typed events and asks through a `Prompter`, it never prints. |
+| `packages/cli` | `capmac`, the published CLI: commands, the terminal renderer for engine events, the browser screen viewer. Publish from this folder (`npm publish -w capmac`). |
+| `apps/desktop` | capmac Studio, the Windows desktop app (Electron). See [docs/desktop-design.md](docs/desktop-design.md). |
+| `bin/capmac.js` | Runs the CLI from `packages/cli/dist` (so `node bin/capmac.js …` works from a clone). |
 
 `examples/hello-capacitor` is a minimal Vite + Capacitor 8 (Swift Package Manager) app for trying things out.

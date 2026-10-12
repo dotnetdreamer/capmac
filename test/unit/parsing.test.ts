@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { exportMethod, exportOptionsPlist } from '../../src/agent/ops/archive.js';
-import { jpegSize, pointsFromPixels } from '../../src/agent/ops/screen.js';
-import { parseDevices, parseSimulators } from '../../src/agent/ops/targets.js';
-import { parseDestination } from '../../src/cli/commands/pair.js';
-import { pickDevUrl } from '../../src/cli/devserver.js';
-import { parseDiscovery, pickNode } from '../../src/cli/remote-env.js';
-import { chooseTarget } from '../../src/cli/targets.js';
-import type { TargetsResult } from '../../src/shared/protocol.js';
+import { exportMethod, exportOptionsPlist } from '../../packages/core/src/agent/ops/archive.js';
+import { jpegSize, pointsFromPixels } from '../../packages/core/src/agent/ops/screen.js';
+import { parseDevices, parseSimulators } from '../../packages/core/src/agent/ops/targets.js';
+import { parseDestination } from '../../packages/core/src/engine/pair.js';
+import { pickDevUrl } from '../../packages/core/src/engine/devserver.js';
+import { parseDiscovery, pickNode } from '../../packages/core/src/engine/remote-env.js';
+import { chooseTarget } from '../../packages/core/src/engine/targets.js';
+import type { TargetsResult } from '../../packages/core/src/shared/protocol.js';
 
 const SIMS = JSON.stringify({
   devices: {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hintForBuildOutput, XcodeOutputParser, type XcodeEvent } from '../../src/shared/xcode-output.js';
+import { hintForBuildOutput, XcodeOutputParser, type XcodeEvent } from '../../packages/core/src/shared/xcode-output.js';
 
 const ROOT = '/Users/me/.capmac/projects/app-1/src';
 

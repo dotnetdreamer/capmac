@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { assertSafeRelPath, crlfToLf, packArchive, unpackArchive, type ArchiveFile } from '../../src/shared/archive.js';
+import { assertSafeRelPath, crlfToLf, packArchive, unpackArchive, type ArchiveFile } from '../../packages/core/src/shared/archive.js';
 
 let tmp: string;
 

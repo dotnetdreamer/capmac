@@ -16,5 +16,5 @@
     "verbatimModuleSyntax": true,
     "noEmit": true
   },
-  "include": ["src", "test"]
+  "include": ["packages/core/src", "packages/cli/src", "test"]
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AGENT_MAGIC, encodeBinary, encodeJson, FrameDecoder, MagicScanner } from '../../src/shared/frames.js';
+import { AGENT_MAGIC, encodeBinary, encodeJson, FrameDecoder, MagicScanner } from '../../packages/core/src/shared/frames.js';
 
 describe('frames', () => {
   it('round-trips JSON and binary frames split at every byte boundary', () => {
