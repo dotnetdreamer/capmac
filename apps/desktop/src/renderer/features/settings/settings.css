@@ -45,3 +45,15 @@
   gap: var(--s-3);
   flex-wrap: wrap;
 }
+.settings-takeover__note {
+  display: block;
+  margin-top: var(--s-1);
+  overflow-wrap: anywhere;
+}
+.settings-takeover__note--warn {
+  color: var(--caution);
+}
+.settings .switch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

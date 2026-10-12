@@ -62,15 +62,50 @@ capmac dev                       # live reload: save in VS Code, the simulator u
 | Native (Swift) change, incremental build | ~10 s |
 | `capmac dev`: save a file → app reloads | ~1 s |
 
+## Keep your Capacitor and Ionic commands
+
+Your team already types `npx cap run ios` or `ionic capacitor run ios -l`. With CapMac installed, those same commands run on the Mac. Nobody has to learn `capmac run`.
+
+This "takeover" is **on by default**. The first capmac command you run (usually `capmac pair`), or the first launch of CapMac Studio, turns it on. Then open a new terminal (restart VS Code so its terminals get it too):
+
+```powershell
+npx cap run ios                  # builds on the Mac, launches, shows the app's console
+ionic capacitor run ios -l       # Ionic live reload, through capmac's tunnel
+```
+
+Turn it off with `capmac takeover off`, or in CapMac Studio under **Settings › Terminal commands**. It stays off until you turn it back on.
+
+| You type | CapMac does |
+|---|---|
+| `npx cap run ios [--target <id>]` | `capmac run`, without a web build (like `cap run`). In a terminal it stays attached to show the app's console; from a script it returns once the app is running. |
+| `npx cap run ios --list [--json]` | Lists the Mac's simulators and devices, in Capacitor's format, so `ionic capacitor run ios` can ask which one to use. |
+| `npx cap run ios -l [--host <h>] [--port <p>]` | `capmac dev` with your running dev server. With no `--host` or `--port`, CapMac starts the dev server itself. |
+| `ionic capacitor run ios -l` | Ionic starts its dev server; CapMac tunnels it to the Mac. `--external` also works but isn't needed. |
+| `npx cap open ios` · `ionic cap build ios` | Opens the project in Xcode on the Mac's screen. |
+| `npx cap build ios` | `capmac build --ipa` into `ios/App/output`, with `--xcode-export-method` (`app-store-connect`, `release-testing`, `enterprise`, `debugging`), `--xcode-team-id`, `--scheme` and `--configuration`. |
+
+Everything else (`cap sync`, `cap copy`, `cap add` and all of Android) still runs on Windows, unchanged. `capmac cap run ios -l` does the same without takeover.
+
+**How it works:** takeover adds `--require %USERPROFILE%\.capmac\takeover.cjs` to your Windows user's `NODE_OPTIONS`. In every Node.js process, that small file checks whether the process is the Capacitor CLI running `run`, `open` or `build` for `ios`. If it is, CapMac runs the command instead; if not, it does nothing. Every way of starting Capacitor goes through it, whether `npx cap`, `ionic capacitor`, an npm script or a VS Code task, with no change to any project. CapMac Studio ships its own copy of the CLI for this, so takeover also works without `npm install -g capmac`; your terminal's Node.js runs it.
+
+- `CAPMAC_TAKEOVER=0` runs one command with plain Capacitor (`$env:CAPMAC_TAKEOVER=0; npx cap run ios`).
+- `capmac takeover off` turns it off at once, even in terminals that are already open. `capmac takeover on` turns it back on, and `capmac takeover` shows the current state.
+- It is never turned on automatically in CI (`CI=true`) or by `npx capmac`, which runs a throwaway copy.
+- Leave `%USERPROFILE%\.capmac\takeover.cjs` in place while takeover is on: Node.js stops with "Cannot find module" if `NODE_OPTIONS` points to a file that is missing. If CapMac itself is uninstalled, Capacitor runs as usual and prints a reminder.
+
 ## What you get
 
 | | |
 |---|---|
 | **`capmac run`** | Builds your web app on Windows, syncs the project (only changed files), runs `npm install` + `npx cap sync ios` on the Mac when needed, builds with `xcodebuild`, installs and launches on a simulator or device, and streams the app's console (`console.log` from JS, native logs) until you press Ctrl+C. Web-only changes skip Xcode entirely and update the installed app in about a second. |
 | **`capmac dev`** | Live reload. Your dev server (`vite`, `ng serve`, …) runs on Windows; an SSH reverse tunnel makes it `http://localhost:<port>` on the Mac, and the app is built to load from there. HMR works as usual. Native changes (Swift, plugins, `capacitor.config`, `package.json`) trigger an automatic rebuild. If the Mac sleeps or Wi-Fi drops, CapMac reconnects, restores the tunnel and relaunches by itself. Keys: `r` rebuild, `R` clean rebuild, `l` relaunch, `o` open screen, `q` quit. |
+| **`capmac run --no-logs` · `--for <seconds>`** | For scripts and AI agents: return once the app is running, or show its console for that many seconds and then stop. |
+| **`capmac screenshot [file]`** | Saves a full-resolution PNG of the running simulator and prints its path. |
+| **`capmac skill`** | Teaches AI coding agents to use CapMac (see [AI coding agents](#ai-coding-agents)). |
 | **`capmac logs`** | Streams the system log (os_log/NSLog) of the app running on a simulator. |
 | **`capmac screen`** | The Mac's simulator in your browser (like Xamarin's *Remoted iOS Simulator*): click to tap, drag to swipe, scroll, type, Home/Lock buttons, screenshots, plus the app console side-by-side. Touch and typing go through CapMac's own helper, compiled on the Mac on first use; with an Xcode whose simulators don't take its input, [AXe](https://github.com/cameroncooke/AXe) is used when installed (`capmac doctor --fix` installs it). |
 | **`capmac build --ipa`** | Archives and exports a signed `.ipa` (development, ad-hoc, app-store, enterprise) and downloads it to `build/ios/`. `--upload` sends it to App Store Connect/TestFlight instead. |
+| **`capmac takeover [on\|off]`** | `npx cap run ios`, `ionic capacitor run ios`, `cap open ios` and `cap build ios` run on the Mac. On by default (see above). |
 | **`capmac doctor [--fix]`** | Checks this PC, the connection and the Mac (Xcode, license, simulators, Node, CocoaPods, disk, signing) and fixes what it can. |
 | **`capmac targets`** | Lists simulators and connected devices. Pick with `--target "iPhone 16 Pro"` or `--device`. |
 | **`capmac exec -- <cmd>`** | Runs any command inside the project on the Mac (`capmac exec -- pod update`). |
@@ -96,6 +131,32 @@ Add to `.vscode/tasks.json` to get build errors in the Problems panel:
   ]
 }
 ```
+
+## AI coding agents
+
+Claude Code, Codex, GitHub Copilot, Cursor and other coding agents can drive CapMac too. Give them the **CapMac skill**, a short `SKILL.md` in the [Agent Skills](https://agentskills.io) format. It teaches an agent to build your iOS app on the Mac, run it, read its console, take a screenshot, fix build errors and leave password prompts to you.
+
+```powershell
+capmac skill add                                       # asks which agents (the ones on this PC are ticked) and where
+capmac skill add --agent claude-code,codex --global    # for all your projects
+capmac skill add --agent all --project                 # into this repository, to commit for your team
+capmac skill                                           # which agents have it, globally and in this project
+capmac skill remove --global
+```
+
+In CapMac Studio: **Settings › Terminal commands › AI coding agents › Set up…**, with the same choices.
+
+| Agent | All your projects | One project |
+|---|---|---|
+| Claude Code | `~\.claude\skills\capmac` | `.claude\skills\capmac` |
+| Codex, GitHub Copilot, Cursor, Gemini CLI, Cline, Kilo Code, Amp, Augment, Goose | `~\.agents\skills\capmac` (shared) | `.agents\skills\capmac` (shared) |
+| OpenCode | `~\.config\opencode\skills\capmac` | `.agents\skills\capmac` |
+| Windsurf (Devin Desktop) | `~\.codeium\windsurf\skills\capmac` | `.windsurf\skills\capmac` |
+| JetBrains Junie | `~\.junie\skills\capmac` | `.agents\skills\capmac` |
+
+Most agents read the shared `.agents\skills` folder, so CapMac writes it once for all of them. Project skills go at the repository root. CapMac only replaces or removes copies it wrote itself. For any other agent, `capmac skill show` prints the skill to paste where that agent reads instructions.
+
+Agents run `capmac` as a command. If new terminals can't find it (no `npm install -g capmac`), `capmac skill add` offers to add it, and so does CapMac Studio, whose built-in CLI then serves as the command. Either way it goes in `%LOCALAPPDATA%\capmac\bin`, on your user PATH, and `capmac skill remove --command` takes it off again, leaving the rest of PATH exactly as it was. Output in a pipe is plain text without colour codes, which is easier for agents to read.
 
 ## Running on an iPhone
 

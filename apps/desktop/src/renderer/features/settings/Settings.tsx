@@ -1,6 +1,8 @@
-import type { ReactNode } from 'react';
-import type { Settings as SettingsShape } from '../../../shared/contract';
-import { useApp } from '../../state/app';
+import { useEffect, useState, type ReactNode } from 'react';
+import type { Settings as SettingsShape, TakeoverInfo } from '../../../shared/contract';
+import { toast, useApp } from '../../state/app';
+import { errorInfo } from '../../state/engine';
+import { AgentSkillsButton } from './AgentSkills';
 import { Button } from '../../ui/Button';
 import { Segmented, Select } from '../../ui/Form';
 import { Icon, type IconName } from '../../ui/Icon';
@@ -20,16 +22,65 @@ function Row({ icon, title, description, children }: { icon: IconName; title: Re
   );
 }
 
-function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+function Toggle({ checked, onChange, label, disabled, loading }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean; loading?: boolean }) {
   return (
     <span className="toggle-control">
       <span className="toggle-control__state" aria-hidden="true">
-        {checked ? 'On' : 'Off'}
+        {loading ? '…' : checked ? 'On' : 'Off'}
       </span>
-      <button type="button" role="switch" aria-checked={checked} aria-label={label} className="switch" onClick={() => onChange(!checked)}>
+      <button type="button" role="switch" aria-checked={checked} aria-label={label} className="switch" disabled={disabled} onClick={() => onChange(!checked)}>
         <span className="switch__thumb" />
       </button>
     </span>
+  );
+}
+
+/** Takeover: the Capacitor and Ionic commands people already type run on the Mac. */
+function TerminalCommands() {
+  const [info, setInfo] = useState<TakeoverInfo | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    window.capmac.invoke('app:takeover-status').then((value) => live && setInfo(value), () => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+  const change = async (on: boolean) => {
+    setBusy(true);
+    try {
+      setInfo(await window.capmac.invoke('app:takeover-set', { on }));
+      toast(on
+        ? { tone: 'success', title: 'Open a new terminal to use it', body: 'Restart VS Code too, so its terminals pick it up.' }
+        : { tone: 'info', title: 'Capacitor runs on this PC again', body: 'In every terminal, starting now.' });
+    } catch (err) {
+      toast({ tone: 'critical', title: on ? 'Could not turn it on' : 'Could not turn it off', body: errorInfo(err).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <h2 className="section-title">Terminal commands</h2>
+      <Row
+        icon="console"
+        title={<>Run <code>npx cap run ios</code> on the Mac</>}
+        description={
+          <>
+            <code>npx cap run ios</code>, <code>ionic capacitor run ios -l</code>, <code>cap open ios</code> and <code>cap build ios</code> typed in any terminal build and
+            run on your Mac. Sync and Android stay on this PC. Set <code>CAPMAC_TAKEOVER=0</code> to skip it for one command.
+            {info?.on && !info.bundled && info.cli && <span className="settings-takeover__note">Runs the CapMac CLI at {info.cli}.</span>}
+            {info?.cliMissing && <span className="settings-takeover__note settings-takeover__note--warn">The CapMac CLI it used is gone: turn this off and on again.</span>}
+          </>
+        }
+      >
+        <Toggle label="Run Capacitor iOS commands on the Mac" checked={info?.on ?? false} loading={!info} disabled={!info || busy} onChange={(v) => void change(v)} />
+      </Row>
+      <Row icon="sparkle" title="AI coding agents" description="Let Claude Code, Codex, Copilot, Cursor and other agents build, run and check your iOS app with CapMac, in all your projects or one.">
+        <AgentSkillsButton />
+      </Row>
+    </>
   );
 }
 
@@ -95,6 +146,8 @@ export function Settings() {
             ]}
           />
         </Row>
+
+        <TerminalCommands />
 
         <h2 className="section-title">Console</h2>
         <Row icon="console" title="Line limit" description="Older lines are dropped beyond this; memory stays bounded.">

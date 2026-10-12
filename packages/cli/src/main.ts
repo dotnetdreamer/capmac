@@ -1,9 +1,13 @@
 import { Command, Option } from 'commander';
 import { buildCommand } from './commands/build.js';
+import { capCommand } from './commands/cap.js';
 import { devCommand } from './commands/dev.js';
 import { doctorCommand } from './commands/doctor.js';
 import { macsCommand, pairCommand, setDefaultCommand, unpairCommand } from './commands/pair.js';
 import { runCommand } from './commands/run.js';
+import { screenshotCommand } from './commands/screenshot.js';
+import { skillAddCommand, skillRemoveCommand, skillShowCommand, skillStatusCommand } from './commands/skill.js';
+import { takeoverByDefault, takeoverCommand } from './commands/takeover.js';
 import {
   cleanCommand,
   execCommand,
@@ -42,8 +46,10 @@ program
   .version(VERSION, '-V, --version')
   .option('-v, --verbose', 'show full tool output')
   .showHelpAfterError()
-  .hook('preAction', (cmd) => {
+  .hook('preAction', async (cmd, action) => {
     if (cmd.opts().verbose || cmd.optsWithGlobals?.().verbose) setVerbose(true);
+    // Takeover is on by default: the first capmac command (usually `capmac pair`) turns it on.
+    if (action.name() !== 'takeover') await takeoverByDefault();
   });
 
 const mac = () => new Option('--mac <name>', 'which paired Mac to use');
@@ -100,6 +106,7 @@ buildOptions(targetOptions(
     .option('--release', 'shortcut for --configuration Release')
     .option('--no-web-build', 'do not run the web build first (use the existing web dir)')
     .option('--no-logs', 'launch and return instead of streaming app logs')
+    .option('--for <seconds>', "stream the app's console for this long, then stop (scripts, AI agents)")
     .option('--show-simulator', 'also open the Simulator window on the Mac\'s screen')
     .option('--os-logs', 'also show NSLog/os_log output, like Xcode\'s console')
     .option('--bridge', 'show Capacitor bridge traffic in the logs'),
@@ -156,6 +163,13 @@ program
   .action(wrap(screenCommand));
 
 program
+  .command('screenshot [file]')
+  .description("save a PNG of the running simulator's screen (default: a temp file; the path is printed)")
+  .addOption(mac())
+  .option('-t, --target <name|udid>', 'simulator (default: the booted one this app last ran on)')
+  .action(wrap((file: string | undefined, options) => screenshotCommand(file, options)));
+
+program
   .command('logs')
   .description('stream the app\'s system log from a simulator')
   .addOption(mac())
@@ -203,7 +217,42 @@ program
   .option('--no-allow-codesign', 'only unlock; do not allow codesign to use keys without a prompt')
   .action(wrap(keychainCommand));
 
-program.parseAsync(process.argv).catch((err) => {
-  reportError(err);
-  process.exitCode = 1;
-});
+program
+  .command('takeover [action]')
+  .description('on | off | status: make `npx cap run ios` and `ionic cap run ios` run on the Mac')
+  .action(wrap((action?: string) => takeoverCommand(action)));
+
+const skill = program
+  .command('skill')
+  .description('teach AI coding agents (Claude Code, Codex, Copilot, Cursor, …) to use CapMac: status | add | remove | show');
+const skillWhere = (cmd: Command) =>
+  cmd
+    .option('-a, --agent <ids...>', 'agents: claude-code, codex, copilot, cursor, gemini, windsurf, opencode, cline, kilo, amp, augment, goose, junie, or all')
+    .option('-g, --global', "for all your projects (each agent's own folder)")
+    .option('-p, --project [dir]', 'in a project (default: the one you are in), to commit for your team');
+skillWhere(skill.command('status', { isDefault: true }).description('which agents have the CapMac skill, globally and in this project')).action(wrap(skillStatusCommand));
+skillWhere(skill.command('add').alias('install').description('add (or update) the CapMac skill; asks which agents and where when run without options'))
+  .option('--force', 'replace a "capmac" skill that CapMac did not write')
+  .option('--command', 'also add the capmac command for new terminals if it is missing (agents run capmac)')
+  .action(wrap(skillAddCommand));
+skillWhere(skill.command('remove').alias('uninstall').description('remove the CapMac skill (only copies CapMac wrote)'))
+  .option('--command', 'also remove the capmac command that CapMac added for new terminals')
+  .action(wrap(skillRemoveCommand));
+skill.command('show').description('print the skill (SKILL.md), to paste into any other agent').action(wrap(skillShowCommand));
+
+// Registered for --help only: Capacitor's own options are read by capCommand, below.
+program
+  .command('cap')
+  .description('run `cap run ios`, `cap open ios` or `cap build ios` on the Mac, with the same options as Capacitor')
+  .argument('<args...>');
+
+const [first, ...rest] = process.argv.slice(2);
+if (first === 'cap') {
+  if (rest.includes('--verbose')) setVerbose(true);
+  void wrap(capCommand)(rest.filter((a) => a !== '--verbose'));
+} else {
+  program.parseAsync(process.argv).catch((err) => {
+    reportError(err);
+    process.exitCode = 1;
+  });
+}

@@ -1,10 +1,6 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import ssh2 from 'ssh2';
-
-// ssh2 is CommonJS; `utils` is not visible as a named ESM export.
-const sshUtils = ssh2.utils;
 
 export interface HostConfig {
   /** Short alias used on the command line. */
@@ -33,6 +29,8 @@ export interface GlobalConfig {
   version: 1;
   defaultHost?: string;
   hosts: Record<string, HostConfig>;
+  /** Takeover of `npx cap run ios` and friends, as last chosen; unset means on (see takeover.ts). */
+  takeover?: 'on' | 'off';
 }
 
 export interface ProjectConfig {
@@ -109,7 +107,10 @@ export async function ensureClientKey(): Promise<ClientKey> {
   } catch {
     await fs.mkdir(capmacDir(), { recursive: true });
     const comment = `capmac@${os.hostname()}`;
-    const keys = sshUtils.generateKeyPairSync('ed25519', { comment });
+    // Loaded here, not at the top: capmac Studio's main process reads this config without needing ssh2.
+    // ssh2 is CommonJS; `utils` is not visible as a named ESM export.
+    const { default: ssh2 } = await import('ssh2');
+    const keys = ssh2.utils.generateKeyPairSync('ed25519', { comment });
     await fs.writeFile(keyPath, keys.private, { mode: 0o600 });
     await fs.writeFile(`${keyPath}.pub`, `${keys.public.trim()}\n`, { mode: 0o644 });
     return { privateKey: keys.private, publicKey: keys.public.trim(), path: keyPath };

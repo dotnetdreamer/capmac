@@ -1,0 +1,108 @@
+/* Settings › Terminal commands › AI coding agents: the "add the capmac skill" dialog. */
+.agent-skills__intro {
+  margin: 0 0 var(--s-4);
+  color: var(--text-2);
+}
+.agent-skills__where {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+}
+.agent-skills__project {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.agent-skills__hint {
+  margin: var(--s-2) 0 var(--s-4);
+  font: var(--type-small);
+  overflow-wrap: anywhere;
+}
+.agent-skills__list-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: var(--s-1_5);
+  font: var(--type-body);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.agent-skills__quick {
+  display: inline-flex;
+  gap: var(--s-3);
+  font-weight: 400;
+  button {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: var(--type-small);
+    cursor: pointer;
+  }
+  button:hover {
+    text-decoration: underline;
+  }
+}
+.agent-skills__list {
+  margin: 0;
+  padding: var(--s-1);
+  list-style: none;
+  max-height: 216px;
+  overflow-y: auto;
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--r-card);
+  background: var(--card);
+}
+.agent-skills__row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 36px;
+  padding: 0 var(--s-2);
+  border-radius: var(--r-control);
+  cursor: pointer;
+  input {
+    margin: 0;
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent);
+  }
+  .faint {
+    font: var(--type-small);
+  }
+}
+.agent-skills__row:hover {
+  background: var(--card-hover);
+}
+.agent-skills__name {
+  color: var(--text-1);
+}
+.agent-skills__spacer {
+  flex: 1;
+}
+.agent-skills__loading {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+}
+.agent-skills__result {
+  margin-top: var(--s-3);
+}
+.dialog__footer .agent-skills__spacer {
+  flex: 1;
+}
+.agent-skills__command {
+  margin-bottom: var(--s-4);
+}
+.agent-skills__inline-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.agent-skills__inline-link:hover {
+  text-decoration: underline;
+}

@@ -8,6 +8,8 @@ import { z } from 'zod';
 import type { ErrorInfo } from '@capmac/core/engine/errors';
 import type { ConnectionState, EngineEvent, FixId, SessionMode } from '@capmac/core/engine/events';
 import type { ProbeResult, ScreenInfo, StreamFallback, TargetsResult } from '@capmac/core/shared/protocol';
+import type { AgentSkillStatus, CapmacCommandStatus, SkillChange } from '@capmac/core/shared/skills';
+import type { TakeoverStatus } from '@capmac/core/shared/takeover';
 
 export type { ErrorInfo } from '@capmac/core/engine/errors';
 export type { AppLogEntry, Check, CheckLevel, ConnectionState, EngineEvent, FixId, Phase, SessionMode, SessionState, StepStatus } from '@capmac/core/engine/events';
@@ -20,6 +22,9 @@ const macName = text(100);
 const fsPath = text(4096);
 const udid = z.string().regex(/^[A-Za-z0-9-]{8,64}$/, 'not a device id');
 const id = z.string().regex(/^[a-z0-9-]{1,64}$/);
+/** Which agents get (or lose) the capmac skill, and where. */
+const skillTarget = { agents: z.array(id).min(1).max(32), scope: z.enum(['global', 'project']), projectDir: fsPath.optional() };
+const hasProject = (v: { scope: string; projectDir?: string }) => v.scope === 'global' || v.projectDir !== undefined;
 const fixIds = ['install-node', 'xcode-license', 'xcode-first-launch', 'download-ios', 'install-axe', 'install-cocoapods', 'unlock-keychain', 'build-stream-helper'] as const satisfies readonly FixId[];
 
 export const sessionOptionsSchema = z.object({
@@ -353,6 +358,12 @@ export const appChannels = {
   'app:engine-call': z.object({ method: z.string().max(64), params: z.unknown() }).strict(),
   'app:prompt-response': promptResponseSchema,
   'app:visibility': z.object({ visible: z.boolean() }).strict(),
+  'app:takeover-status': z.undefined(),
+  'app:takeover-set': z.object({ on: z.boolean() }).strict(),
+  'app:skills-status': z.object({ projectDir: fsPath.optional() }).strict(),
+  'app:skills-install': z.object({ ...skillTarget, force: z.boolean().optional() }).strict().refine(hasProject, 'a project skill needs projectDir'),
+  'app:skills-remove': z.object(skillTarget).strict().refine(hasProject, 'a project skill needs projectDir'),
+  'app:capmac-command': z.object({ install: z.boolean() }).strict(),
   'app:update-status': z.undefined(),
   'app:update-check': z.undefined(),
   /** Quit and install the downloaded update (asks first when a session is running). */
@@ -380,6 +391,12 @@ export interface AppResults {
   'app:engine-call': CallResult<unknown>;
   'app:prompt-response': void;
   'app:visibility': void;
+  'app:takeover-status': TakeoverInfo;
+  'app:takeover-set': TakeoverInfo;
+  'app:skills-status': SkillsInfo;
+  'app:skills-install': SkillChange[];
+  'app:skills-remove': SkillChange[];
+  'app:capmac-command': CapmacCommandStatus;
   'app:update-status': UpdateInfo;
   'app:update-check': UpdateInfo;
   'app:update-install': void;
@@ -408,6 +425,22 @@ export interface UpdateInfo {
   /** Release notes for the version on offer (or the current one), when the build knows where they are. */
   notesUrl: string | null;
   state: UpdateState;
+}
+
+/** Takeover: `npx cap run ios` and `ionic capacitor run ios` typed in a terminal run on the Mac. */
+export interface TakeoverInfo extends TakeoverStatus {
+  /** The capmac that runs them is the one inside capmac Studio (not an npm install of the CLI). */
+  bundled: boolean;
+}
+
+/** The capmac skill for AI coding agents: where it is, for every agent capmac knows. */
+export interface SkillsInfo {
+  version: string;
+  /** Where a project skill goes for the project asked about (its repository root). */
+  projectRoot: string | null;
+  agents: AgentSkillStatus[];
+  /** Agents run `capmac` as a command: whether new terminals can. */
+  command: CapmacCommandStatus;
 }
 
 /** Commands main sends to the renderer (tray, second instance, menu). */

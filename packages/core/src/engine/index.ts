@@ -4,6 +4,8 @@
  * (see context.ts); it never prints or touches a UI itself.
  */
 export * from './agent-client.js';
+export * from './agent-skills.js';
+export * from './capmac-command.js';
 export * from './config.js';
 export * from './context.js';
 export * from './devices.js';
@@ -29,8 +31,10 @@ export * from './scan.js';
 export * from './screen.js';
 export * from './session.js';
 export * from './signing.js';
+export * from './skill-content.js';
 export * from './ssh.js';
 export * from './sync-client.js';
+export * from './takeover.js';
 export * from './targets.js';
 export * from './tools.js';
 export * from './translate.js';

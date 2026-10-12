@@ -19,10 +19,14 @@ import {
   type Envelope,
   type PromptRequest,
   type Settings,
+  type TakeoverInfo,
 } from '../shared/contract.js';
 import { EngineProcess } from './engine.js';
 import { openInEditor } from './editor.js';
-import { agentPath, iconsDir, outDir, sampleDir } from './paths.js';
+import { installSkill, removeSkill, skillProjectRoot, skillStatus } from '@capmac/core/engine/agent-skills';
+import { capmacCommandStatus, installCapmacCommand, removeCapmacCommand } from '@capmac/core/engine/capmac-command';
+import { disableTakeover, enableTakeover, ensureTakeoverDefault, samePath, takeoverStatus, type TakeoverInstall } from '@capmac/core/engine/takeover';
+import { agentPath, cliDir, iconsDir, outDir, sampleDir } from './paths.js';
 import { SettingsStore } from './settings.js';
 import { AppTray } from './tray.js';
 import { Updates } from './updates.js';
@@ -194,6 +198,18 @@ function handle<C extends AppChannel>(channel: C, fn: (payload: z.output<(typeof
   });
 }
 
+// ─── Takeover ──────────────────────────────────────────────────────────────
+
+/** The capmac CLI inside capmac Studio, which `npx cap run ios` runs when takeover is on. */
+function studioCli(): TakeoverInstall {
+  return { cli: path.join(cliDir(), 'cli.mjs'), preload: path.join(cliDir(), 'takeover.cjs'), version: app.getVersion() };
+}
+
+async function takeoverInfo(): Promise<TakeoverInfo> {
+  const status = await takeoverStatus();
+  return { ...status, bundled: status.cli !== undefined && samePath(status.cli, studioCli().cli) };
+}
+
 function registerIpc(): void {
   handle('app:info', (): AppInfo => ({
     version: __APP_VERSION__,
@@ -278,6 +294,22 @@ function registerIpc(): void {
     engine.respondPrompt(response);
   });
   handle('app:visibility', () => updateVisibility());
+  handle('app:takeover-status', () => takeoverInfo());
+  handle('app:takeover-set', async ({ on }) => {
+    if (on) await enableTakeover(studioCli());
+    else await disableTakeover();
+    return takeoverInfo();
+  });
+  handle('app:skills-status', async ({ projectDir }) => ({
+    version: app.getVersion(),
+    projectRoot: projectDir ? skillProjectRoot(projectDir) : null,
+    agents: await skillStatus(app.getVersion(), projectDir),
+    command: await capmacCommandStatus(),
+  }));
+  handle('app:skills-install', (options) => installSkill({ ...options, version: app.getVersion() }));
+  handle('app:skills-remove', (options) => removeSkill(options));
+  // Agents run `capmac` as a command; without the npm package, it runs the CLI shipped inside Studio.
+  handle('app:capmac-command', ({ install }) => (install ? installCapmacCommand(studioCli().cli) : removeCapmacCommand()));
   handle('app:update-status', () => updates.info);
   handle('app:update-check', () => updates.check());
   handle('app:update-install', () => restartToUpdate());
@@ -386,6 +418,9 @@ app.whenReady().then(async () => {
   });
   engine.start();
   registerIpc();
+  // Takeover is on by default (Settings › Terminal commands). Development builds and
+  // the e2e tests leave the user's environment alone.
+  if (app.isPackaged) void ensureTakeoverDefault(studioCli()).catch(() => undefined);
   settings.onChange((s: Settings) => {
     nativeTheme.themeSource = s.theme;
     engine.setSettings({ verbose: s.verbose, osLogs: s.osLogs });

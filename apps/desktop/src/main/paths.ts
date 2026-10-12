@@ -20,6 +20,11 @@ export function agentPath(): string {
   return app.isPackaged ? resources('agent', 'agent.mjs') : outDir('agent', 'agent.mjs');
 }
 
+/** The capmac CLI shipped for takeover: cli.mjs, agent.mjs and takeover.cjs, run by the user's own Node.js. */
+export function cliDir(): string {
+  return app.isPackaged ? resources('cli') : outDir('cli');
+}
+
 export function iconsDir(): string {
   return app.isPackaged ? resources('icons') : path.join(appRoot(), 'resources', 'icons');
 }

@@ -14,12 +14,16 @@ files:
   - package.json
   - out/**/*
   - '!out/agent/**'
+  - '!out/cli/**'
   - '!out/sample/**'
   - '!**/*.map'
-# Outside app.asar: the agent is uploaded to Macs, the sample is copied to Documents.
+# Outside app.asar: the agent is uploaded to Macs, the sample is copied to Documents,
+# and the CLI is run by the Node.js in the user's terminals (takeover).
 extraResources:
   - from: out/agent
     to: agent
+  - from: out/cli
+    to: cli
   - from: out/sample
     to: sample
   - from: resources/icons

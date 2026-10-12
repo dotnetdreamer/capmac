@@ -1,10 +1,13 @@
 import readline from 'node:readline';
 import { formatDuration } from '@capmac/core/engine';
-import pc from 'picocolors';
+import picocolors from 'picocolors';
 
 export { formatBytes, formatDuration, plural } from '@capmac/core/engine';
 
 const isTTY = Boolean(process.stdout.isTTY) && process.env.CAPMAC_NO_TTY !== '1';
+// Colour only in a terminal (picocolors also colours pipes on Windows), so AI agents,
+// scripts and log files get plain text. NO_COLOR and FORCE_COLOR still win.
+const pc = picocolors.createColors(!process.env.NO_COLOR && (Boolean(process.env.FORCE_COLOR) || isTTY));
 const ascii = process.env.CAPMAC_ASCII === '1';
 const SPINNER = ascii ? ['-', '\\', '|', '/'] : ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -271,6 +274,20 @@ export async function select<T>(question: string, items: Array<{ label: string; 
     const index = Number(answer) - 1;
     if (Number.isInteger(index) && items[index]) return items[index]!.value;
     log.warn(`Please enter a number between 1 and ${items.length}.`);
+  }
+}
+
+/** Several choices by number ("1,3", "all"); Enter keeps the pre-selected ones. */
+export async function multiSelect<T>(question: string, items: Array<{ label: string; value: T; hint?: string; selected?: boolean }>): Promise<T[]> {
+  log.line(`${pc.cyan('?')} ${question}`);
+  items.forEach((item, i) => log.line(`  ${pc.cyan(String(i + 1).padStart(2))}) ${item.selected ? pc.green('●') : pc.dim('○')} ${item.label}${item.hint ? pc.dim(`  ${item.hint}`) : ''}`));
+  const preselected = items.map((item, i) => (item.selected ? String(i + 1) : null)).filter(Boolean).join(',');
+  for (;;) {
+    const answer = (await ask('Numbers separated by commas, or "all":', preselected || undefined)).toLowerCase();
+    if (answer === 'all') return items.map((item) => item.value);
+    const picked = answer.split(/[\s,]+/).filter(Boolean).map((n) => Number(n) - 1);
+    if (picked.length && picked.every((i) => Number.isInteger(i) && items[i])) return [...new Set(picked)].map((i) => items[i]!.value);
+    log.warn(`Please enter numbers between 1 and ${items.length}, separated by commas.`);
   }
 }
 

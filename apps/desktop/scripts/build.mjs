@@ -2,10 +2,12 @@
 //   main/ preload/ engine/   esbuild bundles (all JS dependencies inlined; no node_modules shipped)
 //   renderer/                Vite build of the React UI
 //   agent/agent.mjs          the Mac agent (identical to the CLI's)
+//   cli/                     a standalone capmac CLI for takeover (`npx cap run ios` in a terminal)
 //   sample/                  the "Run the sample app" project, with prebuilt web assets
 import { spawnSync } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 import { build as viteBuild } from 'vite';
 import { buildAgent } from '@capmac/core/scripts/agent-build';
@@ -20,6 +22,10 @@ await Promise.all([
   ...Object.values(bundles({ production: true })).map((options) => build(options)),
 ]);
 await viteBuild({ configFile: path.join(desktopDir, 'vite.config.ts'), logLevel: 'warn' });
+
+// The terminal's Node.js runs this copy of the CLI, so it is shipped outside app.asar.
+const { buildStandaloneCli } = await import(pathToFileURL(path.join(repoDir, 'packages', 'cli', 'scripts', 'bundles.mjs')).href);
+await buildStandaloneCli(out('cli'), { agent: out('agent', 'agent.mjs'), version: pkg.version });
 
 // The sample app ships without node_modules, so it carries its built web assets.
 const sampleSrc = path.join(repoDir, 'examples', 'hello-capacitor');
