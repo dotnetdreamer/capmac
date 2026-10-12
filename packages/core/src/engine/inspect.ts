@@ -1,7 +1,7 @@
 /** What capmac Studio shows about a project before any Mac is involved. */
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
-import { loadProject, type ProjectInfo } from './project.js';
+import { hasInstalledDependencies, loadProject, type ProjectInfo } from './project.js';
 import { scanProject } from './scan.js';
 import { scanCacheFile } from './sync-client.js';
 
@@ -64,7 +64,7 @@ export async function inspectProject(dir: string): Promise<ProjectSummary> {
     packageManager: project.packageManager,
     iconPath: await findAppIcon(project),
     host: project.config.host ?? null,
-    hasNodeModules: existsSync(path.join(project.capDir, 'node_modules')) || existsSync(path.join(project.syncRoot, 'node_modules')),
+    hasNodeModules: hasInstalledDependencies(project),
     devCommand,
   };
 }

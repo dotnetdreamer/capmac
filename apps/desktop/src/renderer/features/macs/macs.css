@@ -1,0 +1,181 @@
+.mac-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.mac-card {
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+  animation: rise-in var(--dur-slow) var(--ease-out) both;
+}
+.mac-card__head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  padding: var(--s-4) var(--s-4) var(--s-3);
+}
+.mac-card__glyph {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--accent-subtle);
+  color: var(--accent-text);
+  flex: none;
+  .dot {
+    position: absolute;
+    right: -2px;
+    bottom: -2px;
+    width: 11px;
+    height: 11px;
+    box-shadow: 0 0 0 2.5px var(--layer-solid);
+  }
+}
+.mac-card__ident {
+  flex: 1;
+  min-width: 0;
+}
+.mac-card__name {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  font: var(--type-subtitle);
+}
+.mac-card__host {
+  color: var(--text-2);
+  font: var(--type-small);
+  font-family: var(--font-mono);
+  margin-top: 2px;
+}
+.mac-card__status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  max-width: 280px;
+  text-align: right;
+}
+.mac-card__state {
+  font: var(--type-body);
+  font-weight: 600;
+}
+.mac-card__state--ok {
+  color: var(--success);
+}
+.mac-card__state--warn,
+.mac-card__state--busy {
+  color: var(--text-2);
+}
+.mac-card__state--error {
+  color: var(--critical);
+}
+.mac-card__error {
+  font: var(--type-caption);
+  color: var(--text-2);
+}
+.mac-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+}
+.mac-card__facts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, auto));
+  justify-content: start;
+  column-gap: var(--s-8);
+  margin: 0;
+  padding: 0 var(--s-4) var(--s-4) calc(44px + var(--s-4) * 2);
+  div {
+    min-width: 0;
+  }
+  dt {
+    color: var(--text-3);
+    font: var(--type-caption);
+  }
+  dd {
+    margin: 2px 0 0;
+    font: var(--type-small);
+    color: var(--text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+.mac-card__health {
+  border-top: 1px solid var(--stroke-divider);
+  padding: var(--s-3) var(--s-4) var(--s-4);
+  animation: fade-in var(--dur-slow) linear;
+}
+.mac-card__health-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  margin-bottom: var(--s-2);
+  h3 {
+    margin: 0;
+    font: var(--type-body);
+    font-weight: 600;
+  }
+}
+.mac-card__health-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+
+/* Health checklist (also used by first run) */
+.checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--r-card);
+  background: var(--card-2);
+  overflow: hidden;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 44px;
+  padding: var(--s-2) var(--s-3) var(--s-2) var(--s-4);
+  animation: fade-in var(--dur-slow) var(--ease-out) both;
+  & + & {
+    border-top: 1px solid var(--stroke-divider);
+  }
+}
+.check__icon {
+  flex: none;
+  .check--ok & {
+    color: var(--success);
+  }
+  .check--warn & {
+    color: var(--caution);
+  }
+  .check--fail & {
+    color: var(--critical);
+  }
+  .check--info & {
+    color: var(--text-3);
+  }
+}
+.check__body {
+  flex: 1;
+  min-width: 0;
+}
+.check__label {
+  color: var(--text-1);
+}
+.check__detail {
+  color: var(--text-2);
+}
+.check__fix {
+  margin-top: 2px;
+  color: var(--text-2);
+  font: var(--type-small);
+}

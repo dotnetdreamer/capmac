@@ -800,6 +800,26 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  container: console / inline-size;
+}
+@container console (max-width: 840px) {
+  .console__bar {
+    flex-wrap: wrap;
+    row-gap: var(--s-1);
+  }
+  .console__sources {
+    overflow: visible;
+  }
+  .console__spacer {
+    display: none;
+  }
+  /* Search and actions take the second row together. */
+  .console__tools {
+    flex: 1 1 100%;
+  }
+  .console__search {
+    flex: 1 1 auto;
+  }
 }
 .console__bar {
   display: flex;
@@ -820,6 +840,13 @@
 }
 .console__spacer {
   flex: 1 1 0;
+}
+.console__tools {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .console__search {
   flex: 0 1 200px;
@@ -892,6 +919,9 @@
   overflow: auto;
   outline: none;
   padding: var(--s-1) 0;
+  /* Opaque like a terminal: over Mica, text only gets grayscale antialiasing,
+     which makes long monospace logs look bold. */
+  background: var(--layer-solid);
   &:focus-visible {
     box-shadow: inset 0 0 0 2px var(--focus-outer);
   }
@@ -913,7 +943,7 @@
   min-height: 20px;
   padding: 1px var(--s-3) 1px var(--s-3);
   font: var(--type-mono);
-  color: var(--text-1);
+  color: var(--console-fg);
   user-select: text;
   border-left: 2px solid transparent;
   &.cl-row--error {
@@ -925,11 +955,9 @@
     border-left-color: var(--caution);
   }
   &.cl-row--debug .cl-text,
-  &.cl-row--bridge .cl-text {
-    color: var(--text-2);
-  }
+  &.cl-row--bridge .cl-text,
   &.cl-row--capmac .cl-text {
-    color: var(--text-2);
+    color: var(--console-dim);
   }
   &.is-current {
     box-shadow: inset 0 0 0 1px var(--accent);
@@ -1016,10 +1044,11 @@
 
 /* JSON in console.log */
 .json-root {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 3px;
-  max-width: 100%;
+  width: 100%;
+  min-width: 0;
   padding: 0;
   border: 0;
   background: transparent;
@@ -1035,7 +1064,12 @@
     text-decoration-color: var(--text-3);
   }
 }
+.json-prefix {
+  flex: none;
+  white-space: pre;
+}
 .json-preview {
+  min-width: 0;
   color: var(--text-2);
   white-space: pre;
   overflow: hidden;

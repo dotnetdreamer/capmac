@@ -1,0 +1,109 @@
+.devices-search {
+  width: 220px;
+}
+.device-section + .device-section {
+  margin-top: var(--s-8);
+}
+.device-group + .device-group {
+  margin-top: var(--s-4);
+}
+.device-group__title {
+  margin: 0 0 var(--s-1_5);
+  font: var(--type-small);
+  color: var(--text-2);
+  font-weight: 600;
+}
+.device-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--r-card);
+  background: var(--card);
+  overflow: hidden;
+}
+.device-row {
+  display: grid;
+  grid-template-columns: 36px minmax(160px, 1.4fr) minmax(90px, 0.6fr) minmax(140px, 0.9fr) auto;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 52px;
+  padding: var(--s-2) var(--s-3) var(--s-2) var(--s-4);
+  animation: fade-in var(--dur-slow) linear both;
+  & + & {
+    border-top: 1px solid var(--stroke-divider);
+  }
+  &:hover {
+    background: var(--fill-subtle-hover);
+  }
+}
+.device-row--device {
+  grid-template-columns: 36px minmax(160px, 1.2fr) minmax(80px, 0.5fr) auto minmax(180px, 1.2fr);
+}
+.device-row__glyph {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: var(--neutral-bg);
+  color: var(--text-1);
+}
+.device-row__name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font: var(--type-body);
+  font-weight: 600;
+}
+.device-row__model {
+  font: var(--type-caption);
+  font-weight: 400;
+  color: var(--text-3);
+}
+.device-row__os {
+  color: var(--text-2);
+  font: var(--type-small);
+}
+.device-row__state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1_5);
+  color: var(--text-2);
+  font: var(--type-small);
+  &.is-on {
+    color: var(--text-1);
+  }
+}
+.device-row__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  justify-content: flex-end;
+  .btn {
+    min-width: 104px;
+  }
+}
+.device-row__badges {
+  display: flex;
+  gap: var(--s-1_5);
+  flex-wrap: wrap;
+}
+.device-row__hint {
+  color: var(--text-2);
+  font: var(--type-small);
+}
+.device-empty {
+  display: flex;
+  gap: var(--s-3);
+  padding: var(--s-4);
+  border: 1px dashed var(--stroke-surface);
+  border-radius: var(--r-card);
+  > .icon {
+    color: var(--text-3);
+    margin-top: 2px;
+  }
+  p {
+    margin-top: 2px;
+  }
+}

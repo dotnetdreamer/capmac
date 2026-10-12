@@ -113,6 +113,16 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
     scrollEndThreshold: 24,
   });
 
+  useEffect(() => {
+    if (!visible || paused) return;
+    const raf = requestAnimationFrame(() => {
+      virtualizer.scrollToEnd();
+      setAtEnd(true);
+    });
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
   const onScroll = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -223,6 +233,7 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
           </span>
         )}
         <span className="console__spacer" />
+        <div className="console__tools">
         <SearchField
           ref={searchRef}
           compact
@@ -261,6 +272,7 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
             { id: 'export', label: 'Export to a file…', icon: 'download', disabled: count === 0, onSelect: () => void exportLog() },
           ]}
         />
+        </div>
       </div>
       <div
         ref={scrollRef}

@@ -80,6 +80,10 @@ kbd,
 .mono {
   font-family: var(--font-mono);
 }
+/* Cascadia is a variable font: UI labels (ids, hosts) read better a touch lighter. */
+.mono {
+  font-weight: 350;
+}
 
 code {
   font-size: 0.92em;

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, promises as fs, readFileSync } from 'node:fs';
+import { existsSync, promises as fs, readdirSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { toPosixRel } from '../shared/paths.js';
@@ -198,6 +198,22 @@ export async function loadProject(cwd: string): Promise<ProjectInfo> {
     config: await loadProjectConfig(capDir),
     scripts: packageJson.scripts ?? {},
   };
+}
+
+/**
+ * Whether the project's JavaScript dependencies are installed on this PC.
+ * A node_modules folder alone is not enough: dev servers leave caches there
+ * (node_modules/.vite) even when nothing was installed.
+ */
+export function hasInstalledDependencies(project: Pick<ProjectInfo, 'capDir' | 'syncRoot'>): boolean {
+  for (const dir of new Set([project.capDir, project.syncRoot])) {
+    try {
+      if (readdirSync(path.join(dir, 'node_modules')).some((name) => !name.startsWith('.'))) return true;
+    } catch {
+      // no node_modules here
+    }
+  }
+  return false;
 }
 
 export function requireIos(project: ProjectInfo): void {

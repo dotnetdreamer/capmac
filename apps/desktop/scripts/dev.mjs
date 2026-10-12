@@ -49,17 +49,28 @@ function killElectron() {
   });
 }
 
+// Restarts run one at a time: a change that lands mid-restart queues another
+// restart instead of launching a second Electron next to the first.
+let restartChain = Promise.resolve();
+const changed = new Set();
+
 function scheduleRestart(reason) {
+  changed.add(reason);
   clearTimeout(restartTimer);
-  restartTimer = setTimeout(async () => {
-    log(`${reason} changed, restarting Electron`);
-    restarting = true;
-    await killElectron();
-    // Give Windows a moment to release the single-instance lock.
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    restarting = false;
-    startElectron();
-  }, 150);
+  restartTimer = setTimeout(() => {
+    const what = [...changed].join(', ');
+    changed.clear();
+    restartChain = restartChain.then(async () => {
+      if (shuttingDown) return;
+      log(`${what} changed, restarting Electron`);
+      restarting = true;
+      await killElectron();
+      // Give Windows a moment to release the single-instance lock and caches.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      restarting = false;
+      if (!shuttingDown) startElectron();
+    });
+  }, 300);
 }
 
 const contexts = [];

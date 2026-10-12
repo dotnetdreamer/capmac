@@ -66,6 +66,10 @@
   --neutral-bg: rgb(0 0 0 / 0.05);
   --live: #0f7b0f;
 
+  /* Console text: a softer foreground than --text-1 reads better in long logs. */
+  --console-fg: rgb(0 0 0 / 0.84);
+  --console-dim: rgb(0 0 0 / 0.55);
+
   /* Console sources */
   --src-js: var(--accent-text);
   --src-cap: oklch(0.55 0.17 300);
@@ -192,6 +196,9 @@
     --text-3: rgb(255 255 255 / 0.54);
     --text-disabled: rgb(255 255 255 / 0.36);
 
+    --console-fg: rgb(255 255 255 / 0.86);
+    --console-dim: rgb(255 255 255 / 0.6);
+
     --success: #6ccb5f;
     --success-bg: #393d1b;
     --caution: #fce100;
@@ -226,6 +233,8 @@
     --text-1: CanvasText;
     --text-2: CanvasText;
     --text-3: GrayText;
+    --console-fg: CanvasText;
+    --console-dim: GrayText;
     --stroke-card: CanvasText;
     --stroke-divider: CanvasText;
     --stroke-control: ButtonText;

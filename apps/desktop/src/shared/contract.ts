@@ -299,6 +299,8 @@ export interface AppInfo {
   accent: string | null;
   /** Windows 11 Mica backdrop is on. */
   mica: boolean;
+  /** The Windows user name (a good first guess for the Mac user name). */
+  userName: string;
 }
 
 /** IPC channels handled by main (renderer → main, invoke). */

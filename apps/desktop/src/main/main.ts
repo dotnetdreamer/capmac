@@ -3,8 +3,9 @@
  * and request validation. The engine runs in a utility process (engine.ts).
  */
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, MessageChannelMain, nativeImage, nativeTheme, Notification, shell, systemPreferences, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, MessageChannelMain, nativeImage, nativeTheme, Notification, shell, systemPreferences, type IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import {
   appChannels,
@@ -30,10 +31,19 @@ import { APP_ORIGIN, createMainWindow, hardenSession, micaSupported, registerApp
 const devUrl = process.env.ELECTRON_RENDERER_URL ?? null;
 const isDev = !app.isPackaged;
 
-if (!app.requestSingleInstanceLock()) {
-  app.quit();
-  process.exit(0);
+/**
+ * One capmac Studio at a time. In development the previous instance may
+ * still be exiting when the dev runner restarts Electron, so retry briefly.
+ */
+async function acquireInstanceLock(): Promise<boolean> {
+  for (let attempt = 0; attempt < 24; attempt++) {
+    if (app.requestSingleInstanceLock()) return true;
+    if (!process.env.CAPMAC_STUDIO_DEV) return false;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
 }
+const instanceLock = acquireInstanceLock();
 registerAppScheme();
 app.setAppUserModelId('dev.capmac.studio');
 
@@ -198,6 +208,7 @@ function registerIpc(): void {
     configDir: process.env.CAPMAC_CONFIG_DIR || path.join(app.getPath('home'), '.capmac'),
     accent: accentColor(),
     mica,
+    userName: os.userInfo().username,
   }));
   handle('app:get-settings', () => settings.get());
   handle('app:set-settings', (patch) => settings.update(patch));
@@ -315,7 +326,13 @@ app.on('second-instance', (_event, argv) => {
   if (folder) send('app:command', { type: 'open-project', path: folder } satisfies AppCommand);
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  if (!(await instanceLock)) {
+    // Another capmac Studio is running: it was told to come to the front (second-instance).
+    app.exit(0);
+    return;
+  }
+  if (app.isPackaged) Menu.setApplicationMenu(null); // no reload/devtools accelerators in the product
   settings = new SettingsStore();
   nativeTheme.themeSource = settings.get().theme;
   serveRenderer();

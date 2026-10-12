@@ -32,6 +32,8 @@ export function bundles({ production }) {
     minify: production,
     legalComments: 'none',
     logLevel: 'warning',
+    // core's agent lookup guards import.meta (unused in this CommonJS bundle).
+    logOverride: { 'empty-import-meta': 'silent' },
   };
   return {
     main: { ...common, entryPoints: ['src/main/main.ts'], outfile: 'out/main/main.cjs', format: 'cjs' },

@@ -8,7 +8,7 @@ import { log, startStep, type EngineContext, type StepHandle } from './context.j
 import { CancelledError, isCancelled, UserError } from './errors.js';
 import { stripAnsi } from './format.js';
 import { recall, remember } from './memory.js';
-import { scriptCommand, usesSceneLifecycle, type ProjectInfo } from './project.js';
+import { hasInstalledDependencies, scriptCommand, usesSceneLifecycle, type ProjectInfo } from './project.js';
 import type { MacSession } from './session.js';
 import type { ApiKey } from './signing.js';
 import { syncToMac, type SyncSummary } from './sync-client.js';
@@ -29,7 +29,7 @@ export async function buildWeb(project: ProjectInfo, ctx: EngineContext, signal?
     return;
   }
   // A project copied without node_modules (e.g. the sample) can still run with its built assets.
-  const hasModules = existsSync(path.join(project.capDir, 'node_modules')) || existsSync(path.join(project.syncRoot, 'node_modules'));
+  const hasModules = hasInstalledDependencies(project);
   if (!hasModules && !configured && existsSync(path.join(project.capDir, project.webDir, 'index.html'))) {
     log(ctx, 'info', `Using the built web assets in ${project.webDir}/ (dependencies are not installed on this PC; \`${project.packageManager} install\` builds from source).`);
     ctx.emit({ type: 'phase-skipped', phase: 'web', reason: 'dependencies not installed on this PC' });
