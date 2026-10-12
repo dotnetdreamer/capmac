@@ -26,6 +26,7 @@
     "@vitejs/plugin-react": "6.1.2",
     "electron": "44.7.0",
     "electron-builder": "26.15.3",
+    "electron-updater": "6.8.10",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-resizable-panels": "4.14.4",
