@@ -67,7 +67,7 @@ function Welcome({ next }: { next: () => void }) {
   return (
     <div className="ob-page ob-page--welcome">
       <HeroArt />
-      <h1 className="ob-title ob-title--display">Build and run your iOS app from Windows</h1>
+      <h1 className="ob-title ob-title--display">Build and run your iOS&nbsp;app from Windows</h1>
       <p className="ob-lead">capmac Studio pairs this PC with a Mac on your network. Your Capacitor app is built there with Xcode and shows up here, live, on the iOS simulator.</p>
       <div className="ob-actions ob-actions--center">
         <Button size="lg" variant="accent" onClick={next} data-autofocus>
@@ -230,6 +230,10 @@ function SignIn({ mac, back, paired }: { mac: { host: string; port: number; labe
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ErrorInfo | null>(null);
+  // Progress from an earlier pairing does not belong to this one.
+  useEffect(() => {
+    useMacs.setState({ pairing: [] });
+  }, []);
   const submit = async () => {
     if (!user || busy) return;
     setBusy(true);
@@ -256,7 +260,7 @@ function SignIn({ mac, back, paired }: { mac: { host: string; port: number; labe
       <h1 className="ob-title">Sign in to {mac.label ?? mac.host}</h1>
       <p className="ob-lead">Your Mac password is used once, to install capmac’s own SSH key. It is never stored.</p>
       <div className="ob-form">
-        <TextField label="Mac user name" value={user} onChange={(e) => setUser(e.target.value.trim())} hint="The short name, as shown by whoami in Terminal on the Mac." autoComplete="off" data-autofocus disabled={busy} />
+        <TextField label="Mac user name" value={user} onChange={(e) => setUser(e.target.value.trim())} hint={<>The short name, as shown by <code>whoami</code> in Terminal on the Mac.</>} autoComplete="off" data-autofocus disabled={busy} />
         <PasswordField label="Password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} />
       </div>
       {busy || steps.length > 0 ? (

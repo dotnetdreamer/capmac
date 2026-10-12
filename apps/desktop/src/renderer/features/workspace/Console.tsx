@@ -232,7 +232,6 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
             {errorCount}
           </span>
         )}
-        <span className="console__spacer" />
         <div className="console__tools">
         <SearchField
           ref={searchRef}

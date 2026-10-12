@@ -804,27 +804,9 @@
   flex-direction: column;
   container: console / inline-size;
 }
-@container console (max-width: 840px) {
-  .console__bar {
-    flex-wrap: wrap;
-    row-gap: var(--s-1);
-  }
-  .console__sources {
-    overflow: visible;
-  }
-  .console__spacer {
-    display: none;
-  }
-  /* Search and actions take the second row together. */
-  .console__tools {
-    flex: 1 1 100%;
-  }
-  .console__search {
-    flex: 1 1 auto;
-  }
-}
 .console__bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--s-1);
   padding: var(--s-1) var(--s-1) var(--s-1) var(--s-2);
@@ -840,24 +822,39 @@
   overflow-x: auto;
   scrollbar-width: none;
 }
-.console__spacer {
-  flex: 1 1 0;
-}
+/* Fills the rest of the bar, right-aligned, also when it wraps onto a second row.
+   Line breaks use the base sizes, so the search starts small and grows into free space. */
 .console__tools {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--s-1);
-  flex: 0 1 auto;
+  flex: 1 0 auto;
   min-width: 0;
 }
 .console__search {
-  flex: 0 1 200px;
-  min-width: 110px;
+  /* A definite width keeps the group's base size small; it grows from there. */
+  width: 130px;
+  flex: 1 1 auto;
+  min-width: 120px;
+  max-width: 240px;
 }
 .console__bar > .chip--menu,
 .console__bar > .count,
 .console__bar > .icon-btn {
   flex: none;
+}
+/* Very narrow panes: search gets a row of its own, full width. (After the base rules: same specificity, so order decides.) */
+@container console (max-width: 560px) {
+  .console__sources {
+    overflow: visible;
+  }
+  .console__tools {
+    flex: 1 1 100%;
+  }
+  .console__search {
+    flex: 1 1 auto;
+  }
 }
 .chip {
   display: inline-flex;
