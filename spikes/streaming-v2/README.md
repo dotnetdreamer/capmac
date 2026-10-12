@@ -36,3 +36,22 @@ control: drops frames at 6 Mbps under full-screen motion), `--debug 1` (once a
 second: frames from the simulator, frames encoded and dropped, timings).
 
 Remove the helper from the Mac with `rm -rf ~/.capmac/spike`.
+
+## Exploring the private API
+
+Xcode changes these interfaces between versions, and the symbol tables are the
+only documentation. Two tools in `tools/`:
+
+| File | What it does |
+|---|---|
+| `mac.ts` | Runs a script on the paired Mac (`sh '<command>'`, `sh -f <file>`) or copies a file to it (`put <local> <remote>`, relative to the Mac user's home), over capmac's own SSH connection. Bundle it like `bench.ts`. |
+| `introspect.m` | Lists the display and input classes and protocols in the installed Xcode, dumps a class (`./introspect SimDeviceIOClient`), a protocol with its block signatures (`./introspect @SimScreen`), or every class in a framework (`./introspect --image SimulatorKit`). |
+
+```sh
+node spikes/streaming-v2/out/mac.cjs put spikes/streaming-v2/tools/introspect.m .capmac/spike/introspect.m
+node spikes/streaming-v2/out/mac.cjs sh 'cd ~/.capmac/spike && xcrun clang -fobjc-arc -framework Foundation introspect.m -o introspect && ./introspect @SimScreen'
+node spikes/streaming-v2/out/mac.cjs sh 'nm -gU /Applications/Xcode.app/Contents/Developer/Library/PrivateFrameworks/SimulatorKit.framework/Versions/A/SimulatorKit | grep Indigo'
+```
+
+The second command is how the Xcode 26 `SimScreen` frame callbacks were found;
+the third lists the Indigo HID message builders that input will need.
