@@ -21,7 +21,7 @@ export type MainToHost =
   | { kind: 'call'; id: number; method: EngineMethod; params: unknown }
   | { kind: 'prompt-response'; response: PromptResponse }
   /** Comes with the engine's end of a MessageChannel in `ports`. */
-  | { kind: 'screen-open'; streamId: string; mac: string; udid: string }
+  | { kind: 'screen-open'; streamId: string; mac: string; udid: string; prefer: 'smooth' | 'compatible'; maxSize?: number }
   | { kind: 'settings'; settings: HostSettings }
   | { kind: 'visibility'; visible: boolean }
   | { kind: 'shutdown' };

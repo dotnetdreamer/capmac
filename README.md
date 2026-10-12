@@ -20,9 +20,11 @@ The same engine with a window around it. Pair your Mac in a few clicks, add your
 - every build step on a timeline;
 - build errors as problems you click to open at the line in your editor;
 - your app's console with source and level filters, search, and JSON you can expand;
-- the iOS simulator's screen, next to your code.
+- the iOS simulator, live, next to your code: up to 60 frames a second, about 15 ms behind the Mac on a home network. Click and drag to touch, scroll with the wheel or touchpad, type on your PC's keyboard, paste, and press Home or Lock.
 
 If the connection to the Mac drops, it reconnects and restores the session. Ctrl+K finds any command.
+
+The simulator streams as H.264 from its framebuffer through a small helper that capmac compiles on the Mac, with your Xcode, the first time you open a simulator. The same helper sends touches and keys, so AXe is not needed. If the smooth stream cannot run, the pane switches to screenshots (the *compatible* stream) by itself and says why. Settings › Appearance › Simulator stream chooses between the two.
 
 `npm run desktop:build` builds it into `apps/desktop/release/<version>/`:
 
@@ -65,7 +67,7 @@ capmac dev                       # live reload: save in VS Code, the simulator u
 | **`capmac run`** | Builds your web app on Windows, syncs the project (only changed files), runs `npm install` + `npx cap sync ios` on the Mac when needed, builds with `xcodebuild`, installs and launches on a simulator or device, and streams the app's console (`console.log` from JS, native logs) until you press Ctrl+C. Web-only changes skip Xcode entirely and update the installed app in about a second. |
 | **`capmac dev`** | Live reload. Your dev server (`vite`, `ng serve`, …) runs on Windows; an SSH reverse tunnel makes it `http://localhost:<port>` on the Mac, and the app is built to load from there. HMR works as usual. Native changes (Swift, plugins, `capacitor.config`, `package.json`) trigger an automatic rebuild. If the Mac sleeps or Wi-Fi drops, capmac reconnects, restores the tunnel and relaunches by itself. Keys: `r` rebuild, `R` clean rebuild, `l` relaunch, `o` open screen, `q` quit. |
 | **`capmac logs`** | Streams the system log (os_log/NSLog) of the app running on a simulator. |
-| **`capmac screen`** | The Mac's simulator in your browser (like Xamarin's *Remoted iOS Simulator*): click to tap, drag to swipe, scroll, type, Home/Lock buttons, screenshots, plus the app console side-by-side. Touch input uses [AXe](https://github.com/cameroncooke/AXe) on the Mac (`capmac doctor --fix` installs it); without it the screen is view-only. |
+| **`capmac screen`** | The Mac's simulator in your browser (like Xamarin's *Remoted iOS Simulator*): click to tap, drag to swipe, scroll, type, Home/Lock buttons, screenshots, plus the app console side-by-side. Touch and typing go through capmac's own helper, compiled on the Mac on first use; with an Xcode whose simulators don't take its input, [AXe](https://github.com/cameroncooke/AXe) is used when installed (`capmac doctor --fix` installs it). |
 | **`capmac build --ipa`** | Archives and exports a signed `.ipa` (development, ad-hoc, app-store, enterprise) and downloads it to `build/ios/`. `--upload` sends it to App Store Connect/TestFlight instead. |
 | **`capmac doctor [--fix]`** | Checks this PC, the connection and the Mac (Xcode, license, simulators, Node, CocoaPods, disk, signing) and fixes what it can. |
 | **`capmac targets`** | Lists simulators and connected devices. Pick with `--target "iPhone 16 Pro"` or `--device`. |
@@ -155,6 +157,7 @@ Monorepos work: capmac syncs from the folder that holds the lockfile and runs Ca
 | App built with Xcode 27 doesn't launch | iOS 27 requires the UIScene lifecycle: run `npx cap migrate` (Capacitor 8.5+). |
 | Device build: "No Accounts" / "session has expired" | Use an App Store Connect API key (`--api-key`, see above). |
 | Wrong files synced | `capmac info --files`, then adjust `.capmacignore` / `capmac.json`. |
+| capmac Studio shows the *compatible* stream | The note under the simulator says why. *Try the smooth stream* starts it again; *Restart simulator* fixes a simulator whose screen stopped updating. If the helper doesn't compile after an Xcode update, update capmac. |
 
 Add `--verbose` to any command to see full tool output. Build logs are kept on the Mac in `~/.capmac/projects/<id>/logs/`.
 
@@ -179,7 +182,7 @@ The repo is an npm workspace:
 | `packages/core` | `@capmac/core` (private): the engine both front ends share, the wire protocol (`src/shared`) and the Mac agent (`src/agent`). Consumed as TypeScript source; the engine reports through typed events and asks through a `Prompter`, it never prints. |
 | `packages/cli` | `capmac`, the published CLI: commands, the terminal renderer for engine events, the browser screen viewer. Publish from this folder (`npm publish -w capmac`). |
 | `apps/desktop` | capmac Studio, the Windows desktop app (Electron 44, React 19, Vite 8). The engine runs in a utility process; the UI is a sandboxed renderer talking to it through a small validated API. See [docs/desktop-design.md](docs/desktop-design.md). |
-| `spikes/streaming-v2` | The H.264 simulator stream spike: about 15× the frame rate of today's screenshots at a fifteenth of the latency. Results in the design doc. |
+| `spikes/streaming-v2` | The spike behind capmac Studio's smooth simulator stream: the measurements and the tools used to explore Apple's private simulator interfaces. Results in the design doc. |
 | `bin/capmac.js` | Runs the CLI from `packages/cli/dist` (so `node bin/capmac.js …` works from a clone). |
 
 `examples/hello-capacitor` is a minimal Vite + Capacitor 8 (Swift Package Manager) app for trying things out.

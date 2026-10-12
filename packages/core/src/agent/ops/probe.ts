@@ -2,6 +2,8 @@ import os from 'node:os';
 import path from 'node:path';
 import type { ProbeResult, ToolInfo } from '../../shared/protocol.js';
 import { toolEnv } from '../env.js';
+import { helperState } from '../helper/build.js';
+import { HELPER_SOURCE } from '../helper/source.js';
 import { run, tryCapture, which } from '../proc.js';
 import { AGENT_VERSION } from '../version.js';
 
@@ -99,7 +101,7 @@ async function signingIdentities(env: NodeJS.ProcessEnv): Promise<string[]> {
 
 export async function opProbe(): Promise<ProbeResult> {
   const env = await toolEnv();
-  const [consoleUser, computerName, macos, xcode, simulators, disk, locked, identities, npm, ...toolInfos] = await Promise.all([
+  const [consoleUser, computerName, macos, xcode, simulators, disk, locked, identities, npm, streamHelper, ...toolInfos] = await Promise.all([
     tryCapture('stat', ['-f', '%Su', '/dev/console'], { env }),
     tryCapture('scutil', ['--get', 'ComputerName'], { env }),
     tryCapture('sw_vers', ['-productVersion'], { env }),
@@ -109,6 +111,7 @@ export async function opProbe(): Promise<ProbeResult> {
     keychainLocked(env),
     signingIdentities(env),
     tryCapture('npm', ['--version'], { env, timeoutMs: 30_000 }),
+    helperState(HELPER_SOURCE, env).catch(() => undefined),
     ...OPTIONAL_TOOLS.map((name) => tool(name, env)),
   ]);
   const tools: Record<string, ToolInfo | null> = {};
@@ -132,5 +135,6 @@ export async function opProbe(): Promise<ProbeResult> {
     keychainLocked: locked,
     signingIdentities: identities,
     consoleUser,
+    streamHelper,
   };
 }

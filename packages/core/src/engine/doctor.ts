@@ -2,7 +2,7 @@
  * Health checks for this PC, the connection and the Mac, and the fixes capmac
  * can apply itself (`capmac doctor --fix`, the app's one-click fixes).
  */
-import type { ProbeResult } from '../shared/protocol.js';
+import type { ProbeResult, StreamHelperState } from '../shared/protocol.js';
 import type { HostConfig } from './config.js';
 import { updateHost } from './config.js';
 import { log, withStep, type EngineContext } from './context.js';
@@ -94,16 +94,40 @@ export function macChecks(probe: ProbeResult, project?: ProjectInfo | null): Che
       action: probe.tools.brew ? { id: 'install-cocoapods', label: 'Install', confirm: 'Install CocoaPods on the Mac with Homebrew (brew install cocoapods)?' } : undefined,
     }));
   }
+  const helper = probe.streamHelper;
+  if (helper) {
+    const xcode = helper.xcode ? ` for Xcode ${helper.xcode}` : '';
+    checks.push(
+      helper.state === 'ready'
+        ? mac({ id: 'stream', level: 'ok', label: 'Smooth simulator stream', detail: `helper built${xcode}` })
+        : helper.state === 'not-built'
+          ? mac({ id: 'stream', level: 'info', label: 'Smooth simulator stream', detail: `capmac compiles its helper${xcode} the first time you open a simulator`, action: { id: 'build-stream-helper', label: 'Build now' } })
+          : helper.state === 'failed'
+            ? mac({
+                id: 'stream',
+                level: 'warn',
+                label: 'Smooth simulator stream',
+                detail: `the helper does not compile${xcode}: the simulator shows the compatible stream`,
+                fix: helper.detail ? `Compiler output: ${helper.detail.split('\n')[0]}` : 'Update capmac, then try again.',
+                action: { id: 'build-stream-helper', label: 'Try again' },
+              })
+            : mac({ id: 'stream', level: 'info', label: 'Smooth simulator stream', detail: 'needs Xcode: the simulator shows the compatible stream', fix: helper.detail }),
+    );
+  }
+  // Touch and typing: capmac's helper when the simulators still take its input, else AXe.
+  const helperInput = helper ? helper.state !== 'unsupported' && helper.state !== 'failed' && helper.input !== false : false;
   checks.push(probe.tools.axe
-    ? mac({ id: 'axe', level: 'ok', label: 'AXe', detail: 'touch input for the simulator screen' })
-    : mac({
-        id: 'axe',
-        level: 'info',
-        label: 'AXe',
-        detail: 'not installed: the simulator screen is view-only',
-        fix: probe.tools.brew ? 'Run `capmac doctor --fix` to install it with Homebrew.' : 'Install Homebrew (https://brew.sh), then run `capmac doctor --fix`.',
-        action: probe.tools.brew ? { id: 'install-axe', label: 'Install AXe', confirm: 'Install AXe on the Mac with Homebrew (brew install cameroncooke/axe/axe)? It adds touch and keyboard input to the simulator screen.' } : undefined,
-      }));
+    ? mac({ id: 'axe', level: 'ok', label: 'AXe', detail: helperInput ? 'installed (capmac uses its own helper for touch and typing)' : 'touch input for the simulator screen' })
+    : helperInput
+      ? mac({ id: 'axe', level: 'info', label: 'AXe', detail: 'not needed: capmac’s helper handles touch and typing' })
+      : mac({
+          id: 'axe',
+          level: 'info',
+          label: 'AXe',
+          detail: 'not installed: the simulator screen is view-only',
+          fix: probe.tools.brew ? 'Run `capmac doctor --fix` to install it with Homebrew.' : 'Install Homebrew (https://brew.sh), then run `capmac doctor --fix`.',
+          action: probe.tools.brew ? { id: 'install-axe', label: 'Install AXe', confirm: 'Install AXe on the Mac with Homebrew (brew install cameroncooke/axe/axe)? It adds touch and keyboard input to the simulator screen.' } : undefined,
+        }));
   if (probe.freeDiskGb !== null) {
     checks.push(mac({ id: 'disk', level: probe.freeDiskGb >= 15 ? 'ok' : probe.freeDiskGb >= 5 ? 'warn' : 'fail', label: 'Free disk space', detail: `${probe.freeDiskGb} GB`, fix: probe.freeDiskGb >= 15 ? undefined : 'Xcode builds need room; clear ~/Library/Developer/Xcode/DerivedData or old simulators (`xcrun simctl delete unavailable`).' }));
   }
@@ -189,6 +213,11 @@ export async function applyFix(fix: FixId, session: MacSession, ctx: EngineConte
     case 'unlock-keychain':
       await unlockKeychain(session, ctx, true);
       return;
+    case 'build-stream-helper': {
+      const state = await withStep(ctx, 'Compiling the smooth stream helper on the Mac', 'other', () => session.call<StreamHelperState>('stream-helper', { build: true, force: true }));
+      if (state.state !== 'ready') throw new UserError('The smooth stream helper did not compile on the Mac.', 'The simulator shows the compatible stream instead. Updating capmac usually fixes this after an Xcode update.', state.detail?.split('\n'));
+      return;
+    }
   }
 }
 

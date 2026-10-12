@@ -41,7 +41,7 @@ export interface AppLogEntry {
 
 export type CheckLevel = 'ok' | 'warn' | 'fail' | 'info';
 
-export type FixId = 'install-node' | 'xcode-license' | 'xcode-first-launch' | 'download-ios' | 'install-axe' | 'install-cocoapods' | 'unlock-keychain';
+export type FixId = 'install-node' | 'xcode-license' | 'xcode-first-launch' | 'download-ios' | 'install-axe' | 'install-cocoapods' | 'unlock-keychain' | 'build-stream-helper';
 
 /** A one-click fix for a health check. */
 export interface FixAction {

@@ -70,6 +70,32 @@ button {
   background: var(--accent);
   color: #fff;
 }
+input {
+  font: inherit;
+  font-size: 17px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--muted) 40%, transparent);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--text);
+}
+.echo {
+  margin: 10px 0 0;
+  color: var(--muted);
+}
+.list {
+  margin: 0;
+  padding: 0 0 0 1.4em;
+  li {
+    padding: 10px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--muted) 20%, transparent);
+  }
+  li:last-child {
+    border-bottom: 0;
+  }
+}
 code {
   font-size: 0.9em;
 }

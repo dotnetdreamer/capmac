@@ -43,7 +43,9 @@ import {
   type EngineContext,
   type HostConfig,
   type Prompter,
+  type VideoPacket,
 } from '@capmac/core/engine';
+import { STREAM_CONFIG } from '@capmac/core/shared/stream';
 import type { ProbeResult, Target, TargetsResult } from '@capmac/core/shared/protocol';
 import {
   inputEventSchema,
@@ -58,6 +60,7 @@ import {
   type PromptRequest,
   type PromptResponse,
   type Scope,
+  type ScreenPortCommand,
   type ScreenPortMessage,
 } from '../shared/contract.js';
 import type { HostInit, HostSettings, HostToMain, MainToHost } from '../shared/host-protocol.js';
@@ -346,51 +349,111 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
 
 // ─── Screen streams (frames go straight to the renderer's MessagePort) ────
 
+const toArrayBuffer = (buffer: Buffer) => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
+
 const screens = new Map<string, { stream: ScreenStream; port: MessagePortMain }>();
 
-function openScreen(streamId: string, mac: string, udid: string, port: MessagePortMain): void {
-  let seq = 0;
-  let inFlight = 0;
-  let pending: Buffer | null = null;
+/** Smooth stream: frames posted to the renderer and not taken yet before it counts as falling behind. */
+const VIDEO_MAX_IN_FLIGHT = 30;
+
+function openScreen(streamId: string, mac: string, udid: string, port: MessagePortMain, prefer: 'smooth' | 'compatible', maxSize?: number): void {
   const post = (message: ScreenPortMessage) => port.postMessage(message);
-  const sendFrame = (jpeg: Buffer) => {
-    // Keep at most two frames in flight; under backpressure only the newest waiting frame is kept.
-    if (inFlight >= 2) {
-      pending = jpeg;
+  // Compatible stream: at most two JPEGs in flight; under backpressure only the newest waiting one is kept.
+  let jpegSeq = 0;
+  let jpegInFlight = 0;
+  let jpegPending: Buffer | null = null;
+  const sendJpeg = (jpeg: Buffer) => {
+    if (jpegInFlight >= 2) {
+      jpegPending = jpeg;
       return;
     }
-    inFlight += 1;
-    const data = jpeg.buffer.slice(jpeg.byteOffset, jpeg.byteOffset + jpeg.byteLength) as ArrayBuffer;
-    post({ type: 'frame', data, seq: ++seq });
+    jpegInFlight += 1;
+    post({ type: 'frame', data: toArrayBuffer(jpeg), seq: ++jpegSeq });
   };
-  const stream = new ScreenStream(link(mac), udid, { fps: 15, quality: 72, maxSize: 1400 }, {
-    onFrame: sendFrame,
+  // Smooth stream: every message goes on in order (a delta is useless without the ones before it).
+  // When the renderer falls behind, drop up to the next keyframe and ask for one.
+  let videoInFlight = 0;
+  let videoDropping = false;
+  const sendVideo = ({ data, header }: VideoPacket) => {
+    const config = header.type === STREAM_CONFIG;
+    if (!config) {
+      if (videoDropping) {
+        if (!header.key || videoInFlight > 4) return;
+        videoDropping = false;
+      } else if (!header.key && videoInFlight >= VIDEO_MAX_IN_FLIGHT) {
+        videoDropping = true;
+        stream.requestKeyframe();
+        return;
+      }
+      videoInFlight += 1;
+    }
+    post({ type: 'video', data: toArrayBuffer(data), seq: header.seq, key: header.key, config, captureUs: header.captureUs });
+  };
+  const resetFlow = () => {
+    jpegInFlight = 0;
+    jpegPending = null;
+    videoInFlight = 0;
+    videoDropping = false;
+  };
+  const scope = { mac, streamId };
+  const stream = new ScreenStream(link(mac), udid, { prefer, fps: 15, quality: 72, maxSize: Math.min(1400, maxSize ?? 1400) }, {
+    onFrame: sendJpeg,
+    onVideo: sendVideo,
     onInfo: (info) => {
       post({ type: 'info', info });
-      emit({ mac, streamId }, { type: 'screen-info', info });
+      emit(scope, { type: 'screen-info', info });
     },
-    onLog: (level, message) => emit({ mac, streamId }, { type: 'log', level: level === 'info' ? 'note' : level, message: `Screen: ${message}` }),
+    onLog: (level, message) => emit(scope, { type: 'log', level: level === 'info' ? 'note' : level, message: `Screen: ${message}` }),
     onEnd: (error) => post({ type: 'state', state: 'ended', error }),
     onState: (state) => {
-      if (state === 'streaming') inFlight = 0;
+      if (state === 'streaming') resetFlow();
       post({ type: 'state', state });
     },
+    onCodec: (codec, fallback) => {
+      resetFlow();
+      post({ type: 'codec', codec, fallback });
+      if (fallback) emit(scope, { type: 'log', level: 'note', message: `Screen: using the compatible stream. ${fallback.message}` });
+    },
+    onPreparing: (stage, xcode) => post({ type: 'preparing', stage, xcode }),
+    onClock: (offsetUs, rttUs) => post({ type: 'clock', offsetUs, rttUs }),
   });
+  if (maxSize) stream.setVideoSize(maxSize);
   port.on('message', (e) => {
-    const message = e.data as { type?: string; seq?: number; event?: unknown };
-    if (message?.type === 'ack') {
-      inFlight = Math.max(0, inFlight - 1);
-      if (pending) {
-        const next = pending;
-        pending = null;
-        sendFrame(next);
+    const message = e.data as ScreenPortCommand;
+    switch (message?.type) {
+      case 'ack':
+        if (stream.currentCodec === 'h264') {
+          videoInFlight = Math.max(0, videoInFlight - 1);
+          // Caught up after dropping: a fresh keyframe resumes the picture.
+          if (videoDropping && videoInFlight <= 4) stream.requestKeyframe();
+        } else {
+          jpegInFlight = Math.max(0, jpegInFlight - 1);
+          if (jpegPending) {
+            const next = jpegPending;
+            jpegPending = null;
+            sendJpeg(next);
+          }
+        }
+        break;
+      case 'input': {
+        const parsed = inputEventSchema.safeParse(message.event);
+        if (parsed.success) stream.input(parsed.data);
+        break;
       }
-    } else if (message?.type === 'input') {
-      const parsed = inputEventSchema.safeParse(message.event);
-      if (parsed.success) stream.input(parsed.data);
-    } else if (message?.type === 'restart') {
-      inFlight = 0;
-      void stream.start().catch((err) => post({ type: 'state', state: 'ended', error: toErrorInfo(err) }));
+      case 'keyframe':
+        stream.requestKeyframe();
+        break;
+      case 'size':
+        if (typeof message.maxSize === 'number' && Number.isFinite(message.maxSize)) stream.setVideoSize(message.maxSize);
+        break;
+      case 'retry-smooth':
+        resetFlow();
+        stream.retrySmooth();
+        break;
+      case 'restart':
+        resetFlow();
+        void stream.start().catch((err) => post({ type: 'state', state: 'ended', error: toErrorInfo(err) }));
+        break;
     }
   });
   port.on('close', () => closeScreen(streamId));
@@ -435,8 +498,6 @@ async function createSample(): Promise<{ path: string }> {
 }
 
 // ─── Calls ─────────────────────────────────────────────────────────────────
-
-const toArrayBuffer = (buffer: Buffer) => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
 
 type Handlers = { [M in EngineMethod]: (params: MethodParams<M>) => Promise<MethodResults[M]> };
 
@@ -582,7 +643,7 @@ parent.on('message', (e) => {
     }
     case 'screen-open': {
       const port = e.ports[0];
-      if (port) openScreen(message.streamId, message.mac, message.udid, port);
+      if (port) openScreen(message.streamId, message.mac, message.udid, port, message.prefer, message.maxSize);
       break;
     }
     case 'settings':

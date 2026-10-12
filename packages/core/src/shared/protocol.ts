@@ -63,6 +63,8 @@ export interface ProbeResult {
   signingIdentities: string[];
   /** Who is logged in at the Mac's screen ("root" = nobody); simulators need a desktop session. */
   consoleUser: string | null;
+  /** The smooth (H.264) simulator stream's helper; missing from older agents. */
+  streamHelper?: StreamHelperState;
 }
 
 export interface ManifestEntry {
@@ -167,22 +169,64 @@ export interface ScreenParams {
   quality: number;
   /** Longest side of streamed frames in pixels (frames are downscaled on the Mac). */
   maxSize?: number;
+  /** Take input through capmac's helper when it works (else AXe, when installed). */
+  helperInput?: boolean;
+}
+
+/** The H.264 stream (agent op `stream`): capmac's helper on the Mac, frames relayed as they are. */
+export interface StreamParams {
+  udid: string;
+  /** Longest side of the video in pixels. */
+  maxSize?: number;
+  fps?: number;
+  bitrate?: number;
 }
 
 export interface ScreenInfo {
   t: 'screen';
-  source: 'axe' | 'simctl';
+  source: 'axe' | 'simctl' | 'helper';
   /** Screen size in points (null until known). */
   points: { width: number; height: number } | null;
+  /** Whether the screen takes input at all. */
   input: boolean;
+  /**
+   * How input works: 'touch' streams fingers down, move and up as they happen
+   * (capmac's helper); 'gestures' sends whole taps and swipes (AXe).
+   */
+  inputMode?: 'touch' | 'gestures';
+  /** Why input is not available (or limited to gestures). */
+  inputReason?: string;
+  /** Points to pixels. */
+  scale?: number;
+  codec?: 'h264' | 'jpeg';
 }
 
+/** Why the compatible stream is showing although the smooth one was wanted. */
+export interface StreamFallback {
+  code: 'helper-build' | 'helper-start' | 'helper-exit' | 'no-picture' | 'stalled' | 'unsupported' | 'error';
+  message: string;
+  hint?: string;
+  details?: string[];
+  /** Restarting the simulator usually brings the smooth stream back. */
+  restartSimulator?: boolean;
+}
+
+/** Normalized screen coordinates: 0 to 1 from the top left corner. */
 export type InputEvent =
   | { kind: 'tap'; x: number; y: number }
   | { kind: 'swipe'; x1: number; y1: number; x2: number; y2: number; durationMs: number }
-  | { kind: 'text'; text: string }
+  /** `via: 'paste'` puts the text on the simulator's pasteboard and pastes it; 'type' (the default) types it. */
+  | { kind: 'text'; text: string; via?: 'type' | 'paste' }
   | { kind: 'key'; key: string }
-  | { kind: 'button'; button: 'home' | 'lock' | 'siri' | 'side' | 'apple-pay' };
+  /** No phase: press and release. */
+  | { kind: 'button'; button: 'home' | 'lock' | 'siri' | 'side' | 'apple-pay'; phase?: 'down' | 'up' }
+  // Streaming input ('touch' mode): as it happens, so drags and scrolling feel natural.
+  | { kind: 'touch'; phase: 'down' | 'move' | 'up' | 'cancel'; x: number; y: number }
+  | { kind: 'touch2'; phase: 'down' | 'move' | 'up'; x1: number; y1: number; x2: number; y2: number }
+  /** Scroll by (dx, dy) points at (x, y). */
+  | { kind: 'scroll'; x: number; y: number; dx: number; dy: number }
+  /** A key press: a USB HID keyboard usage plus modifier bits (see shared/hid.ts). */
+  | { kind: 'keypress'; usage: number; modifiers?: number };
 
 export interface ExecParams extends ProjectRef {
   command: string;
@@ -240,6 +284,12 @@ export type AgentEvent =
   | { t: 'archive-end' }
   /** A long-running operation (relay, screen, deploy) is up and running. */
   | { t: 'ready'; data: unknown }
+  /** `stream`: preparing the helper (compiling it on first use, then starting it). */
+  | { t: 'stream-prepare'; stage: 'building' | 'starting'; xcode?: string }
+  /** `stream`: a clock ping answered (Unix epoch µs; `pc` is echoed). */
+  | { t: 'pong'; id: number; pc: number; mac: number }
+  /** `stream`: the helper's memory and traffic, every few seconds. */
+  | { t: 'stream-status'; footprint: number; fps: number; dropped: number }
   | { t: 'result'; ok: true; data: unknown }
   | { t: 'result'; ok: false; error: AgentErrorInfo };
 
@@ -258,4 +308,25 @@ export const ERROR_CODES = {
   toolMissing: 'TOOL_MISSING',
   deployFailed: 'DEPLOY_FAILED',
   badRequest: 'BAD_REQUEST',
+  /** The H.264 helper did not compile on this Mac (details in the tail). */
+  helperBuild: 'HELPER_BUILD_FAILED',
+  /** The helper started but could not stream (no screen, CoreSimulator changed, …). */
+  helperStart: 'HELPER_START_FAILED',
+  /** The helper stopped unexpectedly. */
+  helperExit: 'HELPER_EXITED',
+  /** The screen kept changing while the helper saw nothing. */
+  streamStalled: 'STREAM_STALLED',
+  /** Nothing to build the helper with (no Xcode selected). */
+  streamUnsupported: 'STREAM_UNSUPPORTED',
 } as const;
+
+/** The H.264 helper on a Mac, as the health check reports it. */
+export interface StreamHelperState {
+  state: 'ready' | 'not-built' | 'failed' | 'unsupported';
+  /** "26.6" */
+  xcode?: string;
+  /** The simulators take touch and keys from the helper (CoreSimulator before Xcode 27). */
+  input?: boolean;
+  /** Why it failed or is unsupported (the compiler's last lines). */
+  detail?: string;
+}

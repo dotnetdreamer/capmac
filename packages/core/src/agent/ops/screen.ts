@@ -4,8 +4,18 @@ import os from 'node:os';
 import path from 'node:path';
 import type { InputEvent, ScreenInfo, ScreenParams } from '../../shared/protocol.js';
 import { toolEnv } from '../env.js';
+import { ensureHelper } from '../helper/build.js';
+import { HelperInput } from '../helper/input.js';
+import { HelperProcess } from '../helper/process.js';
+import { HELPER_SOURCE } from '../helper/source.js';
 import type { AgentIO } from '../io.js';
 import { AgentError, run, sleep, which } from '../proc.js';
+
+/** Puts text on the simulator's pasteboard. */
+export async function setSimulatorPasteboard(udid: string, text: string, env: NodeJS.ProcessEnv): Promise<void> {
+  const r = await run('xcrun', ['simctl', 'pbcopy', udid], { env, input: text, timeoutMs: 15_000 });
+  if (r.code !== 0) throw new Error(`simctl pbcopy failed: ${r.stderr.trim().split('\n').pop() ?? r.code}`);
+}
 
 export interface PointSize {
   width: number;
@@ -64,7 +74,8 @@ const KEYCODES: Record<string, number> = {
   space: 44,
 };
 
-function inputArgs(event: InputEvent, points: PointSize, udid: string): string[][] {
+/** AXe command lines for an input event (AXe takes whole gestures; streaming events have no equivalent). */
+export function inputArgs(event: InputEvent, points: PointSize, udid: string): string[][] {
   const px = (v: number) => String(Math.round(Math.min(1, Math.max(0, v)) * points.width));
   const py = (v: number) => String(Math.round(Math.min(1, Math.max(0, v)) * points.height));
   switch (event.kind) {
@@ -84,10 +95,49 @@ function inputArgs(event: InputEvent, points: PointSize, udid: string): string[]
       const code = KEYCODES[event.key];
       return code ? [['key', String(code), '--udid', udid]] : [];
     }
+    case 'keypress':
+      return event.modifiers ? [] : [['key', String(event.usage), '--udid', udid]];
     case 'button': {
+      if (event.phase === 'up') return [];
       const map: Record<string, string> = { home: 'home', lock: 'lock', side: 'side-button', siri: 'siri', 'apple-pay': 'apple-pay' };
       return [['button', map[event.button] ?? 'home', '--udid', udid]];
     }
+    default:
+      return [];
+  }
+}
+
+/** Runs input events through AXe, one at a time, in order. */
+export function createAxeInput(axe: string, points: PointSize, udid: string, env: NodeJS.ProcessEnv, io: AgentIO): (event: InputEvent) => void {
+  let chain = Promise.resolve();
+  return (event) => {
+    chain = chain.then(async () => {
+      for (const args of inputArgs(event, points, udid)) {
+        const r = await run(axe, args, { env, timeoutMs: 20_000 }).catch((err) => ({ code: 1, stderr: String(err), tail: [] as string[] }));
+        if (r.code !== 0) io.log('warn', `Input failed: ${('stderr' in r ? r.stderr : '').trim().split('\n').pop() ?? 'unknown error'}`);
+      }
+    });
+  };
+}
+
+/** Input through capmac's helper, without video (for the compatible stream). Null when it is not available. */
+async function startHelperInput(udid: string, env: NodeJS.ProcessEnv, io: AgentIO): Promise<{ helper: HelperProcess; input: HelperInput; points: PointSize | null } | { reason: string }> {
+  try {
+    const binary = await ensureHelper(HELPER_SOURCE, env, { signal: io.signal });
+    const helper = new HelperProcess(binary.path, [udid, '--developer-dir', binary.xcode.developerDir, '--video', '0'], { onInputError: (m) => io.log('warn', `Input: ${m}`) }, env);
+    const hello = await helper.hello;
+    if (!hello?.input) {
+      await helper.stop();
+      return { reason: hello?.inputReason ?? "capmac's helper takes no input on this Mac." };
+    }
+    const input = new HelperInput({
+      send: (line) => helper.send(line),
+      sleep: (ms) => sleep(ms, io.signal),
+      setPasteboard: (text) => setSimulatorPasteboard(udid, text, env),
+    }, (m) => io.log('warn', `Input failed: ${m}`));
+    return { helper, input, points: hello.points ?? null };
+  } catch (err) {
+    return { reason: (err as Error)?.message ?? String(err) };
   }
 }
 
@@ -118,29 +168,47 @@ export async function opScreenshot(params: { udid: string }, io: AgentIO): Promi
  */
 export async function opScreen(params: ScreenParams, io: AgentIO): Promise<{ frames: number }> {
   const env = await toolEnv();
-  const axe = await which('axe', env);
   const fps = Math.min(30, Math.max(1, params.fps || 10));
   const shotFile = path.join(os.tmpdir(), `capmac-screen-${params.udid}-${process.pid}.jpg`);
-  let points: PointSize | null = axe ? await pointsFromAxe(axe, params.udid, env) : null;
+  // Input: capmac's helper when asked and it works, else AXe when installed, else view only.
+  const viaHelper = params.helperInput ? await startHelperInput(params.udid, env, io) : null;
+  const helper = viaHelper && 'helper' in viaHelper ? viaHelper : null;
+  const axe = helper ? null : await which('axe', env);
+  let points: PointSize | null = helper?.points ?? (axe ? await pointsFromAxe(axe, params.udid, env) : null);
   let announced = false;
   const announce = () => {
-    const info: ScreenInfo = { t: 'screen', source: 'simctl', points, input: Boolean(axe) };
+    const input = Boolean(helper || axe);
+    const info: ScreenInfo = {
+      t: 'screen',
+      source: 'simctl',
+      codec: 'jpeg',
+      points,
+      input,
+      inputMode: helper ? 'touch' : axe ? 'gestures' : undefined,
+      inputReason: helper ? undefined : viaHelper && 'reason' in viaHelper ? viaHelper.reason : axe ? undefined : "Touch and typing need capmac's helper or AXe on the Mac.",
+    };
     io.send(info);
     announced = true;
   };
 
   // Input events are executed one at a time, in order.
-  let inputChain = Promise.resolve();
+  let axeInput: ((event: InputEvent) => void) | null = null;
+  let lastHeard = 0;
   io.onMessage((message) => {
-    if (message?.t !== 'input' || !axe) return;
+    if (message?.t === 'ping') {
+      lastHeard = Date.now();
+      io.send({ t: 'pong', id: Number(message.id) || 0, pc: Number(message.pc) || 0, mac: Math.round((performance.timeOrigin + performance.now()) * 1000) });
+      return;
+    }
+    if (message?.t !== 'input') return;
     const event = message.event as InputEvent;
-    inputChain = inputChain.then(async () => {
-      if (!points) return;
-      for (const args of inputArgs(event, points, params.udid)) {
-        const r = await run(axe, args, { env, timeoutMs: 20_000 }).catch((err) => ({ code: 1, stderr: String(err), tail: [] as string[] }));
-        if (r.code !== 0) io.log('warn', `Input failed: ${('stderr' in r ? r.stderr : '').trim().split('\n').pop() ?? 'unknown error'}`);
-      }
-    });
+    if (helper) {
+      void helper.input.push(event);
+      return;
+    }
+    if (!axe || !points) return;
+    axeInput ??= createAxeInput(axe, points, params.udid, env, io);
+    axeInput(event);
   });
 
   // Full-resolution simulator JPEGs are ~450 KB; sips (built into macOS)
@@ -156,6 +224,8 @@ export async function opScreen(params: ScreenParams, io: AgentIO): Promise<{ fra
   const interval = 1000 / fps;
   try {
     while (!io.signal.aborted) {
+      // A client that pings and then goes quiet is gone (a dropped network leaves the SSH channel open).
+      if (lastHeard && Date.now() - lastHeard > 15_000) break;
       const started = Date.now();
       const r = await run('xcrun', ['simctl', 'io', params.udid, 'screenshot', '--type=jpeg', shotFile], { env, signal: io.signal, timeoutMs: 20_000 });
       if (io.signal.aborted) break;
@@ -191,7 +261,7 @@ export async function opScreen(params: ScreenParams, io: AgentIO): Promise<{ fra
   } finally {
     await fs.rm(shotFile, { force: true }).catch(() => undefined);
     await fs.rm(smallFile, { force: true }).catch(() => undefined);
+    await helper?.helper.stop();
   }
-  await inputChain;
   return { frames };
 }

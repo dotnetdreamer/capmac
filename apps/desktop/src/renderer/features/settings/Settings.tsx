@@ -64,6 +64,21 @@ export function Settings() {
         <Row icon="phone" title="Device frame" description="Draw a phone bezel around the simulator screen.">
           <Toggle label="Device frame" checked={settings.deviceFrame} onChange={set('deviceFrame')} />
         </Row>
+        <Row
+          icon="flash"
+          title="Simulator stream"
+          description="Smooth streams the screen as video, up to 60 frames a second. Compatible sends a few screenshots a second; capmac switches to it by itself when the smooth stream can’t run."
+        >
+          <Segmented
+            label="Simulator stream"
+            value={settings.simulatorStream}
+            onChange={set('simulatorStream')}
+            options={[
+              { value: 'smooth', label: 'Smooth' },
+              { value: 'compatible', label: 'Compatible' },
+            ]}
+          />
+        </Row>
 
         <h2 className="section-title">Editor</h2>
         <Row icon="code" title="Open problems in" description="Clicking a build error opens the file at the right line.">

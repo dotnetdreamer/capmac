@@ -1170,6 +1170,8 @@
   touch-action: none;
   outline: none;
   box-shadow: none;
+  /* The focus ring follows the screen's rounded corners. */
+  border-radius: inherit;
   &.can-input {
     cursor: pointer;
   }
@@ -1177,6 +1179,7 @@
     content: "";
     position: absolute;
     inset: 0;
+    border-radius: inherit;
     box-shadow: inset 0 0 0 2px var(--accent);
     pointer-events: none;
   }
@@ -1258,7 +1261,9 @@
 .sim__stats {
   display: inline-flex;
   align-items: center;
+  flex: none;
   gap: 5px;
+  white-space: nowrap;
   color: var(--text-3);
   font: var(--type-caption);
   padding-right: var(--s-2);
@@ -1266,6 +1271,60 @@
     width: 6px;
     height: 6px;
   }
+}
+.sim__compat {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 5px;
+  white-space: nowrap;
+  height: 24px;
+  padding: 0 var(--s-1_5);
+  margin-right: var(--s-1);
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--text-2);
+  font: var(--type-caption);
+  cursor: pointer;
+  &:hover {
+    background: var(--fill-subtle-hover);
+  }
+}
+.sim__compat-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1_5);
+  width: 320px;
+  padding: var(--s-3);
+  font: var(--type-small);
+  p {
+    margin: 0;
+    color: var(--text-1);
+  }
+  .faint {
+    color: var(--text-2);
+  }
+  details {
+    color: var(--text-2);
+  }
+  pre {
+    max-height: 160px;
+    overflow: auto;
+    margin: var(--s-1) 0 0;
+    padding: var(--s-1_5);
+    font: var(--type-mono);
+    font-size: 11px;
+    white-space: pre-wrap;
+    background: var(--code-bg);
+    border-radius: var(--r-control);
+  }
+}
+.sim__compat-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-2);
+  margin-top: var(--s-1);
 }
 .sim__type {
   display: flex;

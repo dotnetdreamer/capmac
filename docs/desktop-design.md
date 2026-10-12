@@ -201,26 +201,30 @@ Projects                                                    [▸ Add project  Ct
   - Copy (selection or all visible lines) and Export (.log).
   - Multi-line console messages are grouped into one row.
 
-#### Simulator pane (v1)
+#### Simulator pane
 
-- Frames from the agent's `screen` op go straight to a Web Worker over a transferable MessagePort. The worker decodes the JPEG with `createImageBitmap` and draws on an OffscreenCanvas. The main thread never touches pixels.
+- Frames come straight from the engine to a Web Worker over a transferable MessagePort, and the worker draws them on an OffscreenCanvas; the main thread never touches pixels.
+  - **The smooth stream** (default): H.264 from capmac's helper on the Mac, decoded with WebCodecs. See §5.
+  - **The compatible stream**: JPEG screenshots, decoded with `createImageBitmap`. Chosen in Settings, or by capmac itself when the smooth stream cannot run.
 - The device frame is drawn in CSS, as a neutral rounded bezel, and can be turned off.
-- **Input, when AXe is installed on the Mac:**
-  - click = tap (with a ripple);
-  - drag = swipe;
-  - a long press is held;
-  - the wheel scrolls;
-  - typing goes to the simulator while the screen has focus;
-  - Home and Lock buttons.
-- **Without AXe**, an InfoBar: "View only. Install AXe on the Mac for touch and typing". Its "Install…" button asks for confirmation and then runs `brew install`.
+- **Input through capmac's helper** (*touch* mode):
+  - the pointer is a finger: down, move and up go to the simulator as they happen, so drags, scrolling and long presses behave as on the device; a ripple marks each touch;
+  - Alt+drag is two fingers, mirrored around the centre, to pinch and rotate (Simulator's Option-drag);
+  - the wheel and the touchpad scroll, as a finger drag that follows them;
+  - typing goes to the simulator while the screen has focus, as a hardware keyboard: characters follow the PC's layout, Windows shortcuts become their iOS ones (Ctrl+C → ⌘C), and characters a US keyboard has no key for go through the simulator's pasteboard;
+  - Ctrl+V pastes the PC's clipboard; Ctrl+Shift+H and Ctrl+Shift+L press Home and Lock;
+  - a finger still down is lifted when the window loses focus or the stream stops.
+- **Input through AXe** (*gestures* mode), when the helper's input does not work (Xcode 27) and AXe is installed: click = tap, drag = swipe, typing in bursts.
+- **View only** as the last resort, with the reason in a tooltip and "Install AXe…".
 - Footer:
   - Home, Lock, Type text, Screenshot (full resolution from `simctl io screenshot`; Save… / Copy);
-  - live fps;
-  - the stream source.
+  - frames a second and bitrate; the tooltip adds the stream, its latency, decode time and touch-to-picture time;
+  - after a fallback, a quiet "Compatible stream" note: why, and *Try the smooth stream* / *Restart simulator*.
 - **States**:
   - **No simulator selected:** "Pick a simulator".
   - **Shut down:** "Boot iPhone 17".
   - **Booting:** a spinner with the boot progress.
+  - **First smooth stream on a Mac:** "Setting up the smooth stream for Xcode 26.6…" while capmac compiles its helper (about two seconds).
   - **Stream lost:** retrying.
   - **Device target:** "The screen is only available for simulators".
 
@@ -538,8 +542,8 @@ spikes/streaming-v2/  the H.264 simulator stream spike (helper, bench, decode te
 ┌─────┴───────────────────────────┴──────────┐                 │ transferables)
 │ renderer (sandboxed, contextIsolation)     │                 │
 │ React UI ── window.capmac (contextBridge)  │                 │
-│ screen worker: port ─► createImageBitmap ─►│◄────────────────┘
-│ OffscreenCanvas (v2: WebCodecs)            │
+│ screen worker: port ─► VideoDecoder (H.264)│◄────────────────┘
+│ or createImageBitmap (JPEG) ─► Offscreen   │
 └────────────────────────────────────────────┘
 ```
 
@@ -551,7 +555,11 @@ spikes/streaming-v2/  the H.264 simulator stream spike (helper, bench, decode te
   - Validates every renderer request with zod: a method allow-list plus a params schema.
   - Owns the OS integrations: folder picker, `code -g`, `shell.openPath`, notifications, tray, the theme, the accent colour.
   - Relays engine events to the renderer in batches: one message per animation frame at most.
-- **Screen frames** use a `MessageChannelMain` per stream. One port goes to the engine and the other to the renderer: preload → `window.postMessage` → the screen Worker. Frames are binary `ArrayBuffer`s, never JSON: the engine copies each frame once into its port (Electron's `MessagePortMain` cannot transfer buffers), the renderer side moves them on to the worker without copying. At most two frames are in flight; the worker acks each one, and under backpressure only the newest waiting frame is kept. Input events travel back on the same port, and the engine validates them before forwarding them to the agent. When the Mac connection drops, the stream reports `reconnecting` (the last frame stays, dimmed) and resumes by itself.
+- **Screen frames** use a `MessageChannelMain` per stream. One port goes to the engine and the other to the renderer: preload → `window.postMessage` → the screen Worker. Frames are binary `ArrayBuffer`s, never JSON: the engine copies each frame once into its port (Electron's `MessagePortMain` cannot transfer buffers), the renderer side moves them on to the worker without copying. The worker acks each frame.
+  - JPEG: at most two frames in flight; under backpressure only the newest waiting frame is kept.
+  - H.264: every frame goes on in order, since a delta frame is useless without the ones before it. When 30 frames wait unacknowledged, the engine drops up to the next keyframe and asks for one.
+  - Input events travel back on the same port, and the engine validates them before forwarding them to the agent.
+  - When the Mac connection drops, the stream reports `reconnecting` (the last frame stays, dimmed) and resumes by itself, from a keyframe.
 - **Security**
   - `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, `webSecurity: true`.
   - The renderer is served from a privileged `app://` scheme via `protocol.handle`, never `file://`. Strict CSP:
@@ -659,7 +667,10 @@ class Pipeline {                                         // the shared steps beh
 
 class RunSession  { start(): Promise<void>; stop(): Promise<void>; }      // web build → … → launch, attach logs
 class LiveSession { start(); rebuild({ clean? }); relaunch(); stop(); }   // dev server, tunnel, watcher, reconnect
-class ScreenStream { start(); input(e: InputEvent); screenshot(): Promise<Buffer>; stop(); }  // frames via callback
+class ScreenStream {                                     // smooth (H.264) with the compatible stream (JPEG) as fallback
+  constructor(link, udid, { prefer: 'smooth' | 'compatible', fps?, quality?, maxSize? }, handlers);
+  start(); input(e: InputEvent); requestKeyframe(); setVideoSize(px); retrySmooth(); stop();
+}  // handlers: onVideo / onFrame, onCodec(codec, fallback), onPreparing, onClock, onInfo, onState, onEnd
 function pairMac(dest, ctx, opts): Promise<HostConfig>;
 function runDoctor(link, project, ctx): Promise<Check[]>;   // emits 'check' events
 function applyFix(link, fixId, ctx): Promise<void>;
@@ -695,121 +706,120 @@ Events reach the renderer as `{ scope: { sessionId?, mac?, watchId? }, event }` 
 
 **Goal:** 30–60 fps and under 100 ms latency over Wi-Fi, carried by the existing SSH connection. No new ports.
 
-### Today (v1)
+**Status:** shipped in capmac Studio as *the smooth stream*, with the JPEG stream (v1, *the compatible stream*) as its automatic fallback. On the LAN: 55–61 fps, 7–16 ms (p50) from the Mac's screen to the PC's, and a median of 54 ms from a click to the app's answer on screen.
 
-The agent polls `simctl io screenshot --type=jpeg` (160–205 ms per shot, measured on an M1 with Xcode 26.6) and downscales with `sips` (80–93 ms). That gives about 4 fps, 80–115 KB a frame, 2.5–3.6 Mbps while the screen changes, and frames that are already ~250–300 ms old when they leave the Mac. Unchanged frames are skipped. The ceiling is the screenshot round trip, not the network.
+### The compatible stream (v1)
 
-### Design
+The agent polls `simctl io screenshot --type=jpeg` (160–205 ms per shot, measured on an M1 with Xcode 26.6) and downscales with `sips` (80–93 ms). That gives about 4 fps, 80–115 KB a frame, 2.5–3.6 Mbps while the screen changes, and frames that are already ~250–300 ms old when they leave the Mac. Unchanged frames are skipped. The ceiling is the screenshot round trip, not the network. It now takes input through capmac's helper too (an input-only helper, `--video 0`), so a fallback keeps touch and typing.
+
+### How it works
 
 ```
-Mac                                                        Windows
-┌────────────────────────── agent op `stream` ──────────┐  ┌───────── engine ─────────┐  ┌──── renderer worker ─────┐
-│ capmac-simstream (Swift, compiled on first use with   │  │ relays binary frames to  │  │ VideoDecoder (WebCodecs, │
-│ the Xcode toolchain into ~/.capmac/bin/<hash>/)       │  │ the screen MessagePort;  │  │ prefer-hardware,         │
-│  • CoreSimulator: SimDevice → framebuffer IOSurface   │──┤ drops to the next IDR    ├──┤ optimizeForLatency)      │
-│    (damage callbacks: 0 fps when the screen is idle)  │  │ under backpressure and   │  │ → VideoFrame → Offscreen │
-│  • VideoToolbox H.264 (HEVC optional), real-time,     │  │ asks for a keyframe      │  │   Canvas, frame.close()  │
-│    no B-frames, keyframes on demand, CBR-ish 2–6 Mbps │  └──────────────────────────┘  └──────────────────────────┘
-│  • stdin: input (Indigo HID / DTUHID), keyframe req   │
-└───────────────────────────────────────────────────────┘
+Mac                                                         Windows
+┌─ agent op `stream` ─────────────────────────────────┐    ┌─ engine (utility process) ─────┐    ┌─ screen worker ───────────────┐
+│ ensures ~/.capmac/bin/<hash>/simstream (compiled    │    │ ScreenStream: H.264 first,     │    │ VideoDecoder (WebCodecs,      │
+│ with the Mac's Xcode on first use), runs it, relays │───►│ JPEG fallback with a reason;   │───►│ prefer-hardware, optimize-    │
+│ its messages as binary frames, unchanged; input to  │    │ acks frames, pings for the     │    │ ForLatency) → OffscreenCanvas │
+│ the helper; stall check; latency cap               │◄───│ clock; drops to the next key-  │◄───│ skips deltas when behind;     │
+│                                                     │    │ frame when the renderer lags   │    │ input from the pane           │
+│ simstream: SimScreen frame callbacks → framebuffer  │    └────────────────────────────────┘    └───────────────────────────────┘
+│ IOSurface → VTPixelTransfer (NV12, scaled) →        │
+│ VideoToolbox H.264 → stdout                         │
+│ stdin: k s p q · t T c w b K → Indigo HID           │
+│ (SimulatorKit SimDeviceLegacyHIDClient)             │
+└─────────────────────────────────────────────────────┘
 ```
 
-- **Capture.**
-  - Use the simulator's framebuffer `IOSurface` through CoreSimulator, as idb (`FBSimulatorVideoStream`) and serve-sim do.
-  - Xcode 26 reworked the display API: each display port is a `SimScreen` (a ROCKit proxy to the simulator's IO server) with `registerScreenCallbacksWithUUID:callbackQueue:frameCallback:surfacesChangedCallback:propertiesChangedCallback:`. The older `SimDisplayRenderable` damage callbacks still exist but no longer fire. Several screens exist (the device's LCD is `screenType` 0; TV out and CarPlay are others).
-  - No screen-recording permission and no Simulator.app are needed: capture works with the simulator booted headless, the way capmac boots it.
-  - Frames are produced only when the screen changes, so an idle simulator costs nothing.
-- **Encode.**
-  - `VTCompressionSession` (hardware), H.264 High@4.1, with `RealTime`, `AllowFrameReordering = false` and `MaxKeyFrameInterval = ∞`.
-  - The keyframe is forced on request (stream start, decoder error, drop recovery).
-  - The bitrate is adaptive. Resolution defaults to the device's point size × 2, which keeps text crisp at 100–200 % scaling.
-- **Transport.**
-  - Length-prefixed frames carry a header: keyframe flag, capture timestamp (mach → µs) and sequence number.
-  - The agent relays them as `encodeBinary` frames over the same SSH channel, with no transcoding.
-  - Backpressure: when the channel write buffer is full, the agent drops frames until the next keyframe and asks for one.
-- **Decode.** WebCodecs `VideoDecoder` in the screen worker. On error, reset and request a keyframe. MJPEG (v1) stays as the fallback when the helper can't build or the OS is unsupported.
-- **Input.**
-  - Touch (one and two fingers: pinch and rotate as with Simulator's Option-drag) and hardware buttons go through the same helper.
-  - iOS 26 uses Indigo HID messages: the 9-argument mouse event, per baguette's notes. Xcode 27 removed Indigo, so its path is DTUHID, the path idb moved to.
-  - Coordinates are normalised to [0, 1] and mapped to points in the helper.
-  - Hardware keyboard: HID usages with modifiers.
-  - Rotation via `SimDevice` orientation.
-- **Extras via `simctl`** (no helper needed):
+- **The helper** (`packages/core/src/agent/helper/simstream.m`, Objective-C).
+  - It ships inside the agent bundle as text and is compiled on first use with `xcrun clang` into `~/.capmac/bin/<hash>/`; the hash covers the source, the Xcode developer directory and build, and the architecture. Compiling takes about 1.2 s.
+  - A compile error is cached as `error.log`, so the next stream falls back at once instead of compiling again. The Macs health check shows it, with *Try again*. Builds unused for 14 days are removed.
+  - Capture: the device's own screen (`screenType` 0). A frame is encoded as soon as a frame callback arrives, at most 60 a second, and nothing is encoded while the screen is idle. After two quiet seconds the helper checks whether CoreSimulator swapped the framebuffer without saying so, and follows it.
+  - Encode: VideoToolbox H.264 High, real time, no frame reordering, 6 Mbps average, keyframes only on request. The longest side follows the pane's canvas (640–2400 px; the `s` command re-creates the encoder).
+  - **A byte budget.** On incompressible content (noise, video) the hardware encoder overshoots its average several times over (38 Mbps for full-screen noise at 1400 px) and ignores `DataRateLimits` and the frame-QP limits in real-time mode. The helper keeps its own budget, 125% of the bitrate as a token bucket with half a second of burst, and encodes fewer frames when it runs out: full-screen noise streams at 12 fps and 7.5 Mbps.
+  - Out: config, frame and pong messages, and JSON events (hello with the screen size and input support; status every second with the memory footprint; input errors; fatal errors with a code). In: one command per line.
+  - It exits when stdin closes (the agent went away) or on SIGTERM, lifting any finger still down first.
+- **The agent op `stream`** (`ops/stream.ts`) ensures the helper, starts it, relays its config and frame messages as binary frames, answers clock pings, forwards keyframe and size requests and input, and reports the screen (points, scale, input mode).
+  - **Latency cap** (`VideoWindow`): the engine acknowledges frames as they arrive. When the oldest unacknowledged frame is more than 350 ms old, the agent stops sending deltas, and resumes from a fresh keyframe once the backlog has cleared.
+  - **Stall check** (`StallWatch`): only while the stream is quiet, the agent compares two screenshot hashes taken a few seconds apart, backing off to 20 s. A change the helper did not see ends the op with `STREAM_STALLED`.
+  - **No orphans:** the client pings every 2 s. Fifteen seconds of silence means it is gone (a dropped Wi-Fi leaves the SSH channel open on the Mac for minutes), so the op ends and the helper with it. The `screen` op does the same once its client pings.
+- **The engine** (`ScreenStream`) prefers H.264 and falls back to JPEG, with a reason, when:
+  - the helper cannot build or start;
+  - it exits;
+  - no keyframe arrives within 1.5 s of one being asked for (at start, after a reconnect, after a decoder reset);
+  - or the stall check fires.
 
-  | Feature | How |
-  |---|---|
-  | Clipboard sync | `pbcopy` / `pbpaste`, both ways on focus change |
-  | Drag and drop media | `addmedia` (upload, then add) |
-  | Deep links | `openurl` |
-  | Push notifications | `push` (APNs JSON editor) |
-  | Location | `location set` / `location run` |
-  | Appearance | `ui appearance` |
-  | Clean status bar | `status_bar override` (9:41, full battery) |
-  | Privacy permissions | `privacy grant` / `revoke` / `reset` |
-  | Screen recording | `io recordVideo`, downloaded as `.mp4` |
+  A fallback lasts for the stream; *Try the smooth stream* clears it. Pings every 2 s also keep an NTP-style clock offset (the shortest round trip wins) for the latency readout.
+- **The screen worker** configures WebCodecs' `VideoDecoder` from the config message (the codec string and `description` come from the avcC record) with `prefer-hardware` and `optimizeForLatency`. Each `VideoFrame` is drawn as soon as it is decoded and closed when the next one arrives; the newest is kept for redraws on resize. When more than three frames wait in the decoder, it skips deltas up to the next keyframe and asks for one; a decoder error resets it the same way.
+- **The SPS says frames come in order.** VideoToolbox writes no VUI bitstream restriction, so a decoder has to assume frames may be reordered and holds up to a DPB's worth of them: on this PC, about 16 frames, or 270 ms at 60 fps. capmac rewrites the SPS in the avcC record to declare `max_num_reorder_frames = 0` (`shared/h264.ts`, applied when the worker reads the config). Decoding went from about 270 ms to 0.5 ms a frame.
+- **The picture's edges.** The encoder pads 642×1398 to 656×1408. Scaling down with high-quality smoothing samples past the visible edge into that green padding, so the worker draws from a source rectangle one pixel smaller.
+
+### Input
+
+- capmac's helper sends Indigo HID messages through `SimulatorKit.SimDeviceLegacyHIDClient`, built the way idb (FBSimulatorControl, MIT) builds them for Xcode 26:
+  - **One finger.** SimulatorKit only builds multi-touch messages, with `IndigoHIDMessageForMouseNSEvent(p1, p2, target 0x32, type, size, edge)`. The helper takes their digitizer contact and wraps it as a single-touch message. A move is another touch-down at the new point.
+  - **Two fingers** use the builder's multi-touch message as it is.
+  - **Buttons:** `IndigoHIDMessageForButton(source, direction, 0x33)`; home 0, lock 1, side 0xbb8, Siri 0x400002, Apple Pay 0x1f4.
+  - **Keys:** `IndigoHIDMessageForKeyboardArbitrary(usage, direction)` with USB HID usages (page 7).
+  - **Edge gestures** need the edge flag on every contact: a touch that starts within 2% of the bottom edge is a swipe from the home indicator (Home, the app switcher), from the top it opens Notification Centre, from the left it goes back.
+- Two behaviours iOS needed help with:
+  - A lifted finger keeps the speed of its last movement, however long it held still. After a drag that stopped, the helper adds a few 0.4 pt moves before lifting, so the content stops where the pointer stopped. Taps lift at once: settling them as well delayed every click by 64 ms.
+  - One big move per wheel notch is mostly lost to the touch slop. A wheel scroll first moves 12 pt, then follows the wheel in steps of 24 pt, 4 ms apart, and lifts 120 ms after the last notch. 87% of the wheel distance reaches the content (with 2 ms steps, only two thirds).
+- **Text:** characters a US keyboard types become key presses, with Shift where needed. Other characters, text longer than 200 characters and pastes go through `simctl pbcopy` and ⌘V; iOS accepts that without a paste prompt.
+- **Xcode 27:** CoreSimulator 1155.4 and later ignore legacy Indigo input (idb moved to DTUHID). The helper and the health check detect it from CoreSimulator's version; the pane then uses AXe when it is installed, and is view only otherwise, with the reason.
+
+### Results
+
+Measured in the app (engine → port → worker), the Mac to this PC on the LAN, iPhone 17 simulator:
+
+| | Smooth stream | Compatible stream |
+|---|---|---|
+| Frame rate | 55–61 fps for animation and scrolling; 12 fps for full-screen noise at 1400 px, held by the budget | 2–4 fps |
+| Capture on the Mac → decoded on the PC | p50 7–16 ms, p95 14–44 ms (a banner animation); p50 13–18 ms, p95 23–42 ms (full-screen noise at 640 px) | ~300 ms |
+| Click → the app's answer on screen | median 54 ms, 37–69 ms over 12 clicks (iOS alone takes 57–98 ms from a tap to the new frame on the Mac) | |
+| Bandwidth | 0.15–0.3 Mbps scrolling, 0.24 Mbps full-screen gradient, 7.5 Mbps at most; nothing while the screen is idle | 2.5–3.6 Mbps |
+| Decoding on Windows | 0.4–0.8 ms a frame (hardware) | `createImageBitmap` |
+| The app with an idle screen | 1.6% of one PC core, all processes | screenshots keep coming |
+| The helper's memory | flat: 11.9 MB at start, then 13.5–13.8 MB for 30 minutes of full-screen noise | |
+
+Verified on the Mac:
+
+- killing the helper mid-stream switches to the compatible stream within about a second, and touch keeps working through an input-only helper; *Try the smooth stream* brings H.264 back;
+- dropping the SSH connection dims the last frame, then the stream resumes from a keyframe;
+- no `simstream` process remains after a stop, a reconnect, a fallback or a killed client;
+- tapping the sample's button logs `Counter: N`, typing logs `Note: …`, the wheel scrolls its list, Home and Lock work, and a swipe up from the bottom edge unlocks.
 
 ### Prior art
 
 | Project | What it offers | Use |
 |---|---|---|
 | serve-sim (EvanBacon, Apache-2.0) | IOSurface → H.264 over WebSocket, WebCodecs client | Closest match. Its capture and encode approach can be studied and adapted (licence permits). |
-| idb (Meta, MIT) | `idb video-stream --format h264`; DTUHID input on Xcode 27 | Proven private-API paths. A heavy install (Python client and companion), so not a runtime dependency. |
-| baguette (tddworks) | `baguette serve`: WebSocket with MJPEG/AVCC, gesture JSON | Notes on the iOS 26 Indigo 9-argument message and Xcode 27 Device Hub input shadowing. |
-| AXe | Input (tap, swipe, type, buttons) | Fine for v1 input. **Not** for streaming (`stream-video` leak, issue #72). |
+| idb (Meta, MIT) | `idb video-stream --format h264`; Indigo HID on Xcode 26, DTUHID on Xcode 27 | The source of capmac's Indigo message layout. A heavy install (Python client and companion), so not a runtime dependency. |
+| baguette (tddworks, Apache-2.0) | `baguette serve`: WebSocket with MJPEG/AVCC, gesture JSON | Its notes on the Xcode 26 mouse message: the real signature has the edge in the fifth integer argument. |
+| AXe | Input (tap, swipe, type, buttons) | Now the fallback for input. **Not** for streaming (`stream-video` leak, issue #72). |
 | Radon IDE simulator-server | — | Closed source; not used. |
 
-### Spike results
+### The spike
 
-The spike lives in `spikes/streaming-v2/`:
+The spike in `spikes/streaming-v2/` (`simstream.m`, `bench.ts`, `decode-test.mjs`, `tools/`) measured both pipelines at 642×1398 with the sample app running a 60 Hz animation:
 
-- `simstream.m`: the helper (Objective-C, about 350 lines), compiled on the Mac with `xcrun clang`.
-- `bench.ts`: builds the helper over capmac's SSH connection and measures both pipelines.
-- `decode-test.mjs`: decodes a recorded stream with WebCodecs inside the app.
-
-**Setup.**
-
-- Mac: MacBook Pro (M1), macOS 26.6.1, Xcode 26.6, iPhone 17 simulator (iOS 26.5, 1206×2622) booted headless.
-- PC: this Windows 11 machine, on the same LAN. SSH round trip: 7 ms at best, 15–20 ms typical.
-- Content: the sample app running a 60 Hz `requestAnimationFrame` animation; the app measured 60 frames per second itself.
-- Workloads: **A**, a banner over about 15 % of the screen that changes every frame; **B**, the whole screen changing every frame (the worst case).
-- Both pipelines encode at 642×1398 (longest side 1400, as v1 does).
-
-| | v1: JPEG screenshots (today) | v2: H.264 helper |
+| | v1: JPEG screenshots | v2: H.264 helper |
 |---|---|---|
-| Frame rate, A | 3.7 fps | **58.6 fps** |
-| Frame rate, B | 3.9 fps | **54.7 fps** |
-| Bandwidth, A | 2.5 Mbps | **0.29 Mbps** |
-| Bandwidth, B | 3.6 Mbps | 4.3 Mbps |
-| Frame size | 83–113 KB | 0.6 KB (A), 9.6 KB (B); keyframe 19–80 KB |
-| Latency, capture on the Mac → arrival on the PC | ~250–300 ms spent before a frame leaves the Mac (screenshot + `sips`), plus transfer; frames ~270 ms apart | **p50 17.5 ms, p95 30 ms (A); p50 19 ms, p95 41 ms (B)** |
-| Idle screen | screenshots keep being taken (unchanged ones are skipped) | no frames, no bytes |
-| Decoding on Windows | `createImageBitmap` (JPEG) | WebCodecs, hardware: p50 0.5 ms, p95 1.1 ms a frame (software: 2.8 ms) |
-| Work on the Mac | a `simctl` and a `sips` process per frame | 2–5 ms to scale and convert, 1–4 ms to submit to the hardware encoder |
+| Frame rate, a banner over 15% of the screen | 3.7 fps | 58.6 fps |
+| Frame rate, the whole screen changing | 3.9 fps | 54.7 fps |
+| Bandwidth | 2.5–3.6 Mbps | 0.29 Mbps (banner), 4.3 Mbps (whole screen) |
+| Capture on the Mac → arrival on the PC | ~250–300 ms | p50 17.5–19 ms, p95 30–41 ms |
 
-Latency is measured from the capture timestamp each frame carries, corrected by the clock offset from round-trip pings (the shortest round trip wins). Glass to glass, v2 is about one display frame plus 20–40 ms.
+What it found, and what the product changed:
 
-**What the spike found.**
+- **Rate control matters.** VideoToolbox's low-latency rate control dropped half the frames at 6 Mbps; standard rate control kept 55–60 fps. The product keeps standard rate control and adds its own byte budget for incompressible content.
+- **Pick the device's own screen** (`screenType` 0): after a reboot, "TVOut" came first in the list.
+- **One unexplained failure.** Once, before a simulator reboot, the main screen accepted the callbacks but its framebuffer never updated, while screenshots kept working. The product follows a swapped framebuffer, checks for stalls, and offers *Restart simulator*.
+- **Never set the screen's power state.** `SimScreen setPowerState:` with an unexpected value turned the device's display off until a reboot.
+- **The spike measured arrival, not display.** Its decode test fed a recorded stream back to back, which hid the decoder's 270 ms of buffering; the product found it, and fixed it in the SPS.
 
-- **Rate control matters.**
-  - With VideoToolbox's low-latency rate control at 6 Mbps, the encoder dropped half the frames under full-screen motion (29 fps).
-  - Raising its cap to 12 Mbps fixed that, but cost latency (p50 26 ms).
-  - Standard rate control (`RealTime`, no frame reordering) at 6 Mbps kept 55–60 fps with lower latency. It is the helper's default.
-- **The simulator must be on its main screen.**
-  - After a reboot, the screen list included "TVOut" ahead of the LCD. Pick the screen whose `screenType` is 0.
-- **One unexplained failure.**
-  - Once, before a simulator reboot, the main screen accepted the callbacks but produced no frames: its framebuffer was not being updated, although screenshots still worked.
-  - After `simctl shutdown` and `boot` it streamed every time, over dozens of runs.
-  - So v1 must stay as the fallback, chosen automatically.
-- **Never set the screen's power state.**
-  - `SimScreen setPowerState:` with an unexpected value turned the device's display off, and it took a reboot to recover.
+### Next
 
-**Recommendation.** Make v2 the simulator stream in capmac Studio, with v1 as the automatic fallback.
-
-1. **Build the helper on the Mac.** It compiles on first use against the Mac's own Xcode into `~/.capmac/bin/<hash>/`, as the agent is deployed. It needs nothing beyond Xcode, which capmac already requires. It detects the API at runtime: `SimScreen` on Xcode 26, `SimDisplayRenderable` before.
-2. **Add an agent op `stream`.** It runs the helper and relays its length-prefixed frames on the existing SSH channel (`sendBinary`), without transcoding.
-3. **Fall back on silence.** The engine forces a keyframe at start. If no frame follows within about a second while v1 sees the screen change, it falls back to v1. It forces another keyframe after every reconnect.
-4. **Decode in the screen worker.** WebCodecs `VideoDecoder` there replaces `createImageBitmap`. It takes the `avc1.*` codec string and the avcC record from the config message, and uses `optimizeForLatency` and `prefer-hardware`.
-5. **Next: input through the same helper.** SimulatorKit's `SimDeviceLegacyHIDClient` / Indigo HID would remove the AXe requirement for taps, swipes and typing.
-6. **Next: adaptive bitrate.** Lower it when the SSH channel's write buffer backs up.
-
-The cost: an Objective-C helper that depends on private CoreSimulator interfaces, which change between Xcode versions (Xcode 26 already did). Runtime feature detection plus the v1 fallback keep that failure mode graceful. And the gain, 15× the frame rate at a fifteenth of the latency, is what turns the pane into a usable remote simulator.
+- Input on Xcode 27 through DTUHID, the path idb moved to, detected at runtime.
+- The smooth stream in the CLI's browser viewer (`capmac screen`), with the same worker code.
+- Adaptive bitrate: the budget is fixed at 125% of 6 Mbps.
+- Rotation (`SimDevice` orientation), and HEVC where both ends decode it in hardware.

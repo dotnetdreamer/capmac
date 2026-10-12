@@ -134,6 +134,20 @@ export class AgentIO {
     }
   }
 
+  /**
+   * Sends one binary frame without waiting for the pipe (live video: the
+   * caller watches `backlog` and drops frames instead of falling behind).
+   */
+  sendLive(data: Buffer): void {
+    if (this.broken || this.ended) return;
+    this.output.write(encodeBinary(data));
+  }
+
+  /** Bytes written but not yet taken by the SSH channel. */
+  get backlog(): number {
+    return (this.output as Writable & { writableLength?: number }).writableLength ?? 0;
+  }
+
   private drain(): Promise<void> {
     return new Promise((resolve) => {
       const done = () => {

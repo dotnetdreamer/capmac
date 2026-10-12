@@ -7,11 +7,11 @@
 import { z } from 'zod';
 import type { ErrorInfo } from '@capmac/core/engine/errors';
 import type { ConnectionState, EngineEvent, FixId, SessionMode } from '@capmac/core/engine/events';
-import type { ProbeResult, ScreenInfo, TargetsResult } from '@capmac/core/shared/protocol';
+import type { ProbeResult, ScreenInfo, StreamFallback, TargetsResult } from '@capmac/core/shared/protocol';
 
 export type { ErrorInfo } from '@capmac/core/engine/errors';
 export type { AppLogEntry, Check, CheckLevel, ConnectionState, EngineEvent, FixId, Phase, SessionMode, SessionState, StepStatus } from '@capmac/core/engine/events';
-export type { Diagnostic, InputEvent, ProbeResult, ScreenInfo, Target, TargetsResult } from '@capmac/core/shared/protocol';
+export type { Diagnostic, InputEvent, ProbeResult, ScreenInfo, StreamFallback, StreamHelperState, Target, TargetsResult } from '@capmac/core/shared/protocol';
 
 // ─── Values ────────────────────────────────────────────────────────────────
 
@@ -20,7 +20,7 @@ const macName = text(100);
 const fsPath = text(4096);
 const udid = z.string().regex(/^[A-Za-z0-9-]{8,64}$/, 'not a device id');
 const id = z.string().regex(/^[a-z0-9-]{1,64}$/);
-const fixIds = ['install-node', 'xcode-license', 'xcode-first-launch', 'download-ios', 'install-axe', 'install-cocoapods', 'unlock-keychain'] as const satisfies readonly FixId[];
+const fixIds = ['install-node', 'xcode-license', 'xcode-first-launch', 'download-ios', 'install-axe', 'install-cocoapods', 'unlock-keychain', 'build-stream-helper'] as const satisfies readonly FixId[];
 
 export const sessionOptionsSchema = z.object({
   clean: z.boolean().optional(),
@@ -211,19 +211,46 @@ export type PromptResponse = z.infer<typeof promptResponseSchema>;
 // ─── Screen input (renderer → engine over the screen MessagePort) ─────────
 
 const unit = z.number().min(0).max(1);
+const points = z.number().min(-2000).max(2000);
 export const inputEventSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('tap'), x: unit, y: unit }).strict(),
   z.object({ kind: z.literal('swipe'), x1: unit, y1: unit, x2: unit, y2: unit, durationMs: z.number().int().min(16).max(10_000) }).strict(),
-  z.object({ kind: z.literal('text'), text: z.string().min(1).max(2000) }).strict(),
+  z.object({ kind: z.literal('text'), text: z.string().min(1).max(20_000), via: z.enum(['type', 'paste']).optional() }).strict(),
   z.object({ kind: z.literal('key'), key: z.enum(['return', 'enter', 'escape', 'delete', 'backspace', 'tab', 'space']) }).strict(),
-  z.object({ kind: z.literal('button'), button: z.enum(['home', 'lock', 'siri', 'side', 'apple-pay']) }).strict(),
+  z.object({ kind: z.literal('button'), button: z.enum(['home', 'lock', 'siri', 'side', 'apple-pay']), phase: z.enum(['down', 'up']).optional() }).strict(),
+  z.object({ kind: z.literal('touch'), phase: z.enum(['down', 'move', 'up', 'cancel']), x: unit, y: unit }).strict(),
+  z.object({ kind: z.literal('touch2'), phase: z.enum(['down', 'move', 'up']), x1: unit, y1: unit, x2: unit, y2: unit }).strict(),
+  z.object({ kind: z.literal('scroll'), x: unit, y: unit, dx: points, dy: points }).strict(),
+  z.object({ kind: z.literal('keypress'), usage: z.number().int().min(1).max(0xffff), modifiers: z.number().int().min(0).max(15).optional() }).strict(),
 ]);
 
 /** Messages on a screen port, engine → renderer. Frames are ArrayBuffers sent with a transfer list. */
 export type ScreenPortMessage =
+  /** Compatible stream: one JPEG. */
   | { type: 'frame'; data: ArrayBuffer; seq: number }
+  /** Smooth stream: one message from the helper (header and payload, see core's shared/stream.ts). */
+  | { type: 'video'; data: ArrayBuffer; seq: number; key: boolean; config: boolean; captureUs: number }
   | { type: 'info'; info: ScreenInfo }
-  | { type: 'state'; state: 'connecting' | 'streaming' | 'reconnecting' | 'ended'; error?: ErrorInfo };
+  | { type: 'state'; state: 'connecting' | 'streaming' | 'reconnecting' | 'ended'; error?: ErrorInfo }
+  /** Which stream is showing, and why it is the compatible one when the smooth one was wanted. */
+  | { type: 'codec'; codec: 'h264' | 'jpeg'; fallback: StreamFallback | null }
+  /** Smooth stream: preparing the helper on the Mac (compiling it the first time). */
+  | { type: 'preparing'; stage: 'building' | 'starting'; xcode?: string }
+  /** The Mac's clock minus this PC's (µs), for the latency readout. */
+  | { type: 'clock'; offsetUs: number; rttUs: number };
+
+/** Messages on a screen port, renderer → engine. */
+export type ScreenPortCommand =
+  /** Compatible stream: a frame was drawn. Smooth stream: frames up to `seq` were taken. */
+  | { type: 'ack'; seq: number }
+  | { type: 'input'; event: unknown }
+  | { type: 'restart' }
+  /** Smooth stream: the decoder needs a keyframe (it reset, or dropped frames to catch up). */
+  | { type: 'keyframe' }
+  /** Smooth stream: the video's longest side in pixels, to match the pane. */
+  | { type: 'size'; maxSize: number }
+  /** After a fallback: try the smooth stream again. */
+  | { type: 'retry-smooth' };
 
 // ─── App (main process) ────────────────────────────────────────────────────
 
@@ -251,6 +278,8 @@ export const settingsSchema = z.object({
   verbose: z.boolean(),
   dependencyWarnings: z.boolean(),
   deviceFrame: z.boolean(),
+  /** Smooth: H.264 from capmac's helper (falls back by itself); compatible: screenshots. */
+  simulatorStream: z.enum(['smooth', 'compatible']),
   sidebarCollapsed: z.boolean(),
   onboardingDone: z.boolean(),
   trayHintShown: z.boolean(),
@@ -275,6 +304,7 @@ export const DEFAULT_SETTINGS: Settings = {
   verbose: false,
   dependencyWarnings: false,
   deviceFrame: true,
+  simulatorStream: 'smooth',
   sidebarCollapsed: false,
   onboardingDone: false,
   trayHintShown: false,
@@ -317,7 +347,7 @@ export const appChannels = {
   'app:save-image': z.object({ data: z.union([z.instanceof(ArrayBuffer), z.instanceof(Uint8Array)]), name: text(200) }).strict(),
   'app:copy-image': z.object({ data: z.union([z.instanceof(ArrayBuffer), z.instanceof(Uint8Array)]) }).strict(),
   'app:save-text': z.object({ text: z.string().max(200 * 1024 * 1024), name: text(200) }).strict(),
-  'app:screen-open': z.object({ mac: macName, udid }).strict(),
+  'app:screen-open': z.object({ mac: macName, udid, maxSize: z.number().int().min(320).max(4096).optional() }).strict(),
   'app:project-opened': z.object({ path: fsPath, name: z.string().max(200), appId: z.string().max(200) }).strict(),
   'app:forget-project': z.object({ path: fsPath }).strict(),
   'app:engine-call': z.object({ method: z.string().max(64), params: z.unknown() }).strict(),

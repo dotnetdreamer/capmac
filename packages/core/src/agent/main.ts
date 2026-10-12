@@ -12,6 +12,7 @@ import { opPrepare } from './ops/prepare.js';
 import { keychainLocked, opProbe } from './ops/probe.js';
 import { toolEnv } from './env.js';
 import { opScreen, opScreenshot } from './ops/screen.js';
+import { opStream, opStreamHelper } from './ops/stream.js';
 import { opSync } from './ops/sync.js';
 import { opInstallTools, opTargets, opWatchTargets } from './ops/targets.js';
 import { AgentError, killAll } from './proc.js';
@@ -33,6 +34,8 @@ const OPS: Record<string, Handler> = {
   targets: () => opTargets(),
   'watch-targets': opWatchTargets,
   screen: opScreen,
+  stream: opStream,
+  'stream-helper': opStreamHelper,
   screenshot: opScreenshot,
   exec: opExec,
   pull: opPull,

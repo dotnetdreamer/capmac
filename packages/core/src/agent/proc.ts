@@ -56,6 +56,12 @@ export function killAll(): void {
   for (const child of live) killTree(child, 'SIGKILL');
 }
 
+/** A child spawned elsewhere that must not outlive the agent either. */
+export function trackChild(child: ChildProcess): void {
+  live.add(child);
+  child.once('exit', () => live.delete(child));
+}
+
 process.on('exit', killAll);
 
 /**

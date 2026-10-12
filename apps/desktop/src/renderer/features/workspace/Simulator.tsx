@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react';
-import type { ErrorInfo, InputEvent, MacSummary, ScreenInfo, Target } from '../../../shared/contract';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react';
+import { keystrokeForChar, keystrokeForKey } from '@capmac/core/shared/hid';
+import type { ErrorInfo, InputEvent, MacSummary, ScreenInfo, StreamFallback, Target } from '../../../shared/contract';
 import { workspaceBus, type WorkspaceAction } from '../../app/commands';
 import { toast, useApp } from '../../state/app';
 import { call, errorInfo } from '../../state/engine';
@@ -14,6 +15,11 @@ import { Tooltip } from '../../ui/Tooltip';
 interface Stats {
   fps: number;
   kbps: number;
+  decodeMs: number;
+  latencyMs: number | null;
+  latencyP95Ms: number | null;
+  /** The last touch, key or button press to the picture that answered it. */
+  inputMs: number | null;
 }
 
 type StreamState = { kind: 'connecting' } | { kind: 'streaming' } | { kind: 'reconnecting' } | { kind: 'ended'; error?: ErrorInfo };
@@ -36,26 +42,76 @@ async function screenshot(mac: string, udid: string, action: 'save' | 'copy') {
   }
 }
 
+const formatRate = (kbps: number) => (kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${kbps} kbps`);
+
+/** The video's longest side for a canvas this tall: a little above it (crisp text), in steps, within limits. */
+function videoSizeFor(canvasPixels: number, devicePixels: number | null): number {
+  const want = Math.ceil(canvasPixels / 64) * 64;
+  return Math.max(640, Math.min(2400, devicePixels ?? 2400, want));
+}
+
+/** The stream note in the footer: why the compatible stream is on, and the ways back. */
+function CompatibleNote({ fallback, onRetry, onRestart }: { fallback: StreamFallback; onRetry: () => void; onRestart: () => void }) {
+  const pop = usePopover();
+  return (
+    <>
+      <button type="button" className="sim__compat" {...pop.triggerProps}>
+        <Icon name="info" size={14} />
+        Compatible stream
+      </button>
+      <Popover state={pop} placement="top-end" label="Compatible stream" className="sim__compat-pop">
+        <div className="sim__compat-body">
+          <strong>Showing the compatible stream</strong>
+          <p>{fallback.message}</p>
+          {fallback.hint && <p className="faint">{fallback.hint}</p>}
+          {fallback.details && fallback.details.length > 0 && (
+            <details>
+              <summary>Details</summary>
+              <pre>{fallback.details.join('\n')}</pre>
+            </details>
+          )}
+          <div className="sim__compat-actions">
+            {fallback.restartSimulator && (
+              <Button size="sm" icon="power" onClick={() => { pop.close(); onRestart(); }}>
+                Restart simulator
+              </Button>
+            )}
+            <Button size="sm" variant="accent" icon="refresh" onClick={() => { pop.close(); onRetry(); }}>
+              Try the smooth stream
+            </Button>
+          </div>
+        </div>
+      </Popover>
+    </>
+  );
+}
+
 /** The live simulator screen: a canvas fed by a worker that decodes frames off the main thread. */
 function Screen({ mac, target, frame }: { mac: string; target: Target; frame: boolean }) {
   const stageRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const workerRef = useRef<Worker | null>(null);
+  const prefer = useApp((s) => s.settings?.simulatorStream ?? 'smooth');
   const [state, setState] = useState<StreamState>({ kind: 'connecting' });
   const [info, setInfo] = useState<ScreenInfo | null>(null);
+  const [codec, setCodec] = useState<'h264' | 'jpeg' | null>(null);
+  const [fallback, setFallback] = useState<StreamFallback | null>(null);
+  const [preparing, setPreparing] = useState<{ stage: 'building' | 'starting'; xcode?: string } | null>(null);
   const [frameSize, setFrameSize] = useState<{ width: number; height: number } | null>(null);
   const [box, setBox] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [stats, setStats] = useState<Stats | null>(null);
   const [hasFrame, setHasFrame] = useState(false);
   const [ripples, setRipples] = useState<Array<{ id: number; x: number; y: number }>>([]);
   const [epoch, setEpoch] = useState(0);
+  const [announce, setAnnounce] = useState('');
   const typePopover = usePopover();
   const shotMenu = usePopover();
   const [typed, setTyped] = useState('');
+  const canvasPixels = useRef(0);
   const fixAxe = useCallback(async () => {
     try {
       await call('macs.fix', { name: mac, fix: 'install-axe' });
-      toast({ tone: 'success', title: 'AXe installed', body: 'Touch and typing work now.' });
+      toast({ tone: 'success', title: 'AXe installed', body: 'Taps, swipes and typing work now.' });
       setEpoch((e) => e + 1);
     } catch (err) {
       const e = errorInfo(err);
@@ -81,16 +137,26 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
     worker.onmessage = (e) => {
       const m = e.data;
       if (m.type === 'frame-size') setFrameSize({ width: m.width, height: m.height });
-      else if (m.type === 'first-frame') setHasFrame(true);
-      else if (m.type === 'stats') setStats({ fps: m.fps, kbps: m.kbps });
+      else if (m.type === 'first-frame') {
+        setHasFrame(true);
+        setPreparing(null);
+      } else if (m.type === 'stats') setStats({ fps: m.fps, kbps: m.kbps, decodeMs: m.decodeMs, latencyMs: m.latencyMs, latencyP95Ms: m.latencyP95Ms, inputMs: m.inputMs });
       else if (m.type === 'info') setInfo(m.info);
-      else if (m.type === 'state') setState(m.state === 'ended' ? { kind: 'ended', error: m.error } : { kind: m.state });
+      else if (m.type === 'preparing') setPreparing({ stage: m.stage, xcode: m.xcode });
+      else if (m.type === 'codec') {
+        setCodec(m.codec);
+        setFallback(m.fallback);
+        if (m.fallback) setAnnounce(`Switched to the compatible stream. ${m.fallback.message}`);
+      } else if (m.type === 'state') setState(m.state === 'ended' ? { kind: 'ended', error: m.error } : { kind: m.state });
     };
     setState({ kind: 'connecting' });
     setHasFrame(false);
+    setPreparing(null);
+    setFallback(null);
     (async () => {
       try {
-        const opened = await window.capmac.invoke('app:screen-open', { mac, udid: target.udid });
+        const maxSize = canvasPixels.current ? videoSizeFor(canvasPixels.current, null) : undefined;
+        const opened = await window.capmac.invoke('app:screen-open', { mac, udid: target.udid, maxSize });
         streamId = opened.streamId;
         const port = await claimScreenPort(opened.streamId);
         if (disposed) {
@@ -109,7 +175,7 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
       workerRef.current = null;
       if (streamId) void call('screen.stop', { streamId }).catch(() => undefined);
     };
-  }, [mac, target.udid, epoch]);
+  }, [mac, target.udid, epoch, prefer]);
 
   // Fit the screen into the pane (exact pixel sizes; the canvas backing store follows the DPR).
   useLayoutEffect(() => {
@@ -137,13 +203,29 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
   const screenW = Math.floor(screenH * aspect);
   useEffect(() => {
     const dpr = window.devicePixelRatio || 1;
+    canvasPixels.current = Math.round(Math.max(screenW, screenH) * dpr);
     workerRef.current?.postMessage({ type: 'size', width: Math.round(screenW * dpr), height: Math.round(screenH * dpr) });
   }, [screenW, screenH, epoch]);
 
-  // Input (needs AXe on the Mac)
-  const canInput = Boolean(info?.input);
+  // Smooth stream: keep the video about as sharp as the canvas shows it (settled sizes only).
+  const devicePixels = info?.points && info.scale ? Math.round(Math.max(info.points.width, info.points.height) * info.scale) : null;
+  const sentVideoSize = useRef(0);
+  useEffect(() => {
+    if (codec !== 'h264' || !screenH) return;
+    const timer = window.setTimeout(() => {
+      const want = videoSizeFor(canvasPixels.current, devicePixels);
+      if (sentVideoSize.current && Math.abs(want - sentVideoSize.current) / sentVideoSize.current < 0.12) return;
+      sentVideoSize.current = want;
+      workerRef.current?.postMessage({ type: 'video-size', maxSize: want });
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [codec, screenW, screenH, devicePixels]);
+
+  // ─── Input ───────────────────────────────────────────────────────────────
+  // 'touch' (capmac's helper): fingers stream as they move. 'gestures' (AXe): whole taps and swipes.
+  const mode = info?.input ? (info.inputMode ?? 'gestures') : null;
+  const canInput = mode !== null;
   const send = useCallback((event: InputEvent) => workerRef.current?.postMessage({ type: 'input', event }), []);
-  const down = useRef<{ x: number; y: number; t: number } | null>(null);
   const point = (e: { clientX: number; clientY: number }) => {
     const r = hostRef.current!.getBoundingClientRect();
     return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)), px: e.clientX - r.left, py: e.clientY - r.top };
@@ -153,14 +235,75 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
     setRipples((r) => [...r, { id, x: px, y: py }]);
     window.setTimeout(() => setRipples((r) => r.filter((x) => x.id !== id)), 500);
   };
+
+  // Touch mode: one finger (Alt: two, mirrored around the centre, to pinch and rotate).
+  const finger = useRef<{ id: number; two: boolean; x: number; y: number } | null>(null);
+  const moveFrame = useRef(0);
+  const endTouch = useCallback(
+    (how: 'up' | 'cancel', at?: { x: number; y: number }) => {
+      const f = finger.current;
+      if (!f) return;
+      finger.current = null;
+      cancelAnimationFrame(moveFrame.current);
+      const x = at?.x ?? f.x;
+      const y = at?.y ?? f.y;
+      if (f.two) send({ kind: 'touch2', phase: 'up', x1: x, y1: y, x2: 1 - x, y2: 1 - y });
+      else send({ kind: 'touch', phase: how, x, y });
+    },
+    [send],
+  );
+  // No stuck fingers: lift on blur, on disconnect, and when the pane goes away.
+  useEffect(() => {
+    const onBlur = () => endTouch('cancel');
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('blur', onBlur);
+      endTouch('cancel');
+    };
+  }, [endTouch]);
+  useEffect(() => {
+    if (state.kind !== 'streaming') finger.current = null;
+  }, [state.kind]);
+
+  // Gestures mode (AXe): a tap or a swipe once the pointer is released.
+  const down = useRef<{ x: number; y: number; t: number } | null>(null);
+
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || !canInput) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    const p = point(e);
-    down.current = { x: p.x, y: p.y, t: performance.now() };
     e.currentTarget.focus();
+    const p = point(e);
+    if (mode === 'touch') {
+      endTouch('cancel');
+      const two = e.altKey;
+      finger.current = { id: e.pointerId, two, x: p.x, y: p.y };
+      ripple(p.px, p.py);
+      if (two) send({ kind: 'touch2', phase: 'down', x1: p.x, y1: p.y, x2: 1 - p.x, y2: 1 - p.y });
+      else send({ kind: 'touch', phase: 'down', x: p.x, y: p.y });
+    } else {
+      down.current = { x: p.x, y: p.y, t: performance.now() };
+    }
+  };
+  const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    const f = finger.current;
+    if (!f || f.id !== e.pointerId) return;
+    const p = point(e);
+    f.x = p.x;
+    f.y = p.y;
+    // At most one move per display frame.
+    cancelAnimationFrame(moveFrame.current);
+    moveFrame.current = requestAnimationFrame(() => {
+      const now = finger.current;
+      if (!now) return;
+      if (now.two) send({ kind: 'touch2', phase: 'move', x1: now.x, y1: now.y, x2: 1 - now.x, y2: 1 - now.y });
+      else send({ kind: 'touch', phase: 'move', x: now.x, y: now.y });
+    });
   };
   const onPointerUp = (e: PointerEvent<HTMLDivElement>) => {
+    if (mode === 'touch') {
+      if (finger.current?.id === e.pointerId) endTouch('up', point(e));
+      return;
+    }
     const start = down.current;
     down.current = null;
     if (!start || !canInput) return;
@@ -173,24 +316,71 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
       send({ kind: 'swipe', x1: start.x, y1: start.y, x2: p.x, y2: p.y, durationMs: Math.round(Math.max(80, Math.min(dt, 1500))) });
     }
   };
-  const wheel = useRef({ acc: 0, timer: 0, x: 0.5, y: 0.5 });
+  const onPointerCancel = () => {
+    down.current = null;
+    endTouch('cancel');
+  };
+
+  const wheel = useRef({ dx: 0, dy: 0, x: 0.5, y: 0.5, frame: 0, timer: 0 });
   const onWheel = (e: WheelEvent<HTMLDivElement>) => {
     if (!canInput) return;
     const p = point(e);
     const w = wheel.current;
-    w.acc += e.deltaY;
+    if (mode === 'touch') {
+      // Wheel and touchpad scrolling, in the simulator's points: one display frame's worth at a time.
+      const r = hostRef.current!.getBoundingClientRect();
+      const perPixel = info?.points ? info.points.height / r.height : 1;
+      const lines = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? r.height : 1;
+      w.dx += e.deltaX * lines * perPixel;
+      w.dy += e.deltaY * lines * perPixel;
+      w.x = p.x;
+      w.y = p.y;
+      if (!w.frame) {
+        w.frame = requestAnimationFrame(() => {
+          w.frame = 0;
+          if (Math.abs(w.dx) + Math.abs(w.dy) < 0.5) return;
+          send({ kind: 'scroll', x: w.x, y: w.y, dx: Math.max(-2000, Math.min(2000, w.dx)), dy: Math.max(-2000, Math.min(2000, w.dy)) });
+          w.dx = 0;
+          w.dy = 0;
+        });
+      }
+      return;
+    }
+    w.dy += e.deltaY;
     w.x = p.x;
     w.y = p.y;
     window.clearTimeout(w.timer);
     w.timer = window.setTimeout(() => {
-      const dy = Math.max(-0.5, Math.min(0.5, -w.acc / 1200));
-      w.acc = 0;
+      const dy = Math.max(-0.5, Math.min(0.5, -w.dy / 1200));
+      w.dy = 0;
       send({ kind: 'swipe', x1: w.x, y1: w.y, x2: w.x, y2: Math.min(0.98, Math.max(0.02, w.y + dy)), durationMs: 180 });
     }, 90);
   };
+
   const textBuffer = useRef({ text: '', timer: 0 });
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (!canInput || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (!canInput) return;
+    // Simulator.app's shortcuts for the hardware buttons.
+    if (e.ctrlKey && e.shiftKey && !e.altKey && (e.code === 'KeyH' || e.code === 'KeyL')) {
+      e.preventDefault();
+      send({ kind: 'button', button: e.code === 'KeyH' ? 'home' : 'lock' });
+      return;
+    }
+    if (mode === 'touch') {
+      // Ctrl+V arrives as a paste event (with this PC's clipboard).
+      if (e.ctrlKey && !e.altKey && e.code === 'KeyV') return;
+      const stroke = keystrokeForKey(e);
+      if (stroke) {
+        e.preventDefault();
+        send({ kind: 'keypress', usage: stroke.usage, modifiers: stroke.modifiers || undefined });
+      } else if (!e.ctrlKey && [...e.key].length === 1 && !keystrokeForChar(e.key)) {
+        // A character no US key types (é, ß, …): typed through the simulator's pasteboard.
+        e.preventDefault();
+        send({ kind: 'text', text: e.key });
+      }
+      return;
+    }
+    if (e.ctrlKey || e.altKey || e.metaKey) return;
     const special = ({ Enter: 'return', Backspace: 'delete', Tab: 'tab', Escape: 'escape' } as const)[e.key as 'Enter'];
     const buffer = textBuffer.current;
     const flush = () => {
@@ -209,6 +399,28 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
       buffer.timer = window.setTimeout(flush, 200);
     }
   };
+  const onPaste = (e: ClipboardEvent<HTMLDivElement>) => {
+    if (!canInput) return;
+    const text = e.clipboardData.getData('text/plain');
+    if (!text) return;
+    e.preventDefault();
+    send({ kind: 'text', text: text.slice(0, 20_000), via: mode === 'touch' ? 'paste' : 'type' });
+  };
+
+  const retrySmooth = useCallback(() => {
+    setFallback(null);
+    workerRef.current?.postMessage({ type: 'retry-smooth' });
+  }, []);
+  const restartSimulator = useCallback(async () => {
+    try {
+      toast({ tone: 'info', title: `Restarting ${target.name}…`, body: 'Your app stops; run it again when the simulator is back.' });
+      await call('simulators.shutdown', { mac, udid: target.udid });
+      await call('simulators.boot', { mac, udid: target.udid });
+      setEpoch((n) => n + 1);
+    } catch (err) {
+      toast({ tone: 'critical', title: `Could not restart ${target.name}`, body: errorInfo(err).hint ?? errorInfo(err).message });
+    }
+  }, [mac, target.udid, target.name]);
 
   // Workspace command: Ctrl+Shift+S
   useEffect(() => {
@@ -222,6 +434,22 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
   const ended = state.kind === 'ended';
   // The connection dropped: keep the last frame, dimmed, until the stream resumes.
   const reconnecting = state.kind === 'reconnecting';
+  const connectingText =
+    preparing?.stage === 'building'
+      ? `Setting up the smooth stream for Xcode ${preparing.xcode ?? ''}…`.replace(' …', '…')
+      : preparing?.stage === 'starting'
+        ? `Starting the smooth stream…`
+        : `Connecting to ${target.name}…`;
+  const streamName = codec === 'h264' ? 'Smooth stream (H.264)' : codec === 'jpeg' ? 'Compatible stream (screenshots)' : 'Stream';
+  const statsTip = [
+    streamName,
+    stats && codec === 'h264' && stats.latencyMs !== null ? `Latency ${Math.round(stats.latencyMs)} ms (p95 ${Math.round(stats.latencyP95Ms ?? stats.latencyMs)} ms)` : null,
+    stats && stats.fps > 0 ? `Decoding ${stats.decodeMs.toFixed(1)} ms a frame` : null,
+    stats?.inputMs != null ? `Touch to picture ${Math.round(stats.inputMs)} ms` : null,
+    codec === 'h264' && stats?.fps === 0 ? 'Nothing is sent while the screen does not change' : null,
+  ].filter(Boolean).join(' · ');
+  const viewOnlyReason = info?.inputReason ?? 'Touch and typing are not available for this simulator.';
+  const inputHelp = mode === 'touch' ? 'Click and drag to touch, scroll to scroll, type to type. Alt+drag pinches.' : 'Click to tap, drag to swipe, type to enter text.';
   return (
     <div className="sim">
       <div ref={stageRef} className="sim__stage">
@@ -233,12 +461,18 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
               style={{ width: screenW, height: screenH }}
               tabIndex={0}
               role="img"
-              aria-label={`${target.name} screen${canInput ? '. Click to tap, drag to swipe, type to enter text.' : ' (view only)'}`}
+              aria-label={`${target.name} screen${canInput ? `. ${inputHelp}` : ' (view only)'}`}
               onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
-              onPointerCancel={() => (down.current = null)}
+              onPointerCancel={onPointerCancel}
+              onLostPointerCapture={(e) => {
+                if (finger.current?.id === e.pointerId) endTouch('cancel');
+              }}
               onWheel={onWheel}
               onKeyDown={onKeyDown}
+              onPaste={onPaste}
+              onBlur={() => endTouch('cancel')}
             />
             {ripples.map((r) => (
               <span key={r.id} className="sim__ripple" style={{ left: r.x, top: r.y }} />
@@ -257,7 +491,8 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
                 ) : (
                   <>
                     <Spinner size={20} />
-                    <span>{reconnecting ? 'Reconnecting to the Mac…' : `Connecting to ${target.name}…`}</span>
+                    <span>{reconnecting ? 'Reconnecting to the Mac…' : connectingText}</span>
+                    {!reconnecting && preparing?.stage === 'building' && <span className="faint">First time on this Mac: compiling capmac’s screen helper. It takes a few seconds.</span>}
                   </>
                 )}
               </div>
@@ -268,7 +503,7 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
       <div className="sim__toolbar" role="toolbar" aria-label="Simulator controls">
         {info && !info.input ? (
           <span className="sim__viewonly">
-            <Tooltip content="Touch, swipe and typing need AXe on the Mac">
+            <Tooltip content={viewOnlyReason}>
               <span className="sim__viewonly-label" tabIndex={0}>
                 <Icon name="eye" size={14} />
                 View only
@@ -280,8 +515,8 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
           </span>
         ) : (
           <>
-            <IconButton icon="home" size="sm" label="Home" disabled={!canInput} onClick={() => send({ kind: 'button', button: 'home' })} />
-            <IconButton icon="lock" size="sm" label="Lock" disabled={!canInput} onClick={() => send({ kind: 'button', button: 'lock' })} />
+            <IconButton icon="home" size="sm" label="Home" shortcut="Ctrl+Shift+H" disabled={!canInput} onClick={() => send({ kind: 'button', button: 'home' })} />
+            <IconButton icon="lock" size="sm" label="Lock" shortcut="Ctrl+Shift+L" disabled={!canInput} onClick={() => send({ kind: 'button', button: 'lock' })} />
             <button type="button" className="icon-btn icon-btn--sm" aria-label="Type text" disabled={!canInput} {...typePopover.triggerProps}>
               <Icon name="keyboard" size={16} />
             </button>
@@ -318,19 +553,26 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
           ]}
         />
         <span className="sim__spacer" />
-        <span className="sim__stats tabular" aria-live="off">
-          {state.kind === 'streaming' && hasFrame ? (
-            <>
-              <StatusDot tone="live" />
-              {stats && stats.fps > 0 ? `${stats.fps} fps · ${stats.kbps >= 1000 ? `${(stats.kbps / 1000).toFixed(1)} Mbps` : `${stats.kbps} kbps`}` : 'Live'}
-            </>
-          ) : state.kind === 'ended' ? (
-            'Disconnected'
-          ) : reconnecting ? (
-            'Reconnecting…'
-          ) : (
-            'Connecting…'
-          )}
+        {fallback && codec === 'jpeg' && <CompatibleNote fallback={fallback} onRetry={retrySmooth} onRestart={() => void restartSimulator()} />}
+        <Tooltip content={statsTip} placement="top">
+          <span className="sim__stats tabular" tabIndex={0} aria-live="off">
+            {state.kind === 'streaming' && hasFrame ? (
+              <>
+                <StatusDot tone="live" />
+                {/* Next to the compatible-stream note, the frame rate says enough. */}
+                {stats && stats.fps > 0 ? (fallback && codec === 'jpeg' ? `${stats.fps} fps` : `${stats.fps} fps · ${formatRate(stats.kbps)}`) : 'Live'}
+              </>
+            ) : state.kind === 'ended' ? (
+              'Disconnected'
+            ) : reconnecting ? (
+              'Reconnecting…'
+            ) : (
+              'Connecting…'
+            )}
+          </span>
+        </Tooltip>
+        <span className="visually-hidden" role="status">
+          {announce}
         </span>
       </div>
     </div>

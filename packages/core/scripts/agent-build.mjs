@@ -23,6 +23,8 @@ export function agentBuildOptions(outfile) {
     format: 'esm',
     target: 'node18',
     define: { __CAPMAC_VERSION__: JSON.stringify(core.version) },
+    // The H.264 helper's Objective-C source ships inside the agent; it is compiled on the Mac.
+    loader: { '.m': 'text' },
     legalComments: 'none',
     logLevel: 'warning',
     banner: { js: '// capmac agent — uploaded to the Mac by capmac. Safe to delete; it is re-uploaded on demand.' },

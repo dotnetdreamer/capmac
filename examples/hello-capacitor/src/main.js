@@ -32,4 +32,15 @@ document.getElementById('count').addEventListener('click', () => {
   if (count % 5 === 0) console.warn(`That is a lot of taps (${count})`);
 });
 
+const note = document.getElementById('note');
+note.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || !note.value) return;
+  console.log(`Note: ${note.value}`);
+  document.getElementById('echo').textContent = `Logged “${note.value}”`;
+  note.value = '';
+});
+
+// Something long enough to scroll.
+document.getElementById('list').innerHTML = Array.from({ length: 40 }, (_, i) => `<li>Item ${i + 1}</li>`).join('');
+
 showDevice();
