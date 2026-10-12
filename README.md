@@ -13,6 +13,25 @@ Windows (your editor, dev server)                          Mac (Xcode)
 └──────────────────────────────┘                        └─────────────────────────────────┘
 ```
 
+## capmac Studio, the Windows app
+
+The same engine with a window around it. Pair your Mac in a few clicks, add your Capacitor app, and press **Live** (F5) or **Run** (Ctrl+F5). You get:
+
+- every build step on a timeline;
+- build errors as problems you click to open at the line in your editor;
+- your app's console with source and level filters, search, and JSON you can expand;
+- the iOS simulator's screen, next to your code.
+
+If the connection to the Mac drops, it reconnects and restores the session. Ctrl+K finds any command.
+
+`npm run desktop:build` builds it into `apps/desktop/release/<version>/`:
+
+- `capmac-studio-<version>-x64-setup.exe`, a per-user installer;
+- `capmac-studio-<version>-x64-portable.exe`, which needs no installation;
+- the same two for arm64.
+
+The design (screens, visual language, architecture, simulator streaming) is in [docs/desktop-design.md](docs/desktop-design.md).
+
 ## Quick start
 
 **On the Mac (once):** install Xcode and open it once, then turn on **System Settings › General › Sharing › Remote Login**. Stay logged in to the Mac's desktop (or enable automatic login on a headless Mac): Apple's simulators only run inside a desktop session.
@@ -144,9 +163,13 @@ Add `--verbose` to any command to see full tool output. Build logs are kept on t
 ```powershell
 npm install
 npm run build      # packages/cli/dist: cli.js (CLI), agent.mjs (Mac agent), viewer.html
-npm test           # unit tests + an SSH round-trip test against an in-process server
+npm test           # unit tests (engine, CLI, agent, desktop logic) + an SSH round-trip test
 npm run typecheck
 node bin/capmac.js --help
+
+npm run desktop:dev    # capmac Studio with hot reload (Vite for the UI; main, preload and engine rebuild and restart)
+npm run desktop:test   # builds the app, then Playwright launches it with a fresh profile
+npm run desktop:build  # installers and portable exes in apps/desktop/release/
 ```
 
 The repo is an npm workspace:
@@ -155,7 +178,8 @@ The repo is an npm workspace:
 |---|---|
 | `packages/core` | `@capmac/core` (private): the engine both front ends share, the wire protocol (`src/shared`) and the Mac agent (`src/agent`). Consumed as TypeScript source; the engine reports through typed events and asks through a `Prompter`, it never prints. |
 | `packages/cli` | `capmac`, the published CLI: commands, the terminal renderer for engine events, the browser screen viewer. Publish from this folder (`npm publish -w capmac`). |
-| `apps/desktop` | capmac Studio, the Windows desktop app (Electron). See [docs/desktop-design.md](docs/desktop-design.md). |
+| `apps/desktop` | capmac Studio, the Windows desktop app (Electron 44, React 19, Vite 8). The engine runs in a utility process; the UI is a sandboxed renderer talking to it through a small validated API. See [docs/desktop-design.md](docs/desktop-design.md). |
+| `spikes/streaming-v2` | The H.264 simulator stream spike: about 15× the frame rate of today's screenshots at a fifteenth of the latency. Results in the design doc. |
 | `bin/capmac.js` | Runs the CLI from `packages/cli/dist` (so `node bin/capmac.js …` works from a clone). |
 
 `examples/hello-capacitor` is a minimal Vite + Capacitor 8 (Swift Package Manager) app for trying things out.

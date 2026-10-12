@@ -187,11 +187,11 @@ Projects                                                    [▸ Add project  Ct
 - **Problems**
   - Diagnostics are grouped by file (path relative to the project), errors first.
   - Each diagnostic shows its message, `line:col` and the code excerpt from xcodebuild (the source line plus caret) in a mini code block.
-  - Click, or press Enter, to open it in VS Code (`code -g file:line:col`), or in the default app if VS Code isn't installed.
+  - Click, or press Enter, to open it at the line in the editor chosen in Settings (VS Code and Cursor through their `vscode://file/…` and `cursor://file/…` links), or in the default app.
   - Copy (one item, or all as `file:line:col: error: …`), and "Show full build log", which downloads the Mac-side log into a read-only viewer.
   - Warnings from dependencies (Pods, Swift packages, node_modules) are collapsed under "37 warnings from dependencies".
-- **Console**: virtualized, 200k-line ring buffer.
-  - Source chips: JS, Capacitor, Native, Bridge, Dev server.
+- **Console**: virtualized (TanStack Virtual), 100k lines by default (Settings: 10k to 1M); old lines drop in chunks.
+  - Source chips: JS, Capacitor, Native, Bridge, Dev server, capmac.
   - Level menu: Errors, Warnings, Info, Debug.
   - Search with highlighted matches, a match count and F3/Shift+F3 navigation.
   - Auto-scroll pauses when you scroll up. "↓ 23 new lines" jumps back. ⏸ freezes the view.
@@ -483,7 +483,7 @@ Spinners only exist while work is running; idle CPU stays near zero.
 | Dialogs | PasswordDialog, HostKeyDialog, BuildIpaDialog, ConfirmDialog |
 | SettingsPage | Sections |
 
-Icons are Fluent System Icons, regular and filled, 16 and 20 px (MIT). Only the icons in use are extracted into `src/renderer/ui/icons.tsx`, because the full package is 170 MB.
+Icons are Fluent System Icons, regular and filled, 16 and 20 px (MIT). Only the icons in use are extracted into `src/renderer/ui/icon-data.ts` (93 today), because the full package is 170 MB.
 
 ---
 
@@ -502,7 +502,10 @@ packages/
 apps/
   desktop/   capmac Studio (Electron 44, React 19, Vite 8)
 bin/capmac.js    dev shim → packages/cli (so `node bin/capmac.js` keeps working)
-test/unit/       the CLI/engine/agent tests (vitest), plus engine tests
+test/unit/       the CLI/engine/agent tests (vitest)
+apps/desktop/test/  desktop logic tests (vitest): URL trust, palette matching, console, timeline
+apps/desktop/e2e/   Playwright _electron smoke tests (built app, fresh profile)
+spikes/streaming-v2/  the H.264 simulator stream spike (helper, bench, decode test)
 ```
 
 - **npm workspaces.** The root is private and holds the shared scripts:
@@ -548,7 +551,7 @@ test/unit/       the CLI/engine/agent tests (vitest), plus engine tests
   - Validates every renderer request with zod: a method allow-list plus a params schema.
   - Owns the OS integrations: folder picker, `code -g`, `shell.openPath`, notifications, tray, the theme, the accent colour.
   - Relays engine events to the renderer in batches: one message per animation frame at most.
-- **Screen frames** use a `MessageChannelMain` per stream. One port goes to the engine and the other to the renderer: preload → `window.postMessage` → the screen Worker. Frames are `ArrayBuffer`s moved with transfer lists, never JSON. Input events travel back on the same port, and the engine validates them before forwarding them to the agent.
+- **Screen frames** use a `MessageChannelMain` per stream. One port goes to the engine and the other to the renderer: preload → `window.postMessage` → the screen Worker. Frames are binary `ArrayBuffer`s, never JSON: the engine copies each frame once into its port (Electron's `MessagePortMain` cannot transfer buffers), the renderer side moves them on to the worker without copying. At most two frames are in flight; the worker acks each one, and under backpressure only the newest waiting frame is kept. Input events travel back on the same port, and the engine validates them before forwarding them to the agent. When the Mac connection drops, the stream reports `reconnecting` (the last frame stays, dimmed) and resumes by itself.
 - **Security**
   - `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, `webSecurity: true`.
   - The renderer is served from a privileged `app://` scheme via `protocol.handle`, never `file://`. Strict CSP:
@@ -558,10 +561,11 @@ test/unit/       the CLI/engine/agent tests (vitest), plus engine tests
     img-src 'self' data: blob:; worker-src 'self' blob:; connect-src 'self'; object-src 'none';
     base-uri 'none'; frame-ancestors 'none'
     ```
-  - `setWindowOpenHandler(() => ({action: 'deny'}))`. `will-navigate` is blocked. Permission requests are denied, except clipboard-sanitized-write. `app.requestSingleInstanceLock()`; a second launch focuses the existing window and opens any folder passed in.
+  - `setWindowOpenHandler(() => ({action: 'deny'}))`. `will-navigate` and `will-redirect` are blocked unless the URL is the app's own (scheme, host and port compared: Node reports `app:`, `file:` and `data:` URLs all with the origin "null", so comparing origins would let them through). IPC from any other page is refused. Permission requests are denied, except clipboard-sanitized-write. `app.requestSingleInstanceLock()`; a second launch focuses the existing window and opens any folder passed in.
   - Passwords pass through memory only, renderer → main → engine → the agent's stdin, and are never logged or stored. Nothing secret is persisted; if that changes, it goes through `safeStorage`.
 - **Packaging**
-  - Main, preload and engine are bundled by esbuild with all their JavaScript dependencies, so the app ships no `node_modules`. ssh2's optional native add-ons (`cpu-features`, `sshcrypto`) are left out; it falls back to pure JS. That also means no native rebuild.
+  - Main, preload and engine are bundled by esbuild with all their JavaScript dependencies, so the app ships no `node_modules`: `app.asar` holds `out/` and `package.json` only. The bundles are CommonJS (`.cjs`) because bundled CommonJS packages such as ssh2 expect `require` and `__dirname`. ssh2's optional native add-ons (`cpu-features`, `sshcrypto`) are left out; it falls back to pure JS. That also means no native rebuild.
+  - Electron fuses lock the shipped binary: `ELECTRON_RUN_AS_NODE`, `NODE_OPTIONS` and `--inspect` are ignored, the asar integrity is checked, and app code loads only from `app.asar`.
   - `agent.mjs` and the sample app ship in `resources/` (`extraResources`).
   - electron-builder targets: NSIS (assisted, per-user) and portable, each for x64 and arm64. The version comes from `apps/desktop/package.json`.
 
@@ -671,16 +675,17 @@ These are the methods main forwards to the engine host, every one validated:
 | Area | Methods |
 |---|---|
 | `macs` | `list`, `discover`, `pair`, `unpair`, `setDefault`, `connect`, `health`, `fix`, `unlockKeychain` |
-| `targets` | `list`, `watch`, `unwatch` |
+| `targets` | `list`, `watch`, `unwatch`, `refresh` |
 | `simulators` | `boot`, `shutdown` |
-| `projects` | `inspect`, `syncSize` |
-| `sessions` | `start`, `stop`, `rebuild`, `relaunch`; `start` takes `{ projectPath, mode: 'run' \| 'live', mac?, targetUdid?, options }` |
+| `projects` | `inspect`, `syncSize`, `createSample`, `installDeps` |
+| `sessions` | `start`, `stop`, `rebuild`, `relaunch`; `start` takes `{ projectPath, mode: 'run' \| 'live', mac?, target?, options }` |
 | `builds` | `ipa` |
 | `xcode` | `open` |
 | `logs` | `buildLog` |
-| `screen` | `start` (and the port arrives), `stop`, `screenshot` |
-| `tools` | `install` |
-| prompts | `prompt.respond` |
+| `screen` | `stop`, `screenshot` (streams open through main's `app:screen-open`, which creates the port pair) |
+| `debug` | `dropConnection` (development builds, to test reconnects) |
+
+Prompts (passwords, host keys, confirmations) go main → renderer and come back through `app:prompt-response`, validated like everything else.
 
 Events reach the renderer as `{ scope: { sessionId?, mac?, watchId? }, event }` envelopes, in batches.
 
@@ -692,7 +697,7 @@ Events reach the renderer as `{ scope: { sessionId?, mac?, watchId? }, event }` 
 
 ### Today (v1)
 
-The agent polls `simctl io screenshot --type=jpeg` (≈130 ms per shot) and downscales with `sips` (≈60 ms). That gives about 5 fps, about 55 KB a frame, and 200–400 ms latency. Unchanged frames are skipped. The ceiling is the screenshot round trip, not the network.
+The agent polls `simctl io screenshot --type=jpeg` (160–205 ms per shot, measured on an M1 with Xcode 26.6) and downscales with `sips` (80–93 ms). That gives about 4 fps, 80–115 KB a frame, 2.5–3.6 Mbps while the screen changes, and frames that are already ~250–300 ms old when they leave the Mac. Unchanged frames are skipped. The ceiling is the screenshot round trip, not the network.
 
 ### Design
 
@@ -710,9 +715,10 @@ Mac                                                        Windows
 ```
 
 - **Capture.**
-  - Use the simulator's framebuffer `IOSurface` through CoreSimulator / SimulatorKit, as idb (`FBSimulatorVideoStream`) and serve-sim do.
-  - No screen-recording permission is needed, and capture works with the Simulator window hidden.
-  - Frames are produced only on damage, so an idle simulator costs ~0 bandwidth.
+  - Use the simulator's framebuffer `IOSurface` through CoreSimulator, as idb (`FBSimulatorVideoStream`) and serve-sim do.
+  - Xcode 26 reworked the display API: each display port is a `SimScreen` (a ROCKit proxy to the simulator's IO server) with `registerScreenCallbacksWithUUID:callbackQueue:frameCallback:surfacesChangedCallback:propertiesChangedCallback:`. The older `SimDisplayRenderable` damage callbacks still exist but no longer fire. Several screens exist (the device's LCD is `screenType` 0; TV out and CarPlay are others).
+  - No screen-recording permission and no Simulator.app are needed: capture works with the simulator booted headless, the way capmac boots it.
+  - Frames are produced only when the screen changes, so an idle simulator costs nothing.
 - **Encode.**
   - `VTCompressionSession` (hardware), H.264 High@4.1, with `RealTime`, `AllowFrameReordering = false` and `MaxKeyFrameInterval = ∞`.
   - The keyframe is forced on request (stream start, decoder error, drop recovery).
@@ -754,4 +760,56 @@ Mac                                                        Windows
 
 ### Spike results
 
-[filled in by the spike: measured fps, latency and bandwidth per approach, and the recommendation]
+The spike lives in `spikes/streaming-v2/`:
+
+- `simstream.m`: the helper (Objective-C, about 350 lines), compiled on the Mac with `xcrun clang`.
+- `bench.ts`: builds the helper over capmac's SSH connection and measures both pipelines.
+- `decode-test.mjs`: decodes a recorded stream with WebCodecs inside the app.
+
+**Setup.**
+
+- Mac: MacBook Pro (M1), macOS 26.6.1, Xcode 26.6, iPhone 17 simulator (iOS 26.5, 1206×2622) booted headless.
+- PC: this Windows 11 machine, on the same LAN. SSH round trip: 7 ms at best, 15–20 ms typical.
+- Content: the sample app running a 60 Hz `requestAnimationFrame` animation; the app measured 60 frames per second itself.
+- Workloads: **A**, a banner over about 15 % of the screen that changes every frame; **B**, the whole screen changing every frame (the worst case).
+- Both pipelines encode at 642×1398 (longest side 1400, as v1 does).
+
+| | v1: JPEG screenshots (today) | v2: H.264 helper |
+|---|---|---|
+| Frame rate, A | 3.7 fps | **58.6 fps** |
+| Frame rate, B | 3.9 fps | **54.7 fps** |
+| Bandwidth, A | 2.5 Mbps | **0.29 Mbps** |
+| Bandwidth, B | 3.6 Mbps | 4.3 Mbps |
+| Frame size | 83–113 KB | 0.6 KB (A), 9.6 KB (B); keyframe 19–80 KB |
+| Latency, capture on the Mac → arrival on the PC | ~250–300 ms spent before a frame leaves the Mac (screenshot + `sips`), plus transfer; frames ~270 ms apart | **p50 17.5 ms, p95 30 ms (A); p50 19 ms, p95 41 ms (B)** |
+| Idle screen | screenshots keep being taken (unchanged ones are skipped) | no frames, no bytes |
+| Decoding on Windows | `createImageBitmap` (JPEG) | WebCodecs, hardware: p50 0.5 ms, p95 1.1 ms a frame (software: 2.8 ms) |
+| Work on the Mac | a `simctl` and a `sips` process per frame | 2–5 ms to scale and convert, 1–4 ms to submit to the hardware encoder |
+
+Latency is measured from the capture timestamp each frame carries, corrected by the clock offset from round-trip pings (the shortest round trip wins). Glass to glass, v2 is about one display frame plus 20–40 ms.
+
+**What the spike found.**
+
+- **Rate control matters.**
+  - With VideoToolbox's low-latency rate control at 6 Mbps, the encoder dropped half the frames under full-screen motion (29 fps).
+  - Raising its cap to 12 Mbps fixed that, but cost latency (p50 26 ms).
+  - Standard rate control (`RealTime`, no frame reordering) at 6 Mbps kept 55–60 fps with lower latency. It is the helper's default.
+- **The simulator must be on its main screen.**
+  - After a reboot, the screen list included "TVOut" ahead of the LCD. Pick the screen whose `screenType` is 0.
+- **One unexplained failure.**
+  - Once, before a simulator reboot, the main screen accepted the callbacks but produced no frames: its framebuffer was not being updated, although screenshots still worked.
+  - After `simctl shutdown` and `boot` it streamed every time, over dozens of runs.
+  - So v1 must stay as the fallback, chosen automatically.
+- **Never set the screen's power state.**
+  - `SimScreen setPowerState:` with an unexpected value turned the device's display off, and it took a reboot to recover.
+
+**Recommendation.** Make v2 the simulator stream in capmac Studio, with v1 as the automatic fallback.
+
+1. **Build the helper on the Mac.** It compiles on first use against the Mac's own Xcode into `~/.capmac/bin/<hash>/`, as the agent is deployed. It needs nothing beyond Xcode, which capmac already requires. It detects the API at runtime: `SimScreen` on Xcode 26, `SimDisplayRenderable` before.
+2. **Add an agent op `stream`.** It runs the helper and relays its length-prefixed frames on the existing SSH channel (`sendBinary`), without transcoding.
+3. **Fall back on silence.** The engine forces a keyframe at start. If no frame follows within about a second while v1 sees the screen change, it falls back to v1. It forces another keyframe after every reconnect.
+4. **Decode in the screen worker.** WebCodecs `VideoDecoder` there replaces `createImageBitmap`. It takes the `avc1.*` codec string and the avcC record from the config message, and uses `optimizeForLatency` and `prefer-hardware`.
+5. **Next: input through the same helper.** SimulatorKit's `SimDeviceLegacyHIDClient` / Indigo HID would remove the AXe requirement for taps, swipes and typing.
+6. **Next: adaptive bitrate.** Lower it when the SSH channel's write buffer backs up.
+
+The cost: an Objective-C helper that depends on private CoreSimulator interfaces, which change between Xcode versions (Xcode 26 already did). Runtime feature detection plus the v1 fallback keep that failure mode graceful. And the gain, 15× the frame rate at a fifteenth of the latency, is what turns the pane into a usable remote simulator.
