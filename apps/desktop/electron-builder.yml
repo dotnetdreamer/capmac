@@ -1,0 +1,66 @@
+# capmac Studio for Windows: an installer (per-user by default) and a portable
+# exe, for x64 and arm64. npm run desktop:build (builds out/ first).
+appId: dev.capmac.studio
+productName: capmac Studio
+executableName: capmac Studio
+copyright: Copyright © 2026 capmac contributors
+
+directories:
+  output: release/${version}
+  buildResources: resources
+
+# Everything the app runs is bundled into out/: no node_modules are shipped.
+files:
+  - package.json
+  - out/**/*
+  - '!out/agent/**'
+  - '!out/sample/**'
+  - '!**/*.map'
+# Outside app.asar: the agent is uploaded to Macs, the sample is copied to Documents.
+extraResources:
+  - from: out/agent
+    to: agent
+  - from: out/sample
+    to: sample
+  - from: resources/icons
+    to: icons
+asar: true
+npmRebuild: false
+electronLanguages: [en-US]
+
+# Lock the shipped binary down: it only runs this app, as an app.
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  grantFileProtocolExtraPrivileges: false
+
+win:
+  icon: resources/icons/icon.ico
+  legalTrademarks: capmac
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+    - target: portable
+      arch: [x64, arm64]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  buildUniversalInstaller: false
+  artifactName: capmac-studio-${version}-${arch}-setup.${ext}
+  shortcutName: capmac Studio
+  uninstallDisplayName: capmac Studio
+  installerIcon: resources/icons/icon.ico
+  uninstallerIcon: resources/icons/icon.ico
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+
+portable:
+  artifactName: capmac-studio-${version}-${arch}-portable.${ext}
+  # One exe per architecture, not an extra one with both.
+  buildUniversalInstaller: false
