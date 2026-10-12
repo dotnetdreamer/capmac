@@ -1,0 +1,236 @@
+/* ─── Command palette ────────────────────────────────────────────────────── */
+.palette {
+  padding: 0;
+  margin: 12vh auto auto;
+  width: min(640px, calc(100vw - 48px));
+  max-height: min(560px, 76vh);
+  border: 1px solid var(--stroke-surface);
+  border-radius: var(--r-card);
+  background: var(--flyout);
+  backdrop-filter: blur(40px) saturate(1.6);
+  color: var(--text-1);
+  box-shadow: var(--shadow-dialog);
+  overflow: hidden;
+  &[open] {
+    display: flex;
+    flex-direction: column;
+    animation: pop-in var(--dur-normal) var(--ease-out);
+  }
+  &::backdrop {
+    background: rgb(0 0 0 / 0.18);
+    animation: fade-in var(--dur-normal) linear;
+  }
+}
+.palette__search {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  height: 52px;
+  padding: 0 var(--s-4);
+  border-bottom: 1px solid var(--stroke-divider);
+  .icon {
+    color: var(--text-2);
+  }
+  input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    border: 0;
+    background: transparent;
+    outline: none;
+    font: var(--type-body-lg);
+    font-size: 15px;
+    &::placeholder {
+      color: var(--text-3);
+    }
+  }
+}
+.palette__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-1) var(--s-1) var(--s-2);
+}
+.palette__group {
+  padding: var(--s-3) var(--s-3) var(--s-1);
+  color: var(--text-3);
+  font: var(--type-caption);
+  font-weight: 600;
+}
+.palette__item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  height: 36px;
+  padding: 0 var(--s-3);
+  border-radius: var(--r-control);
+  cursor: default;
+  .icon {
+    color: var(--text-2);
+  }
+  &.is-active {
+    background: var(--fill-subtle-selected);
+    .icon {
+      color: var(--accent-text);
+    }
+  }
+}
+.palette__no-icon {
+  width: 16px;
+}
+.palette__title {
+  flex: 1 1 auto;
+}
+.palette__hint {
+  flex: 0 1 auto;
+  max-width: 45%;
+  color: var(--text-3);
+  font: var(--type-small);
+}
+.palette__empty {
+  padding: var(--s-8) var(--s-4);
+  text-align: center;
+  color: var(--text-3);
+}
+.palette__footer {
+  display: flex;
+  gap: var(--s-4);
+  padding: var(--s-2) var(--s-4);
+  border-top: 1px solid var(--stroke-divider);
+  color: var(--text-3);
+  font: var(--type-caption);
+  span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+}
+
+/* ─── Toasts ─────────────────────────────────────────────────────────────── */
+.toaster {
+  position: fixed;
+  right: var(--s-5);
+  bottom: var(--s-5);
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--s-2);
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  width: 360px;
+  padding: var(--s-3) var(--s-2) var(--s-3) var(--s-4);
+  border: 1px solid var(--stroke-surface);
+  border-radius: var(--r-card);
+  background: var(--flyout);
+  backdrop-filter: blur(30px) saturate(1.5);
+  box-shadow: var(--shadow-flyout);
+  animation: rise-in var(--dur-slow) var(--ease-spring);
+}
+.toast__icon {
+  margin-top: 1px;
+  .toast--info & {
+    color: var(--accent);
+  }
+  .toast--success & {
+    color: var(--success);
+  }
+  .toast--caution & {
+    color: var(--caution);
+  }
+  .toast--critical & {
+    color: var(--critical);
+  }
+}
+.toast__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+.toast__title {
+  font-weight: 600;
+}
+.toast__text {
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.toast__action {
+  margin-top: var(--s-2);
+}
+
+/* ─── Drop overlay ───────────────────────────────────────────────────────── */
+.drop-overlay {
+  position: fixed;
+  inset: var(--titlebar-h) 0 0 0;
+  z-index: 400;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border: 2px dashed var(--accent);
+  border-radius: var(--r-card);
+  margin: var(--s-2);
+  animation: fade-in var(--dur-normal) linear;
+  pointer-events: none;
+}
+.drop-overlay__card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-8) var(--s-10);
+  border-radius: var(--r-card);
+  background: var(--flyout-solid);
+  box-shadow: var(--shadow-dialog);
+  color: var(--text-1);
+  .icon {
+    color: var(--accent-text);
+  }
+}
+.drop-overlay__title {
+  font: var(--type-subtitle);
+}
+.drop-overlay__text {
+  color: var(--text-2);
+}
+
+/* ─── Engine banner ──────────────────────────────────────────────────────── */
+.engine-banner {
+  padding: var(--s-3) var(--s-4) 0;
+}
+
+/* ─── Prompts ────────────────────────────────────────────────────────────── */
+.fingerprint {
+  display: block;
+  padding: var(--s-3);
+  border-radius: var(--r-control);
+  background: var(--code-bg);
+  font: var(--type-mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.choose-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.choose-list__item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-2_5) var(--s-3);
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  text-align: left;
+  &:hover {
+    background: var(--fill-subtle-hover);
+  }
+}

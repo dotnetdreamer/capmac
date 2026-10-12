@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { Target, TargetsResult } from '../../shared/protocol.js';
 import { toolEnv } from '../env.js';
 import { step, type AgentIO } from '../io.js';
-import { AgentError, parseJsonLoose, run, tryCapture, which } from '../proc.js';
+import { AgentError, parseJsonLoose, run, sleep, tryCapture, which } from '../proc.js';
 
 interface SimRuntime {
   name: string;
@@ -98,6 +98,8 @@ export function parseDevices(json: string): Target[] {
       available: paired && tunnel !== 'unavailable' && props.developerModeStatus !== 'disabled',
       model: hw.marketingName ?? hw.productType,
       connection: conn.transportType === 'wired' ? 'usb' : conn.transportType === 'localNetwork' ? 'network' : 'unknown',
+      developerMode: props.developerModeStatus === 'enabled' ? 'enabled' : props.developerModeStatus === 'disabled' ? 'disabled' : 'unknown',
+      paired,
     });
   }
   return out;
@@ -127,6 +129,39 @@ export async function opTargets(): Promise<TargetsResult> {
   const env = await toolEnv();
   const [simulators, devices] = await Promise.all([listSimulators(env), listDevices(env)]);
   return { simulators, devices: devices.devices, deviceSupport: devices.supported };
+}
+
+/**
+ * Keeps watching simulators and devices and sends `targets` whenever anything
+ * changes (booted, shut down, plugged in, …). One long-lived process instead
+ * of a new agent per poll; devices (devicectl is slow) are checked less often.
+ */
+export async function opWatchTargets(params: { simulatorsEveryMs?: number; devicesEveryMs?: number }, io: AgentIO): Promise<{ updates: number }> {
+  const env = await toolEnv();
+  const simEvery = Math.min(60_000, Math.max(1000, params.simulatorsEveryMs ?? 3000));
+  const devEvery = Math.min(120_000, Math.max(5000, params.devicesEveryMs ?? 15_000));
+  let devices: { devices: Target[]; supported: boolean } = { devices: [], supported: true };
+  let lastDevices = 0;
+  let last = '';
+  let updates = 0;
+  while (!io.signal.aborted) {
+    const checkDevices = Date.now() - lastDevices >= devEvery;
+    const [simulators, nextDevices] = await Promise.all([listSimulators(env), checkDevices ? listDevices(env) : Promise.resolve(null)]);
+    if (io.signal.aborted) break;
+    if (nextDevices) {
+      devices = nextDevices;
+      lastDevices = Date.now();
+    }
+    const data: TargetsResult = { simulators, devices: devices.devices, deviceSupport: devices.supported };
+    const json = JSON.stringify(data);
+    if (json !== last) {
+      last = json;
+      updates += 1;
+      io.send({ t: 'targets', data });
+    }
+    await sleep(simEvery, io.signal);
+  }
+  return { updates };
 }
 
 const BREW_FORMULAE: Record<string, string> = {

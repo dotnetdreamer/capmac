@@ -162,6 +162,7 @@ export async function opBuild(params: BuildParams, io: AgentIO): Promise<BuildRe
           hint?.code ?? 'BUILD_FAILED',
           hint?.hint ?? `Full build log on the Mac: ${logPath}${params.verbose ? '' : ' (or re-run with --verbose)'}`,
           tail,
+          logPath,
         );
       }
       return r;

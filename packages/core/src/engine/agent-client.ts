@@ -13,11 +13,13 @@ export class AgentCallError extends Error {
   readonly code?: string;
   readonly hint?: string;
   readonly tail?: string[];
+  readonly logPath?: string;
   constructor(info: AgentErrorInfo) {
     super(info.message);
     this.code = info.code;
     this.hint = info.hint;
     this.tail = info.tail;
+    this.logPath = info.logPath;
   }
 }
 

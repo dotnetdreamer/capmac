@@ -1,0 +1,214 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+html {
+  background: var(--bg-solid);
+  /* With Mica the window itself draws the backdrop. */
+  &[data-mica='true'] {
+    background: transparent;
+  }
+}
+
+body {
+  font: var(--type-body);
+  color: var(--text-1);
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;
+}
+
+/* Text the user may want to copy */
+.selectable,
+input,
+textarea,
+code,
+pre,
+.mono {
+  user-select: text;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+
+h1 {
+  font: var(--type-title);
+}
+h2 {
+  font: var(--type-subtitle);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: default;
+}
+
+a {
+  color: var(--accent-text);
+  text-decoration: none;
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+code,
+kbd,
+.mono {
+  font-family: var(--font-mono);
+}
+
+code {
+  font-size: 0.92em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--code-bg);
+}
+
+::selection {
+  background: var(--accent-subtle-strong);
+}
+
+/* Fluent focus rectangle: only for keyboard focus */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--focus-outer);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 1px var(--focus-inner);
+}
+
+/* Windows 11 style thin scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar) transparent;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.muted {
+  color: var(--text-2);
+}
+
+.faint {
+  color: var(--text-3);
+}
+
+.truncate {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: var(--s-2);
+  top: -100px;
+  z-index: 1000;
+  padding: var(--s-2) var(--s-3);
+  border-radius: var(--r-control);
+  background: var(--flyout-solid);
+  color: var(--text-1);
+  box-shadow: var(--shadow-flyout);
+  &:focus-visible {
+    top: var(--s-2);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+@keyframes slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: var(--dur-normal) !important;
+  }
+  /* Progress indicators keep moving: they carry information. */
+  .spinner,
+  .progress-indeterminate::after {
+    animation-duration: 1.2s !important;
+    animation-iteration-count: infinite !important;
+  }
+}

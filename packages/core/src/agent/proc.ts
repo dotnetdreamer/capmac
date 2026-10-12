@@ -3,7 +3,7 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import path from 'node:path';
 
 export class AgentError extends Error {
-  constructor(message: string, readonly code?: string, readonly hint?: string, readonly tail?: string[]) {
+  constructor(message: string, readonly code?: string, readonly hint?: string, readonly tail?: string[], readonly logPath?: string) {
     super(message);
   }
 }

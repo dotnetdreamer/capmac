@@ -1,0 +1,267 @@
+/* ─── Shell ──────────────────────────────────────────────────────────────── */
+.app {
+  height: 100%;
+  display: grid;
+  grid-template-rows: var(--titlebar-h) minmax(0, 1fr);
+}
+.app--loading {
+  display: block;
+}
+.app__body {
+  display: flex;
+  min-height: 0;
+}
+
+/* The content layer over Mica, rounded at the top-left like WinUI's NavigationView. */
+.layer {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--layer);
+  border-top: 1px solid var(--stroke-card);
+  border-left: 1px solid var(--stroke-card);
+  border-top-left-radius: var(--r-layer);
+  overflow: hidden;
+  outline: none;
+}
+.view-loading {
+  flex: 1;
+}
+
+/* ─── Title bar ──────────────────────────────────────────────────────────── */
+.titlebar {
+  -webkit-app-region: drag;
+  /* Leave room for the native caption buttons (Window Controls Overlay). */
+  width: env(titlebar-area-width, 100%);
+  height: var(--titlebar-h);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 440px) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s-4);
+  padding: 0 var(--s-2) 0 var(--s-4);
+  button,
+  input {
+    -webkit-app-region: no-drag;
+  }
+}
+.titlebar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2_5);
+  min-width: 0;
+  font: var(--type-small);
+}
+.titlebar__app {
+  color: var(--text-1);
+  white-space: nowrap;
+}
+.titlebar__sep {
+  color: var(--text-3);
+  margin: 0 -2px;
+}
+.titlebar__crumb {
+  color: var(--text-2);
+}
+.titlebar__search {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: 28px;
+  padding: 0 var(--s-1) 0 var(--s-2_5);
+  border: 1px solid var(--stroke-control);
+  border-radius: var(--r-control);
+  background: var(--fill-control);
+  color: var(--text-3);
+  font: var(--type-small);
+  text-align: left;
+  transition: background var(--dur-fast) linear;
+  &:hover {
+    background: var(--fill-control-hover);
+    color: var(--text-2);
+  }
+  .icon {
+    color: var(--text-2);
+  }
+}
+.titlebar__search-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app--onboarding .titlebar {
+  grid-template-columns: 1fr;
+}
+
+/* ─── Sidebar (NavigationView) ───────────────────────────────────────────── */
+.sidebar {
+  width: var(--sidebar-w);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-1) var(--s-2);
+  overflow-y: auto;
+  overflow-x: hidden;
+  &.is-collapsed {
+    width: var(--sidebar-w-collapsed);
+  }
+}
+.sidebar__group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sidebar__heading {
+  padding: var(--s-2) var(--s-3) var(--s-1);
+  color: var(--text-2);
+  font: var(--type-caption);
+  font-weight: 600;
+}
+.sidebar__spacer {
+  flex: 1;
+}
+
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  height: 36px;
+  padding: 0 var(--s-3);
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  color: var(--text-1);
+  font: var(--type-body-lg);
+  text-align: left;
+  transition: background var(--dur-fast) linear;
+  .is-collapsed & {
+    justify-content: center;
+    padding: 0;
+  }
+  &:hover {
+    background: var(--fill-subtle-hover);
+  }
+  &:active {
+    background: var(--fill-subtle-pressed);
+  }
+  &.is-selected {
+    background: var(--fill-subtle-selected);
+  }
+  /* The selection pill */
+  &.is-selected::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 3px;
+    height: 16px;
+    margin-top: -8px;
+    border-radius: 2px;
+    background: var(--accent);
+    animation: pill-in var(--dur-slow) var(--ease-spring);
+  }
+  .icon {
+    color: var(--text-1);
+  }
+}
+@keyframes pill-in {
+  from {
+    transform: scaleY(0.2);
+  }
+}
+.nav-item__label {
+  flex: 1;
+}
+.nav-item__app {
+  position: relative;
+  display: grid;
+  .dot {
+    position: absolute;
+    right: -3px;
+    bottom: -3px;
+    width: 7px;
+    height: 7px;
+    box-shadow: 0 0 0 2px var(--bg-solid);
+  }
+}
+
+.mac-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 44px;
+  padding: var(--s-1_5) var(--s-3);
+  border: 0;
+  border-radius: var(--r-control);
+  background: transparent;
+  text-align: left;
+  .is-collapsed & {
+    justify-content: center;
+    padding: 0;
+  }
+  &:hover {
+    background: var(--fill-subtle-hover);
+  }
+}
+.mac-chip__icon {
+  position: relative;
+  display: grid;
+  .dot {
+    position: absolute;
+    right: -4px;
+    bottom: -3px;
+    width: 8px;
+    height: 8px;
+    box-shadow: 0 0 0 2px var(--bg-solid);
+  }
+}
+.mac-chip__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.mac-chip__name {
+  font: var(--type-body);
+  color: var(--text-1);
+}
+.mac-chip__status {
+  font: var(--type-caption);
+  color: var(--text-2);
+}
+
+/* ─── Pages ──────────────────────────────────────────────────────────────── */
+.page {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-8) var(--s-10) var(--s-12);
+  animation: rise-in var(--dur-slow) var(--ease-out);
+}
+.page__inner {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+.page__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s-4);
+  margin-bottom: var(--s-6);
+}
+.page__title {
+  font: var(--type-title-lg);
+}
+.page__subtitle {
+  color: var(--text-2);
+  margin-top: var(--s-1);
+  font: var(--type-body-lg);
+}
+.page__actions {
+  display: flex;
+  gap: var(--s-2);
+  flex: none;
+}

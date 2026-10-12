@@ -91,6 +91,27 @@ function inputArgs(event: InputEvent, points: PointSize, udid: string): string[]
   }
 }
 
+/** One full-resolution screenshot (PNG), sent as binary frames; the result carries its size. */
+export async function opScreenshot(params: { udid: string }, io: AgentIO): Promise<{ bytes: number; width: number | null; height: number | null }> {
+  const env = await toolEnv();
+  const file = path.join(os.tmpdir(), `capmac-shot-${params.udid}-${process.pid}.png`);
+  try {
+    const r = await run('xcrun', ['simctl', 'io', params.udid, 'screenshot', '--type=png', file], { env, signal: io.signal, timeoutMs: 30_000 });
+    if (r.code !== 0) {
+      if (/not booted|Invalid device|No devices are booted/i.test(r.stderr)) throw new AgentError('The simulator is not running.', 'TARGET_NOT_FOUND');
+      throw new AgentError('Taking the screenshot failed', 'DEPLOY_FAILED', undefined, r.tail.slice(-5));
+    }
+    const data = await fs.readFile(file);
+    // PNG IHDR: width and height are the first two 32-bit fields after the signature and chunk header.
+    const width = data.length > 24 ? data.readUInt32BE(16) : null;
+    const height = data.length > 24 ? data.readUInt32BE(20) : null;
+    await io.sendBinary(data);
+    return { bytes: data.length, width, height };
+  } finally {
+    await fs.rm(file, { force: true }).catch(() => undefined);
+  }
+}
+
 /**
  * Streams the simulator screen as JPEG frames (binary frames on stdout) and
  * performs input events sent by the client (via AXe, when installed).

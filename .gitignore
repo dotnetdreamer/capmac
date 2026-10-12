@@ -1,6 +1,10 @@
 node_modules/
 dist/
+out/
+apps/desktop/release/
 coverage/
+test-results/
+playwright-report/
 *.log
 .capmac/
 .DS_Store

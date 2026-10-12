@@ -6,14 +6,14 @@ import type { AgentErrorInfo } from '../shared/protocol.js';
 import { AgentIO } from './io.js';
 import { opArchive, opDownload } from './ops/archive.js';
 import { opBuild } from './ops/build.js';
-import { opBoot, opDeploy, opLogs } from './ops/deploy.js';
+import { opBoot, opDeploy, opLogs, opShutdown } from './ops/deploy.js';
 import { opClean, opExec, opKeychain, opOpenXcode, opPull, opRelay } from './ops/misc.js';
 import { opPrepare } from './ops/prepare.js';
 import { keychainLocked, opProbe } from './ops/probe.js';
 import { toolEnv } from './env.js';
-import { opScreen } from './ops/screen.js';
+import { opScreen, opScreenshot } from './ops/screen.js';
 import { opSync } from './ops/sync.js';
-import { opInstallTools, opTargets } from './ops/targets.js';
+import { opInstallTools, opTargets, opWatchTargets } from './ops/targets.js';
 import { AgentError, killAll } from './proc.js';
 import { AGENT_VERSION } from './version.js';
 
@@ -28,9 +28,12 @@ const OPS: Record<string, Handler> = {
   download: opDownload,
   deploy: opDeploy,
   boot: opBoot,
+  shutdown: opShutdown,
   logs: opLogs,
   targets: () => opTargets(),
+  'watch-targets': opWatchTargets,
   screen: opScreen,
+  screenshot: opScreenshot,
   exec: opExec,
   pull: opPull,
   keychain: (params) => opKeychain(params),
@@ -44,7 +47,7 @@ const OPS: Record<string, Handler> = {
 
 function toErrorInfo(err: unknown): AgentErrorInfo {
   if (err instanceof AgentError) {
-    return { message: err.message, code: err.code, hint: err.hint, tail: err.tail };
+    return { message: err.message, code: err.code, hint: err.hint, tail: err.tail, logPath: err.logPath };
   }
   const e = err as { message?: string; code?: string } | undefined;
   return { message: e?.message ?? String(err), code: typeof e?.code === 'string' ? e.code : undefined };

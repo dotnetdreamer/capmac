@@ -89,7 +89,7 @@ async function xcodebuildStep(io: AgentIO, id: string, title: string, args: stri
       if (r.cancelled) throw new AgentError('Cancelled', 'CANCELLED');
       if (r.code !== 0) {
         const hint = hintForBuildOutput(r.tail.join('\n'));
-        throw new AgentError(`${title} failed`, hint?.code ?? 'BUILD_FAILED', hint?.hint, r.tail.filter((l) => l.trim()).slice(-25));
+        throw new AgentError(`${title} failed`, hint?.code ?? 'BUILD_FAILED', hint?.hint, r.tail.filter((l) => l.trim()).slice(-25), logFile);
       }
     });
   } finally {

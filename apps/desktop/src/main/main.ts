@@ -1,0 +1,370 @@
+/**
+ * capmac Studio, main process: windows, tray, notifications, OS integration
+ * and request validation. The engine runs in a utility process (engine.ts).
+ */
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, MessageChannelMain, nativeImage, nativeTheme, Notification, shell, systemPreferences, type IpcMainInvokeEvent } from 'electron';
+import { z } from 'zod';
+import {
+  appChannels,
+  engineMethods,
+  type AppChannel,
+  type AppCommand,
+  type AppInfo,
+  type AppResults,
+  type EngineMethod,
+  type EngineStatus,
+  type Envelope,
+  type PromptRequest,
+  type Settings,
+} from '../shared/contract.js';
+import { EngineProcess } from './engine.js';
+import { openInEditor } from './editor.js';
+import { agentPath, iconsDir, outDir, sampleDir } from './paths.js';
+import { SettingsStore } from './settings.js';
+import { AppTray } from './tray.js';
+import { APP_ORIGIN, createMainWindow, hardenSession, micaSupported, registerAppScheme, serveRenderer } from './window.js';
+
+
+const devUrl = process.env.ELECTRON_RENDERER_URL ?? null;
+const isDev = !app.isPackaged;
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  process.exit(0);
+}
+registerAppScheme();
+app.setAppUserModelId('dev.capmac.studio');
+
+let win: BrowserWindow | null = null;
+let settings: SettingsStore;
+let engine: EngineProcess;
+let tray: AppTray | null = null;
+let quitting = false;
+let engineStatus: EngineStatus = { state: 'starting' };
+const mica = micaSupported();
+const pendingPrompts: PromptRequest[] = [];
+const running = new Map<string, { projectPath: string; mode: 'run' | 'live' | 'ipa' }>();
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+
+function accentColor(): string | null {
+  try {
+    const rgba = systemPreferences.getAccentColor();
+    return rgba ? `#${rgba.slice(0, 6)}` : null;
+  } catch {
+    return null;
+  }
+}
+
+function send(channel: string, payload: unknown): void {
+  if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+}
+
+function showWindow(): void {
+  if (!win || win.isDestroyed()) {
+    win = openWindow();
+    return;
+  }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+function command(cmd: AppCommand): void {
+  showWindow();
+  send('app:command', cmd);
+}
+
+function projectName(projectPath: string | undefined): string {
+  if (!projectPath) return 'Your app';
+  const recent = settings.get().recentProjects.find((p) => p.path.toLowerCase() === projectPath.toLowerCase());
+  return recent?.name ?? path.basename(projectPath);
+}
+
+function updateTray(): void {
+  const s = settings.get();
+  const last = s.lastProject ? { path: s.lastProject, name: projectName(s.lastProject) } : null;
+  tray?.update({ lastProject: last, running: [...running.values()].map((r) => ({ ...r, name: projectName(r.projectPath) })) });
+}
+
+/** A Windows notification, only when capmac Studio is not in front. */
+function notify(title: string, body: string, onClick?: () => void): void {
+  if (!settings.get().notifications || !Notification.isSupported()) return;
+  if (win && !win.isDestroyed() && win.isVisible() && win.isFocused()) return;
+  const n = new Notification({ title, body, icon: path.join(iconsDir(), 'icon.png'), silent: false });
+  n.on('click', () => {
+    showWindow();
+    onClick?.();
+  });
+  n.show();
+}
+
+function updateVisibility(): void {
+  const visible = Boolean(win && !win.isDestroyed() && win.isVisible() && !win.isMinimized());
+  engine?.setVisible(visible);
+}
+
+// ─── Engine events: relay to the window, drive tray and notifications ─────
+
+const launchedAt = new Map<string, number>();
+
+function onEngineEvents(batch: Envelope[]): void {
+  send('engine:events', batch);
+  for (const { scope, event } of batch) {
+    switch (event.type) {
+      case 'session-started':
+        if (scope.sessionId) running.set(scope.sessionId, { projectPath: event.projectPath, mode: event.mode === 'live' || event.mode === 'ipa' ? event.mode : 'run' });
+        if (scope.sessionId) launchedAt.set(scope.sessionId, Date.now());
+        updateTray();
+        break;
+      case 'session-ended':
+        if (scope.sessionId) running.delete(scope.sessionId);
+        updateTray();
+        if (!event.ok && event.error && scope.projectPath) {
+          const name = projectName(scope.projectPath);
+          settings.recordRun(scope.projectPath, { at: Date.now(), mode: event.mode === 'live' ? 'live' : 'run', ok: false, ms: event.ms });
+          notify(`${name}: ${event.mode === 'ipa' ? 'IPA export' : 'build'} failed`, event.error.message, () => command({ type: 'open-project', path: scope.projectPath! }));
+        }
+        break;
+      case 'app':
+        if (event.state === 'running' && scope.projectPath) {
+          const started = scope.sessionId ? launchedAt.get(scope.sessionId) : undefined;
+          const ms = started ? Date.now() - started : undefined;
+          if (scope.sessionId) launchedAt.delete(scope.sessionId);
+          const mode = scope.sessionId ? running.get(scope.sessionId)?.mode : undefined;
+          settings.recordRun(scope.projectPath, { at: Date.now(), mode: mode === 'live' ? 'live' : 'run', ok: true, target: event.target, ms });
+          notify(`${event.name ?? projectName(scope.projectPath)} is running`, `on ${event.target ?? 'the simulator'}${ms ? ` · ${(ms / 1000).toFixed(1)} s` : ''}`, () => command({ type: 'open-project', path: scope.projectPath! }));
+        }
+        break;
+      case 'session':
+        if (event.state === 'failed' && event.mode === 'live' && event.error && scope.projectPath) {
+          notify(`${projectName(scope.projectPath)}: rebuild failed`, event.error.message, () => command({ type: 'open-project', path: scope.projectPath! }));
+        }
+        break;
+      case 'ipa-ready':
+        notify('IPA ready', path.basename(event.file), () => shell.showItemInFolder(event.file));
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+function onEnginePrompt(prompt: PromptRequest): void {
+  if (!win || win.isDestroyed()) {
+    engine.respondPrompt({ id: prompt.id, ok: false });
+    return;
+  }
+  showWindow();
+  pendingPrompts.push(prompt);
+  send('engine:prompt', prompt);
+}
+
+// ─── IPC (every payload validated; only our own pages may call) ───────────
+
+function trusted(event: IpcMainInvokeEvent): boolean {
+  const url = event.senderFrame?.url ?? '';
+  try {
+    const origin = new URL(url).origin;
+    return origin === APP_ORIGIN || (devUrl !== null && origin === new URL(devUrl).origin);
+  } catch {
+    return false;
+  }
+}
+
+function handle<C extends AppChannel>(channel: C, fn: (payload: z.output<(typeof appChannels)[C]>, event: IpcMainInvokeEvent) => Promise<AppResults[C]> | AppResults[C]): void {
+  ipcMain.handle(channel, async (event, payload) => {
+    if (!trusted(event)) throw new Error('Request from an untrusted page.');
+    const parsed = appChannels[channel].safeParse(payload);
+    if (!parsed.success) throw new Error(`Invalid request (${channel}): ${z.prettifyError(parsed.error)}`);
+    return fn(parsed.data as z.output<(typeof appChannels)[C]>, event);
+  });
+}
+
+function registerIpc(): void {
+  handle('app:info', (): AppInfo => ({
+    version: __APP_VERSION__,
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    node: process.versions.node,
+    agent: __AGENT_VERSION__,
+    platform: process.platform,
+    arch: process.arch,
+    osRelease: process.getSystemVersion(),
+    packaged: app.isPackaged,
+    dev: isDev,
+    configDir: process.env.CAPMAC_CONFIG_DIR || path.join(app.getPath('home'), '.capmac'),
+    accent: accentColor(),
+    mica,
+  }));
+  handle('app:get-settings', () => settings.get());
+  handle('app:set-settings', (patch) => settings.update(patch));
+  handle('app:pick-folder', async () => {
+    const result = await dialog.showOpenDialog(win!, { title: 'Add a Capacitor app', properties: ['openDirectory'] });
+    return result.canceled ? null : result.filePaths[0] ?? null;
+  });
+  handle('app:open-in-editor', ({ file, line, column }) => openInEditor(settings.get().editor, file, line, column));
+  handle('app:show-in-folder', ({ path: p }) => shell.showItemInFolder(p));
+  handle('app:open-path', async ({ path: p }) => {
+    const error = await shell.openPath(p);
+    if (error) throw new Error(error);
+  });
+  handle('app:open-external', ({ url }) => shell.openExternal(url));
+  handle('app:project-icon', async ({ path: p }) => {
+    if (!/\.png$/i.test(p)) return null;
+    const image = nativeImage.createFromPath(p);
+    if (image.isEmpty()) return null;
+    return image.resize({ width: 128, height: 128, quality: 'best' }).toDataURL();
+  });
+  handle('app:save-image', async ({ data, name }) => {
+    const result = await dialog.showSaveDialog(win!, { title: 'Save screenshot', defaultPath: path.join(app.getPath('pictures'), name), filters: [{ name: 'PNG image', extensions: ['png'] }] });
+    if (result.canceled || !result.filePath) return null;
+    await fs.writeFile(result.filePath, Buffer.from(data instanceof ArrayBuffer ? new Uint8Array(data) : data));
+    return result.filePath;
+  });
+  handle('app:copy-image', async ({ data }) => {
+    const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
+    await clipboard.write([new ClipboardItem({ 'image/png': new Blob([bytes], { type: 'image/png' }) })]);
+  });
+  handle('app:save-text', async ({ text, name }) => {
+    const result = await dialog.showSaveDialog(win!, { title: 'Export', defaultPath: path.join(app.getPath('documents'), name), filters: [{ name: 'Log file', extensions: ['log', 'txt'] }] });
+    if (result.canceled || !result.filePath) return null;
+    await fs.writeFile(result.filePath, text);
+    return result.filePath;
+  });
+  handle('app:screen-open', ({ mac, udid }, event) => {
+    const streamId = `scr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const { port1, port2 } = new MessageChannelMain();
+    engine.openScreen(streamId, mac, udid, port1);
+    event.sender.postMessage('screen-port', { streamId }, [port2]);
+    return { streamId };
+  });
+  handle('app:project-opened', (entry) => {
+    settings.touchProject(entry);
+    updateTray();
+  });
+  handle('app:forget-project', ({ path: p }) => {
+    settings.forgetProject(p);
+    updateTray();
+  });
+  handle('app:engine-call', async ({ method, params }) => {
+    if (!Object.hasOwn(engineMethods, method) || (method === 'debug.dropConnection' && app.isPackaged)) {
+      return { ok: false, error: { message: `capmac Studio does not know "${method}".`, expected: false } };
+    }
+    const parsed = engineMethods[method as EngineMethod].safeParse(params ?? {});
+    if (!parsed.success) {
+      return { ok: false, error: { message: 'capmac Studio sent an invalid request.', details: z.prettifyError(parsed.error).split('\n'), expected: false } };
+    }
+    return engine.call(method as EngineMethod, parsed.data);
+  });
+  handle('app:prompt-response', (response) => {
+    const index = pendingPrompts.findIndex((p) => p.id === response.id);
+    if (index < 0) return;
+    pendingPrompts.splice(index, 1);
+    engine.respondPrompt(response);
+  });
+  handle('app:visibility', () => updateVisibility());
+  // Late-loading pages ask for state they may have missed.
+  ipcMain.on('app:hello', (event) => {
+    event.sender.send('engine:status', engineStatus);
+    for (const prompt of pendingPrompts) event.sender.send('engine:prompt', prompt);
+  });
+}
+
+// ─── Window ────────────────────────────────────────────────────────────────
+
+function openWindow(): BrowserWindow {
+  const w = createMainWindow({
+    preload: outDir('preload', 'preload.cjs'),
+    url: devUrl ?? `${APP_ORIGIN}/index.html`,
+    icon: path.join(iconsDir(), 'icon.ico'),
+    mica,
+  });
+  w.on('show', updateVisibility);
+  w.on('hide', updateVisibility);
+  w.on('minimize', updateVisibility);
+  w.on('restore', updateVisibility);
+  w.on('close', (event) => {
+    if (quitting || running.size === 0 || !settings.get().keepInTray) return;
+    // A session is running: keep it going in the tray.
+    event.preventDefault();
+    w.hide();
+    if (!settings.get().trayHintShown) {
+      settings.update({ trayHintShown: true });
+      new Notification({ title: 'capmac Studio is still running', body: 'Your app keeps running. Find capmac Studio in the notification area to stop it or quit.', icon: path.join(iconsDir(), 'icon.png') }).show();
+    }
+  });
+  w.on('closed', () => {
+    if (win === w) win = null;
+    // Nothing running: closing the window quits the app.
+    if (!quitting && running.size === 0) app.quit();
+  });
+  if (isDev) w.webContents.on('console-message', (details) => {
+    if (details.level === 'error' || details.level === 'warning') console.log(`[renderer ${details.level}] ${details.message}`);
+  });
+  return w;
+}
+
+// ─── Lifecycle ─────────────────────────────────────────────────────────────
+
+app.on('second-instance', (_event, argv) => {
+  showWindow();
+  const folder = argv.slice(1).find((a) => !a.startsWith('-') && path.isAbsolute(a));
+  if (folder) send('app:command', { type: 'open-project', path: folder } satisfies AppCommand);
+});
+
+app.whenReady().then(() => {
+  settings = new SettingsStore();
+  nativeTheme.themeSource = settings.get().theme;
+  serveRenderer();
+  hardenSession(devUrl);
+  engine = new EngineProcess(outDir('engine', 'engine.cjs'), () => ({
+    agentPath: agentPath(),
+    sampleDir: sampleDir(),
+    samplesHome: path.join(app.getPath('documents'), 'capmac Studio'),
+    settings: { verbose: settings.get().verbose, osLogs: settings.get().osLogs },
+  }), {
+    onEvents: onEngineEvents,
+    onPrompt: onEnginePrompt,
+    onStatus: (status) => {
+      engineStatus = status;
+      if (status.state === 'crashed') {
+        // Prompts of the crashed engine can never be answered.
+        pendingPrompts.length = 0;
+        running.clear();
+        updateTray();
+      }
+      send('engine:status', status);
+    },
+  });
+  engine.start();
+  registerIpc();
+  settings.onChange((s: Settings) => {
+    nativeTheme.themeSource = s.theme;
+    engine.setSettings({ verbose: s.verbose, osLogs: s.osLogs });
+    send('app:settings', s);
+  });
+  systemPreferences.on('accent-color-changed', () => send('app:accent', accentColor()));
+  win = openWindow();
+  tray = new AppTray(iconsDir(), { show: showWindow, quit: () => app.quit(), command });
+  updateTray();
+});
+
+app.on('window-all-closed', () => {
+  // Kept alive by the tray while a session runs; otherwise `closed` already quit.
+});
+
+let shutdownDone = false;
+app.on('before-quit', (event) => {
+  quitting = true;
+  if (shutdownDone) return;
+  event.preventDefault();
+  // Stop running apps, tunnels and dev servers cleanly before exiting.
+  void engine.shutdown().finally(() => {
+    shutdownDone = true;
+    tray?.destroy();
+    app.quit();
+  });
+});

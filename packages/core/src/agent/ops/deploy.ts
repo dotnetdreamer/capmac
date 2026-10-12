@@ -195,6 +195,16 @@ export async function opBoot(params: { target: Target; show?: boolean }, io: Age
   return { booted: true };
 }
 
+/** Shuts a simulator down (fine if it is already shut down). */
+export async function opShutdown(params: { target: Target }, io: AgentIO): Promise<{ shutdown: boolean }> {
+  const env = await toolEnv();
+  const r = await run('xcrun', ['simctl', 'shutdown', params.target.udid], { env, signal: io.signal, timeoutMs: 120_000 });
+  if (r.code !== 0 && !/current state: Shutdown/i.test(r.tail.join('\n'))) {
+    throw new AgentError(`Could not shut down ${params.target.name}`, 'DEPLOY_FAILED', undefined, r.tail.slice(-10));
+  }
+  return { shutdown: true };
+}
+
 export async function opDeploy(params: DeployParams, io: AgentIO): Promise<DeployResult> {
   const env = await toolEnv();
   return params.target.kind === 'simulator' ? deploySimulator(params, io, env) : deployDevice(params, io, env);

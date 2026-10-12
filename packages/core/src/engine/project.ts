@@ -93,12 +93,22 @@ interface ResolvedCapConfig {
   iosPackageManager?: string;
 }
 
+/**
+ * The Node.js to run project tools with. Inside Electron (capmac Studio)
+ * process.execPath is the app itself, so use the developer's Node from PATH.
+ */
+export function nodeExecutable(): string {
+  return process.versions.electron ? (process.platform === 'win32' ? 'node.exe' : 'node') : process.execPath;
+}
+
 /** Asks the project's own Capacitor CLI for the evaluated config (handles TS configs). */
 function evaluateWithCli(capDir: string): Promise<ResolvedCapConfig | null> {
   const cli = findLocalCapCli(capDir);
   if (!cli) return Promise.resolve(null);
   return new Promise((resolve) => {
-    execFile(process.execPath, [cli, 'config', '--json'], { cwd: capDir, timeout: 30_000, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, CI: '1', FORCE_COLOR: '0' } }, (err, stdout) => {
+    const env: NodeJS.ProcessEnv = { ...process.env, CI: '1', FORCE_COLOR: '0' };
+    delete env.ELECTRON_RUN_AS_NODE;
+    execFile(nodeExecutable(), [cli, 'config', '--json'], { cwd: capDir, timeout: 30_000, maxBuffer: 16 * 1024 * 1024, env, windowsHide: true }, (err, stdout) => {
       if (err) {
         resolve(null);
         return;

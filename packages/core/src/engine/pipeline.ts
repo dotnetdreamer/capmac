@@ -31,7 +31,7 @@ export async function buildWeb(project: ProjectInfo, ctx: EngineContext, signal?
   // A project copied without node_modules (e.g. the sample) can still run with its built assets.
   const hasModules = existsSync(path.join(project.capDir, 'node_modules')) || existsSync(path.join(project.syncRoot, 'node_modules'));
   if (!hasModules && !configured && existsSync(path.join(project.capDir, project.webDir, 'index.html'))) {
-    log(ctx, 'warn', `Dependencies are not installed on this PC, so the web build was skipped and the existing ${project.webDir}/ is used. Run \`${project.packageManager} install\` to rebuild your web code.`);
+    log(ctx, 'info', `Using the built web assets in ${project.webDir}/ (dependencies are not installed on this PC; \`${project.packageManager} install\` builds from source).`);
     ctx.emit({ type: 'phase-skipped', phase: 'web', reason: 'dependencies not installed on this PC' });
     return;
   }
@@ -259,6 +259,7 @@ export class Pipeline {
   /** Converts agent errors into friendly UserErrors (with the tool output tail, paths mapped). */
   fail(err: unknown): never {
     if (err instanceof AgentCallError) {
+      if (err.logPath) this.ctx.emit({ type: 'build-log', path: err.logPath });
       const tail = (err.tail ?? []).map((line) => (this.mapper ? this.mapper.mapText(line) : line));
       throw Object.assign(new UserError(err.message, err.hint, tail.length ? tail : undefined), err.code ? { code: err.code } : {});
     }

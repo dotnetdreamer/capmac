@@ -7,7 +7,8 @@
   "type": "module",
   "workspaces": [
     "packages/core",
-    "packages/cli"
+    "packages/cli",
+    "apps/desktop"
   ],
   "engines": {
     "node": ">=20.10"
@@ -15,9 +16,12 @@
   "scripts": {
     "build": "npm run build -w capmac",
     "watch": "npm run watch -w capmac",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck -w @capmac/desktop",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "desktop:dev": "npm run dev -w @capmac/desktop",
+    "desktop:build": "npm run dist -w @capmac/desktop",
+    "desktop:test": "npm run test:e2e -w @capmac/desktop"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

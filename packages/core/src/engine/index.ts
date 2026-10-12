@@ -6,6 +6,7 @@
 export * from './agent-client.js';
 export * from './config.js';
 export * from './context.js';
+export * from './devices.js';
 export * from './devserver.js';
 export * from './discovery.js';
 export * from './doctor.js';
@@ -16,6 +17,7 @@ export * from './inspect.js';
 export * from './ipa.js';
 export * from './link.js';
 export * from './live.js';
+export * from './local-install.js';
 export * from './memory.js';
 export * from './pair.js';
 export * from './pipeline.js';

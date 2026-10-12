@@ -20,6 +20,10 @@ export interface Target {
   available: boolean;
   model?: string;
   connection?: 'usb' | 'network' | 'unknown';
+  /** Devices: whether Developer Mode is on (needed to run development builds). */
+  developerMode?: 'enabled' | 'disabled' | 'unknown';
+  /** Devices: paired (trusted) with the Mac. */
+  paired?: boolean;
 }
 
 export interface ProjectRef {
@@ -203,6 +207,8 @@ export interface AgentErrorInfo {
   hint?: string;
   /** Last lines of tool output, for context. */
   tail?: string[];
+  /** Full tool log on the Mac (e.g. the xcodebuild log of a failed build). */
+  logPath?: string;
 }
 
 export type Severity = 'error' | 'warning' | 'note';
@@ -227,6 +233,8 @@ export type AgentEvent =
   | { t: 'progress'; text: string; done?: number }
   | { t: 'app'; stream: 'stdout' | 'stderr'; text: string }
   | ScreenInfo
+  /** `watch-targets`: the simulators and devices changed. */
+  | { t: 'targets'; data: TargetsResult }
   | ({ t: 'need' } & SyncNeed)
   | { t: 'archive-begin'; files: number }
   | { t: 'archive-end' }
