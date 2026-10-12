@@ -23,6 +23,9 @@ const CHANNELS = new Set<AppChannel>([
   'app:forget-project',
   'app:prompt-response',
   'app:visibility',
+  'app:update-status',
+  'app:update-check',
+  'app:update-install',
 ]);
 
 function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
@@ -45,6 +48,7 @@ const api: CapmacApi = {
   onSettings: (listener) => subscribe('app:settings', listener),
   onCommand: (listener) => subscribe('app:command', listener),
   onAccent: (listener) => subscribe('app:accent', listener),
+  onUpdate: (listener) => subscribe('app:update', listener),
   pathForFile: (file) => webUtils.getPathForFile(file),
   ready: () => ipcRenderer.send('app:hello'),
 };

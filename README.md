@@ -32,6 +32,8 @@ The simulator streams as H.264 from its framebuffer through a small helper that 
 - `capmac-studio-<version>-x64-portable.exe`, which needs no installation;
 - the same two for arm64.
 
+Builds are unsigned and don't update themselves until you set a few environment variables: Azure Artifact Signing or a code signing certificate, and `CAPMAC_UPDATE_URL`, the HTTPS folder installed copies check for new versions. Then installed copies update in the background and install on restart, without interrupting a running app. [docs/signing-and-updates.md](docs/signing-and-updates.md) has the options, their costs, and how to publish an update.
+
 The design (screens, visual language, architecture, simulator streaming) is in [docs/desktop-design.md](docs/desktop-design.md).
 
 ## Quick start

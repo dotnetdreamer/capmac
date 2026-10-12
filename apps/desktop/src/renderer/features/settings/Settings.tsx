@@ -4,6 +4,7 @@ import { useApp } from '../../state/app';
 import { Button } from '../../ui/Button';
 import { Segmented, Select } from '../../ui/Form';
 import { Icon, type IconName } from '../../ui/Icon';
+import { UpdatesPanel } from './Updates';
 import './settings.css';
 
 function Row({ icon, title, description, children }: { icon: IconName; title: ReactNode; description?: ReactNode; children: ReactNode }) {
@@ -152,6 +153,7 @@ export function Settings() {
             <span>Windows</span>
             <strong className="tabular">{info?.osRelease}</strong>
           </div>
+          <UpdatesPanel />
           <div className="settings-about__actions">
             <Button icon="folderOpen" onClick={() => info && void window.capmac.invoke('app:open-path', { path: info.configDir })}>
               Open capmac folder

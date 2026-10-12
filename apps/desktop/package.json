@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
-    "dist": "node scripts/build.mjs && electron-builder --config electron-builder.yml",
+    "dist": "node scripts/dist.mjs",
     "icons": "node scripts/icons.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test:e2e": "node scripts/build.mjs && playwright test --config playwright.config.ts"

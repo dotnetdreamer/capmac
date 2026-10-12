@@ -7,10 +7,13 @@ export const desktopDir = fileURLToPath(new URL('..', import.meta.url));
 export const repoDir = fileURLToPath(new URL('../../..', import.meta.url));
 export const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
+// CAPMAC_VERSION builds another version without editing package.json (release-config.mjs).
 const define = {
-  __APP_VERSION__: JSON.stringify(pkg.version),
+  __APP_VERSION__: JSON.stringify(process.env.CAPMAC_VERSION ?? pkg.version),
   __AGENT_VERSION__: JSON.stringify(agentVersion),
   __CAPMAC_VERSION__: JSON.stringify(pkg.version),
+  // Release notes for a version, e.g. https://github.com/<owner>/<repo>/releases/tag/v{version}.
+  __RELEASE_NOTES_URL__: JSON.stringify(process.env.CAPMAC_RELEASE_NOTES_URL ?? ''),
 };
 
 // ssh2's optional native add-ons are not shipped: it falls back to pure JS.

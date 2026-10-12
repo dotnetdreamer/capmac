@@ -6,13 +6,15 @@ import type { AppCommand } from '../shared/contract.js';
 export interface TrayState {
   lastProject: { path: string; name: string } | null;
   running: Array<{ projectPath: string; name: string; mode: 'run' | 'live' | 'ipa' }>;
+  /** A downloaded update, ready to install. */
+  updateReady?: string | null;
 }
 
 export class AppTray {
   private readonly tray: Tray;
   private state: TrayState = { lastProject: null, running: [] };
 
-  constructor(private readonly iconsDir: string, private readonly actions: { show(): void; quit(): void; command(command: AppCommand): void }) {
+  constructor(private readonly iconsDir: string, private readonly actions: { show(): void; quit(): void; command(command: AppCommand): void; update(): void }) {
     this.tray = new Tray(this.icon(false));
     this.tray.setToolTip('capmac Studio');
     this.tray.on('click', () => actions.show());
@@ -42,7 +44,9 @@ export class AppTray {
         { type: 'separator' },
       );
     }
-    items.push({ label: 'Open capmac Studio', click: () => this.actions.show() }, { type: 'separator' }, { label: 'Quit', click: () => this.actions.quit() });
+    items.push({ label: 'Open capmac Studio', click: () => this.actions.show() });
+    if (this.state.updateReady) items.push({ label: `Restart to update to ${this.state.updateReady}`, click: () => this.actions.update() });
+    items.push({ type: 'separator' }, { label: 'Quit', click: () => this.actions.quit() });
     this.tray.setContextMenu(Menu.buildFromTemplate(items));
     this.tray.setImage(this.icon(running.length > 0));
     this.tray.setToolTip(running.length ? `capmac Studio · ${running.map((r) => r.name).join(', ')}` : 'capmac Studio');

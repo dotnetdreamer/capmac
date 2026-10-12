@@ -353,6 +353,10 @@ export const appChannels = {
   'app:engine-call': z.object({ method: z.string().max(64), params: z.unknown() }).strict(),
   'app:prompt-response': promptResponseSchema,
   'app:visibility': z.object({ visible: z.boolean() }).strict(),
+  'app:update-status': z.undefined(),
+  'app:update-check': z.undefined(),
+  /** Quit and install the downloaded update (asks first when a session is running). */
+  'app:update-install': z.undefined(),
 } as const;
 
 export type AppChannel = keyof typeof appChannels;
@@ -376,6 +380,34 @@ export interface AppResults {
   'app:engine-call': CallResult<unknown>;
   'app:prompt-response': void;
   'app:visibility': void;
+  'app:update-status': UpdateInfo;
+  'app:update-check': UpdateInfo;
+  'app:update-install': void;
+}
+
+/** Where capmac Studio's own update stands. */
+export type UpdateState =
+  /** Updates are off: a development build, or a build with no update feed. */
+  | { state: 'unavailable'; reason: string }
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'up-to-date'; checkedAt: number }
+  /** A newer version exists; the portable exe can't install it, so it links to the download. */
+  | { state: 'available'; version: string; download?: string }
+  | { state: 'downloading'; version: string; percent: number }
+  /** Downloaded: installs on restart, or when capmac Studio quits. */
+  | { state: 'ready'; version: string }
+  | { state: 'error'; message: string; checkedAt: number };
+
+export interface UpdateInfo {
+  current: string;
+  /** The portable exe: it checks, but cannot update itself. */
+  portable: boolean;
+  /** Where updates come from (the feed's host), or null when there is none. */
+  feed: string | null;
+  /** Release notes for the version on offer (or the current one), when the build knows where they are. */
+  notesUrl: string | null;
+  state: UpdateState;
 }
 
 /** Commands main sends to the renderer (tray, second instance, menu). */
@@ -398,6 +430,7 @@ export interface CapmacApi {
   onSettings(listener: (settings: Settings) => void): () => void;
   onCommand(listener: (command: AppCommand) => void): () => void;
   onAccent(listener: (accent: string | null) => void): () => void;
+  onUpdate(listener: (info: UpdateInfo) => void): () => void;
   /** Local path of a file or folder dropped on the window. */
   pathForFile(file: File): string;
   /** The page is listening: main re-sends state it may have missed (open prompts, engine status). */

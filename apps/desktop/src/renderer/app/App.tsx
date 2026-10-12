@@ -6,9 +6,11 @@ import { setConsoleLimit } from '../state/console';
 import { handleBatch } from '../state/dispatch';
 import { call } from '../state/engine';
 import { resolveMac, useMacs } from '../state/macs';
+import { startUpdates } from '../state/updates';
 import { CommandPalette } from './CommandPalette';
 import { DropOverlay } from './DropOverlay';
 import { EngineBanner } from './EngineBanner';
+import { UpdateBanner } from './UpdateBanner';
 import { PromptHost } from './PromptHost';
 import { useShortcuts } from './shortcuts';
 import { Sidebar } from './Sidebar';
@@ -73,6 +75,7 @@ async function bootstrap() {
   });
   capmac.onCommand(onCommand);
   capmac.onAccent(applyAccent);
+  startUpdates();
   useApp.setState({ info, settings });
   capmac.ready();
 
@@ -137,6 +140,7 @@ export function App() {
         <Sidebar collapsed={collapsed} />
         <main id="main" className="layer" tabIndex={-1}>
           <EngineBanner />
+          <UpdateBanner />
           <ErrorBoundary label="This page">
             <Suspense fallback={<div className="view-loading" />}>
               <View />

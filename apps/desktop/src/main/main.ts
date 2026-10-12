@@ -25,6 +25,7 @@ import { openInEditor } from './editor.js';
 import { agentPath, iconsDir, outDir, sampleDir } from './paths.js';
 import { SettingsStore } from './settings.js';
 import { AppTray } from './tray.js';
+import { Updates } from './updates.js';
 import { sameOrigin } from '../shared/urls.js';
 import { APP_ORIGIN, createMainWindow, hardenSession, micaSupported, registerAppScheme, serveRenderer } from './window.js';
 
@@ -55,6 +56,7 @@ let win: BrowserWindow | null = null;
 let settings: SettingsStore;
 let engine: EngineProcess;
 let tray: AppTray | null = null;
+let updates: Updates;
 let quitting = false;
 let engineStatus: EngineStatus = { state: 'starting' };
 const mica = micaSupported();
@@ -100,7 +102,7 @@ function projectName(projectPath: string | undefined): string {
 function updateTray(): void {
   const s = settings.get();
   const last = s.lastProject ? { path: s.lastProject, name: projectName(s.lastProject) } : null;
-  tray?.update({ lastProject: last, running: [...running.values()].map((r) => ({ ...r, name: projectName(r.projectPath) })) });
+  tray?.update({ lastProject: last, running: [...running.values()].map((r) => ({ ...r, name: projectName(r.projectPath) })), updateReady: updates?.ready ?? null });
 }
 
 /** A Windows notification, only when capmac Studio is not in front. */
@@ -276,11 +278,38 @@ function registerIpc(): void {
     engine.respondPrompt(response);
   });
   handle('app:visibility', () => updateVisibility());
+  handle('app:update-status', () => updates.info);
+  handle('app:update-check', () => updates.check());
+  handle('app:update-install', () => restartToUpdate());
   // Late-loading pages ask for state they may have missed.
   ipcMain.on('app:hello', (event) => {
     event.sender.send('engine:status', engineStatus);
     for (const prompt of pendingPrompts) event.sender.send('engine:prompt', prompt);
   });
+}
+
+// ─── Updates ───────────────────────────────────────────────────────────────
+
+/** Restarts into the downloaded update; a running session is the user's call. */
+async function restartToUpdate(): Promise<void> {
+  const version = updates.ready;
+  if (!version) return;
+  if (running.size > 0) {
+    const names = [...running.values()].map((r) => projectName(r.projectPath)).join(', ');
+    const options: Electron.MessageBoxOptions = {
+      type: 'question',
+      buttons: ['Restart and update', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Update capmac Studio',
+      message: `Restart into capmac Studio ${version} now?`,
+      detail: `${names} stops. Otherwise the update installs when you quit capmac Studio.`,
+    };
+    const { response } = await (win && !win.isDestroyed() ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options));
+    if (response !== 0) return;
+  }
+  quitting = true;
+  updates.install();
 }
 
 // ─── Window ────────────────────────────────────────────────────────────────
@@ -364,7 +393,14 @@ app.whenReady().then(async () => {
   });
   systemPreferences.on('accent-color-changed', () => send('app:accent', accentColor()));
   win = openWindow();
-  tray = new AppTray(iconsDir(), { show: showWindow, quit: () => app.quit(), command });
+  tray = new AppTray(iconsDir(), { show: showWindow, quit: () => app.quit(), command, update: () => void restartToUpdate() });
+  updates = new Updates({
+    onChange: (info) => {
+      send('app:update', info);
+      updateTray();
+    },
+  });
+  updates.start();
   updateTray();
 });
 
