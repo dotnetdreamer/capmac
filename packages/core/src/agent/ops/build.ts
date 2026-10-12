@@ -160,7 +160,8 @@ export async function opBuild(params: BuildParams, io: AgentIO): Promise<BuildRe
         throw new AgentError(
           parser.errors > 0 ? `Build failed with ${parser.errors} error${parser.errors === 1 ? '' : 's'}` : 'Build failed',
           hint?.code ?? 'BUILD_FAILED',
-          hint?.hint ?? `Full build log on the Mac: ${logPath}${params.verbose ? '' : ' (or re-run with --verbose)'}`,
+          // Front ends add their own advice (the CLI: --verbose; capmac Studio: its build log button).
+          hint?.hint ?? `Full build log on the Mac: ${logPath}`,
           tail,
           logPath,
         );

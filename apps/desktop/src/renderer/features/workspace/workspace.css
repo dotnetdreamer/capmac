@@ -677,6 +677,16 @@
   display: flex;
   gap: var(--s-1_5);
 }
+.problems__clean {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1_5);
+  color: var(--text-2);
+  font: var(--type-small);
+  .icon {
+    color: var(--success);
+  }
+}
 .problems__list {
   flex: 1;
   min-height: 0;

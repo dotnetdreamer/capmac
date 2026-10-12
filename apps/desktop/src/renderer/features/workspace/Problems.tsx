@@ -141,11 +141,20 @@ export function Problems({ path, run }: { path: string; run: RunState | undefine
         <span className="problems__summary">
           {errors > 0 && <span className="count count--error">{plural(errors, 'error')}</span>}
           {own.length - errors > 0 && <span className="count count--warn">{plural(own.length - errors, 'warning')}</span>}
+          {/* Only dependency warnings: say plainly that the user's own code is fine. */}
+          {own.length === 0 && (
+            <span className="problems__clean">
+              <Icon name="checkCircle" size={16} filled />
+              No problems in your code
+            </span>
+          )}
         </span>
         <span className="session-bar__spacer" />
-        <Button size="sm" variant="subtle" icon="copy" onClick={() => copy(own.map(asText).join('\n\n'), plural(own.length, 'problem'))}>
-          Copy all
-        </Button>
+        {own.length > 0 && (
+          <Button size="sm" variant="subtle" icon="copy" onClick={() => copy(own.map(asText).join('\n\n'), plural(own.length, 'problem'))}>
+            Copy all
+          </Button>
+        )}
       </div>
       <ul className="problems__list" aria-label="Problems">
         {groups.map((g, i) => (
