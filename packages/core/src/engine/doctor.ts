@@ -74,7 +74,7 @@ export function macChecks(probe: ProbeResult, project?: ProjectInfo | null): Che
     level: nodeOk ? 'ok' : 'warn',
     label: `Node.js ${probe.node.version}`,
     detail: probe.node.path,
-    fix: nodeOk ? undefined : 'Run `capmac doctor --fix` to install a current Node.js LTS for capmac.',
+    fix: nodeOk ? undefined : 'Run `capmac doctor --fix` to install a current Node.js LTS for CapMac.',
     action: nodeOk ? undefined : { id: 'install-node', label: 'Install Node.js', confirm: 'Install a private copy of the latest Node.js LTS into ~/.capmac/runtime on the Mac? (no sudo, does not touch your system)' },
   }));
   checks.push(probe.npm
@@ -101,14 +101,14 @@ export function macChecks(probe: ProbeResult, project?: ProjectInfo | null): Che
       helper.state === 'ready'
         ? mac({ id: 'stream', level: 'ok', label: 'Smooth simulator stream', detail: `helper built${xcode}` })
         : helper.state === 'not-built'
-          ? mac({ id: 'stream', level: 'info', label: 'Smooth simulator stream', detail: `capmac compiles its helper${xcode} the first time you open a simulator`, action: { id: 'build-stream-helper', label: 'Build now' } })
+          ? mac({ id: 'stream', level: 'info', label: 'Smooth simulator stream', detail: `CapMac compiles its helper${xcode} the first time you open a simulator`, action: { id: 'build-stream-helper', label: 'Build now' } })
           : helper.state === 'failed'
             ? mac({
                 id: 'stream',
                 level: 'warn',
                 label: 'Smooth simulator stream',
                 detail: `the helper does not compile${xcode}: the simulator shows the compatible stream`,
-                fix: helper.detail ? `Compiler output: ${helper.detail.split('\n')[0]}` : 'Update capmac, then try again.',
+                fix: helper.detail ? `Compiler output: ${helper.detail.split('\n')[0]}` : 'Update CapMac, then try again.',
                 action: { id: 'build-stream-helper', label: 'Try again' },
               })
             : mac({ id: 'stream', level: 'info', label: 'Smooth simulator stream', detail: 'needs Xcode: the simulator shows the compatible stream', fix: helper.detail }),
@@ -117,9 +117,9 @@ export function macChecks(probe: ProbeResult, project?: ProjectInfo | null): Che
   // Touch and typing: capmac's helper when the simulators still take its input, else AXe.
   const helperInput = helper ? helper.state !== 'unsupported' && helper.state !== 'failed' && helper.input !== false : false;
   checks.push(probe.tools.axe
-    ? mac({ id: 'axe', level: 'ok', label: 'AXe', detail: helperInput ? 'installed (capmac uses its own helper for touch and typing)' : 'touch input for the simulator screen' })
+    ? mac({ id: 'axe', level: 'ok', label: 'AXe', detail: helperInput ? 'installed (CapMac uses its own helper for touch and typing)' : 'touch input for the simulator screen' })
     : helperInput
-      ? mac({ id: 'axe', level: 'info', label: 'AXe', detail: 'not needed: capmac’s helper handles touch and typing' })
+      ? mac({ id: 'axe', level: 'info', label: 'AXe', detail: 'not needed: CapMac’s helper handles touch and typing' })
       : mac({
           id: 'axe',
           level: 'info',
@@ -136,7 +136,7 @@ export function macChecks(probe: ProbeResult, project?: ProjectInfo | null): Che
     ? mac({ id: 'signing', level: 'ok', label: 'Signing identities', detail: devIds.slice(0, 2).join(', ') + (devIds.length > 2 ? ` (+${devIds.length - 2})` : '') })
     : mac({ id: 'signing', level: 'info', label: 'Signing identities', detail: 'none (fine for simulators)', fix: 'For real devices: sign in to Xcode › Settings › Accounts on the Mac once.' }));
   if (probe.keychainLocked) {
-    checks.push(mac({ id: 'keychain', level: 'info', label: 'Login keychain locked over SSH', detail: 'capmac will ask for your Mac password when a device build needs signing', action: { id: 'unlock-keychain', label: 'Unlock' } }));
+    checks.push(mac({ id: 'keychain', level: 'info', label: 'Login keychain locked over SSH', detail: 'CapMac will ask for your Mac password when a device build needs signing', action: { id: 'unlock-keychain', label: 'Unlock' } }));
   }
   if (probe.consoleUser && probe.consoleUser !== probe.user) {
     checks.push(mac({
@@ -215,7 +215,7 @@ export async function applyFix(fix: FixId, session: MacSession, ctx: EngineConte
       return;
     case 'build-stream-helper': {
       const state = await withStep(ctx, 'Compiling the smooth stream helper on the Mac', 'other', () => session.call<StreamHelperState>('stream-helper', { build: true, force: true }));
-      if (state.state !== 'ready') throw new UserError('The smooth stream helper did not compile on the Mac.', 'The simulator shows the compatible stream instead. Updating capmac usually fixes this after an Xcode update.', state.detail?.split('\n'));
+      if (state.state !== 'ready') throw new UserError('The smooth stream helper did not compile on the Mac.', 'The simulator shows the compatible stream instead. Updating CapMac usually fixes this after an Xcode update.', state.detail?.split('\n'));
       return;
     }
   }
@@ -256,5 +256,5 @@ export async function applyFixes(session: MacSession, checks: Check[], ctx: Engi
     }
   }
   const brewMissing = checks.some((c) => (c.id === 'axe' || c.id === 'cocoapods') && c.level !== 'ok' && !c.action && c.fix?.includes('Homebrew'));
-  if (brewMissing) log(ctx, 'warn', 'Homebrew is not installed, so capmac cannot install AXe or CocoaPods. Get it from https://brew.sh.');
+  if (brewMissing) log(ctx, 'warn', 'Homebrew is not installed, so CapMac cannot install AXe or CocoaPods. Get it from https://brew.sh.');
 }

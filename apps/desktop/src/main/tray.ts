@@ -16,7 +16,7 @@ export class AppTray {
 
   constructor(private readonly iconsDir: string, private readonly actions: { show(): void; quit(): void; command(command: AppCommand): void; update(): void }) {
     this.tray = new Tray(this.icon(false));
-    this.tray.setToolTip('capmac Studio');
+    this.tray.setToolTip('CapMac Studio');
     this.tray.on('click', () => actions.show());
     this.render();
   }
@@ -44,12 +44,12 @@ export class AppTray {
         { type: 'separator' },
       );
     }
-    items.push({ label: 'Open capmac Studio', click: () => this.actions.show() });
+    items.push({ label: 'Open CapMac Studio', click: () => this.actions.show() });
     if (this.state.updateReady) items.push({ label: `Restart to update to ${this.state.updateReady}`, click: () => this.actions.update() });
     items.push({ type: 'separator' }, { label: 'Quit', click: () => this.actions.quit() });
     this.tray.setContextMenu(Menu.buildFromTemplate(items));
     this.tray.setImage(this.icon(running.length > 0));
-    this.tray.setToolTip(running.length ? `capmac Studio · ${running.map((r) => r.name).join(', ')}` : 'capmac Studio');
+    this.tray.setToolTip(running.length ? `CapMac Studio · ${running.map((r) => r.name).join(', ')}` : 'CapMac Studio');
   }
 
   destroy(): void {

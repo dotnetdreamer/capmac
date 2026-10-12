@@ -12,7 +12,7 @@ const port = process.env.CDP_PORT ?? '39217';
 const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
 const page = browser.contexts().flatMap((c) => c.pages()).find((p) => /127\.0\.0\.1|app:\/\/capmac/.test(p.url()));
 if (!page) {
-  console.error('No capmac Studio page on that port. Is npm run desktop:dev running?');
+  console.error('No CapMac Studio page on that port. Is npm run desktop:dev running?');
   process.exit(1);
 }
 // Playwright emulates a light colour scheme when it attaches; keep the app's real theme.

@@ -31,7 +31,7 @@ test.afterEach(async () => {
 
 test('launches, shows Home and opens a project', async () => {
   const page = await app.firstWindow();
-  await expect(page).toHaveTitle('capmac Studio');
+  await expect(page).toHaveTitle('CapMac Studio');
 
   // First launch: onboarding, which can be skipped until a Mac is around.
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
@@ -48,13 +48,13 @@ test('launches, shows Home and opens a project', async () => {
   await page.getByRole('button', { name: 'Choose a folder…' }).click();
 
   // The project workspace.
-  await expect(page.getByRole('heading', { name: 'Hello capmac', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Hello CapMac', level: 1 })).toBeVisible();
   await expect(page.getByText('dev.capmac.hello')).toBeVisible();
   await expect(page.getByRole('button', { name: /^Run/ })).toBeVisible();
 
   // Back home, the project is listed.
   await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Home' }).click();
-  await expect(page.getByRole('article', { name: 'Hello capmac' })).toBeVisible();
+  await expect(page.getByRole('article', { name: 'Hello CapMac' })).toBeVisible();
 });
 
 test('the command palette opens with Ctrl+K and finds Settings', async () => {

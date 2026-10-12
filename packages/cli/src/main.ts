@@ -73,7 +73,7 @@ program
   .command('pair [mac]')
   .description('pair this PC with a Mac over SSH (finds Macs on your network if none is given)')
   .option('--name <alias>', 'short name for this Mac')
-  .option('--identity <file>', 'use this private key instead of capmac\'s own')
+  .option('--identity <file>', 'use this private key instead of CapMac\'s own')
   .option('--agent', 'authenticate with the Windows OpenSSH agent')
   .option('--password-env <var>', 'read the Mac password from this environment variable (CI)')
   .option('-y, --yes', 'trust the host key and install Node.js without asking')
@@ -134,7 +134,7 @@ buildOptions(targetOptions(
 
 program
   .command('info')
-  .description('show what capmac detected about this app and which files it would sync (no Mac needed)')
+  .description('show what CapMac detected about this app and which files it would sync (no Mac needed)')
   .option('--files', 'list every file')
   .option('--live', 'as in live-reload mode (web assets left out)')
   .action(wrap(infoCommand));

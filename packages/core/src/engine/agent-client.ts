@@ -53,7 +53,7 @@ export function agentBundle(): { code: Buffer; hash: string } {
       // try next
     }
   }
-  throw new Error('The capmac agent bundle is missing. Run `npm run build` in the capmac folder.');
+  throw new Error('The CapMac agent bundle is missing. Run `npm run build` in the CapMac folder.');
 }
 
 /** A running agent operation. */
@@ -104,7 +104,7 @@ export class AgentCall<T> {
           const output = (stderr.trim() || scanner.partial.trim()).split('\n').slice(-12);
           const message = handlers.signal?.aborted
             ? 'Cancelled'
-            : `The capmac agent stopped unexpectedly during "${describe}" (exit ${code ?? 'unknown'}).`;
+            : `The CapMac agent stopped unexpectedly during "${describe}" (exit ${code ?? 'unknown'}).`;
           reject(new AgentCallError({ message, code: handlers.signal?.aborted ? 'CANCELLED' : 'AGENT_CRASHED', tail: output }));
         });
       });
@@ -190,7 +190,7 @@ export class AgentClient {
     if (!check.stdout.includes('present')) {
       const command = `/bin/sh -c ${shQuote(`mkdir -p ${shQuote(dir)} && cat > ${shQuote(`${dir}/agent.mjs.part`)} && mv -f ${shQuote(`${dir}/agent.mjs.part`)} ${shQuote(`${dir}/agent.mjs`)}`)}`;
       const upload = await this.conn.pipeTo(command, bundle.code);
-      if (upload.code !== 0) throw new Error(`Could not install the capmac agent on the Mac: ${upload.stderr.trim()}`);
+      if (upload.code !== 0) throw new Error(`Could not install the CapMac agent on the Mac: ${upload.stderr.trim()}`);
       // Old agent versions are tiny but would pile up across upgrades. Versions used
       // in the last few days stay: the CLI and capmac Studio may run different ones.
       await this.conn.runScript(`find ${shQuote(`${this.home}/.capmac/agent`)} -mindepth 1 -maxdepth 1 -type d ! -name ${shQuote(bundle.hash)} -mtime +3 -exec rm -rf {} + 2>/dev/null; true\n`, { timeoutMs: 30_000 }).catch(() => undefined);

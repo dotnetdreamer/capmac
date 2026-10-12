@@ -11,7 +11,7 @@ export interface EngineHandlers {
 
 const crashed = (message: string): CallResult<never> => ({
   ok: false,
-  error: { message, hint: 'capmac Studio restarted its engine. Try again.', expected: true, code: 'ENGINE_CRASHED' },
+  error: { message, hint: 'CapMac Studio restarted its engine. Try again.', expected: true, code: 'ENGINE_CRASHED' },
 });
 
 export class EngineProcess {
@@ -28,7 +28,7 @@ export class EngineProcess {
 
   start(): void {
     this.handlers.onStatus({ state: 'starting' });
-    const child = utilityProcess.fork(this.modulePath, [], { serviceName: 'capmac engine', stdio: 'pipe' });
+    const child = utilityProcess.fork(this.modulePath, [], { serviceName: 'CapMac engine', stdio: 'pipe' });
     this.child = child;
     child.stdout?.on('data', (d: Buffer) => process.stdout.write(`[engine] ${d}`));
     child.stderr?.on('data', (d: Buffer) => process.stderr.write(`[engine] ${d}`));
@@ -64,7 +64,7 @@ export class EngineProcess {
     child.on('exit', (code) => {
       if (this.child !== child) return;
       this.child = null;
-      for (const resolve of this.pending.values()) resolve(crashed('The capmac engine stopped unexpectedly.'));
+      for (const resolve of this.pending.values()) resolve(crashed('The CapMac engine stopped unexpectedly.'));
       this.pending.clear();
       this.shutdownResolve?.();
       if (this.stopping) return;
@@ -87,7 +87,7 @@ export class EngineProcess {
 
   async call(method: EngineMethod, params: unknown): Promise<CallResult<unknown>> {
     await this.readyPromise;
-    if (!this.child) return crashed('The capmac engine is not running.');
+    if (!this.child) return crashed('The CapMac engine is not running.');
     const id = this.nextId++;
     return new Promise((resolve) => {
       this.pending.set(id, resolve);

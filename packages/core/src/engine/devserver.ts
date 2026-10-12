@@ -87,7 +87,7 @@ export async function startDevServer(project: ProjectInfo, options: DevServerOpt
     const url = new URL(explicit);
     const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80));
     if (!(await canConnect(url.hostname, port))) {
-      throw new UserError(`Nothing is listening at ${url.href}.`, 'Start your dev server first, or let capmac start it by leaving out --url.');
+      throw new UserError(`Nothing is listening at ${url.href}.`, 'Start your dev server first, or let CapMac start it by leaving out --url.');
     }
     return { url, external: true, command: null, stop: async () => undefined, exited: new Promise(() => undefined) };
   }

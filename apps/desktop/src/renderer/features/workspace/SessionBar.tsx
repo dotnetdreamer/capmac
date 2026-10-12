@@ -113,7 +113,7 @@ function RunCard({ run }: { run: RunState }) {
  */
 function hintFor(error: ErrorInfo, run: RunState, errors: number): string | undefined {
   if (error.code !== 'BUILD_FAILED') return error.hint;
-  if (errors > 0) return run.mode === 'live' ? 'Fix it and save: capmac rebuilds as soon as the file changes.' : 'Fix it, then run again.';
+  if (errors > 0) return run.mode === 'live' ? 'Fix it and save: CapMac rebuilds as soon as the file changes.' : 'Fix it, then run again.';
   return run.buildLogPath ? 'The output and the full build log show what went wrong.' : error.hint;
 }
 
@@ -163,7 +163,7 @@ export function SessionBar({ path, run, mac }: { path: string; run: RunState | u
     return (
       <div className="session-banner">
         <InfoBar tone="caution" title={`${mac.label} isn’t answering. It may be asleep.`} live actions={<Spinner size={16} label="Reconnecting" />}>
-          Reconnecting… capmac restores the tunnel and relaunches the app when it’s back.{mac.error ? ` (${mac.error})` : ''}
+          Reconnecting… CapMac restores the tunnel and relaunches the app when it’s back.{mac.error ? ` (${mac.error})` : ''}
         </InfoBar>
       </div>
     );

@@ -1,9 +1,9 @@
 {
   "name": "@capmac/desktop",
-  "productName": "capmac Studio",
+  "productName": "CapMac Studio",
   "version": "0.1.0",
   "private": true,
-  "description": "capmac Studio: build, run, live-reload and see your Capacitor iOS app on a Mac, from Windows.",
+  "description": "CapMac Studio: build, run, live-reload and see your Capacitor iOS app on a Mac, from Windows.",
   "license": "MIT",
   "author": "capmac",
   "type": "module",

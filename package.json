@@ -2,7 +2,7 @@
   "name": "capmac-workspace",
   "version": "0.1.0",
   "private": true,
-  "description": "capmac: Pair to Mac for Capacitor. The CLI (packages/cli), the shared engine (packages/core) and capmac Studio (apps/desktop).",
+  "description": "CapMac: Pair to Mac for Capacitor. The CLI (packages/cli), the shared engine (packages/core) and CapMac Studio (apps/desktop).",
   "license": "MIT",
   "type": "module",
   "workspaces": [

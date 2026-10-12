@@ -76,9 +76,9 @@ describe('updater text', () => {
 
   it('explains update failures in plain words', () => {
     expect(describeUpdateError(new Error('getaddrinfo ENOTFOUND downloads.example.com'))).toMatch(/could not be reached/);
-    expect(describeUpdateError(new Error('HttpError: 404 Not Found "method: GET url: https://x/latest.yml"'))).toMatch(/no capmac Studio release/);
+    expect(describeUpdateError(new Error('HttpError: 404 Not Found "method: GET url: https://x/latest.yml"'))).toMatch(/no CapMac Studio release/);
     expect(describeUpdateError(new Error('sha512 checksum mismatch, expected abc'))).toMatch(/damaged/);
-    expect(describeUpdateError(new Error('New version 0.2.0 is not signed by the application owner: publisherNames: capmac'))).toMatch(/not signed/);
+    expect(describeUpdateError(new Error('New version 0.2.0 is not signed by the application owner: publisherNames: CapMac'))).toMatch(/not signed/);
     expect(describeUpdateError(new Error('Something odd\nstack'))).toBe('The update check failed: Something odd');
   });
 });

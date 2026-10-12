@@ -77,7 +77,7 @@ async function main(): Promise<void> {
 }
 
 process.on('unhandledRejection', (reason) => {
-  process.stderr.write(`capmac agent: unhandled rejection: ${String((reason as Error)?.stack ?? reason)}\n`);
+  process.stderr.write(`CapMac agent: unhandled rejection: ${String((reason as Error)?.stack ?? reason)}\n`);
 });
 
 void main();

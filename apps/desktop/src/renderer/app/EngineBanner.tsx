@@ -7,8 +7,8 @@ export function EngineBanner() {
   if (engine.state !== 'crashed') return null;
   return (
     <div className="engine-banner">
-      <InfoBar tone={engine.restarting ? 'caution' : 'critical'} title={engine.restarting ? 'capmac’s engine stopped. Restarting it…' : 'capmac’s engine keeps stopping.'} live>
-        {engine.restarting ? 'Running sessions were stopped; start them again once it is back.' : 'Restart capmac Studio. If it keeps happening, run capmac doctor in a terminal.'}
+      <InfoBar tone={engine.restarting ? 'caution' : 'critical'} title={engine.restarting ? 'CapMac’s engine stopped. Restarting it…' : 'CapMac’s engine keeps stopping.'} live>
+        {engine.restarting ? 'Running sessions were stopped; start them again once it is back.' : 'Restart CapMac Studio. If it keeps happening, run capmac doctor in a terminal.'}
       </InfoBar>
     </div>
   );

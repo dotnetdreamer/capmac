@@ -153,7 +153,7 @@ export function createMainWindow(options: { preload: string; url: string; icon: 
     minWidth: 900,
     minHeight: 600,
     show: false,
-    title: 'capmac Studio',
+    title: 'CapMac Studio',
     icon: options.icon,
     titleBarStyle: 'hidden',
     titleBarOverlay: titleBarOverlay(),

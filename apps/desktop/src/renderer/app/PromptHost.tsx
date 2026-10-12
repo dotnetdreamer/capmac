@@ -12,9 +12,9 @@ const PASSWORD_TITLES: Record<string, (mac: string) => string> = {
 };
 
 const PASSWORD_WHY: Record<string, string> = {
-  pair: 'capmac uses it once to install its own SSH key. It is never stored.',
-  keychain: 'Code signing over SSH needs the login keychain unlocked. capmac does not store your password.',
-  sudo: 'This fix runs one command with sudo on the Mac. capmac does not store your password.',
+  pair: 'CapMac uses it once to install its own SSH key. It is never stored.',
+  keychain: 'Code signing over SSH needs the login keychain unlocked. CapMac does not store your password.',
+  sudo: 'This fix runs one command with sudo on the Mac. CapMac does not store your password.',
 };
 
 function PasswordPrompt({ prompt }: { prompt: Extract<PromptRequest, { kind: 'password' }> }) {
@@ -65,7 +65,7 @@ function ConfirmPrompt({ prompt }: { prompt: Extract<PromptRequest, { kind: 'con
     >
       {fingerprint ? (
         <>
-          <p className="muted">This is the first time capmac connects to this Mac. Its SSH host key fingerprint is:</p>
+          <p className="muted">This is the first time CapMac connects to this Mac. Its SSH host key fingerprint is:</p>
           <code className="fingerprint selectable">{fingerprint}</code>
           <p className="faint">To double-check, run this in Terminal on the Mac: <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code></p>
         </>

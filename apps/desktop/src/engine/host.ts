@@ -483,8 +483,8 @@ function closeScreen(streamId: string): void {
 const SAMPLE_SKIP = new Set(['node_modules', '.git', 'build', 'DerivedData', 'Pods', 'xcuserdata']);
 
 async function createSample(): Promise<{ path: string }> {
-  if (!init?.sampleDir || !existsSync(init.sampleDir)) throw new UserError('The sample app is not included in this build of capmac Studio.');
-  const target = path.join(init.samplesHome, 'Hello capmac');
+  if (!init?.sampleDir || !existsSync(init.sampleDir)) throw new UserError('The sample app is not included in this build of CapMac Studio.');
+  const target = path.join(init.samplesHome, 'Hello CapMac');
   if (!existsSync(path.join(target, 'capacitor.config.json'))) {
     await fs.mkdir(init.samplesHome, { recursive: true });
     await fs.cp(init.sampleDir, target, {

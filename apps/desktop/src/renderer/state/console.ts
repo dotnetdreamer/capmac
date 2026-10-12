@@ -19,7 +19,7 @@ export interface ConsoleLine {
   err?: boolean;
 }
 
-export const SOURCE_LABELS: Record<ConsoleSource, string> = { js: 'JS', cap: 'Capacitor', native: 'Native', bridge: 'Bridge', web: 'Dev server', capmac: 'capmac' };
+export const SOURCE_LABELS: Record<ConsoleSource, string> = { js: 'JS', cap: 'Capacitor', native: 'Native', bridge: 'Bridge', web: 'Dev server', capmac: 'CapMac' };
 export const SOURCE_TAGS: Record<ConsoleSource, string> = { js: 'JS', cap: 'CAP', native: 'iOS', bridge: '⇄', web: 'WEB', capmac: 'CM' };
 
 const KIND_TO_SOURCE: Record<AppLogEntry['kind'], ConsoleSource> = { console: 'js', capacitor: 'cap', native: 'native', bridge: 'bridge' };

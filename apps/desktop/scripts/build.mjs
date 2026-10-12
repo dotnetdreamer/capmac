@@ -36,4 +36,4 @@ await fs.cp(sampleSrc, out('sample'), {
   filter: (src) => !SKIP.has(path.basename(src)) && !/[\\/]App[\\/]App[\\/](public|capacitor\.config\.json|config\.xml)$/.test(src),
 });
 
-console.log(`capmac Studio ${pkg.version}: built out/ in ${((Date.now() - started) / 1000).toFixed(1)} s`);
+console.log(`CapMac Studio ${pkg.version}: built out/ in ${((Date.now() - started) / 1000).toFixed(1)} s`);

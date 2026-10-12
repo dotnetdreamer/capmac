@@ -80,7 +80,7 @@ export async function ensureWebDirStub(projectDir: string, webDir: string): Prom
   const index = path.join(dir, 'index.html');
   if (await exists(index)) return false;
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(index, '<!doctype html><meta charset="utf-8"><title>capmac</title><p style="font:16px -apple-system;padding:2em">Waiting for the dev server (capmac live reload)…</p>\n');
+  await fs.writeFile(index, '<!doctype html><meta charset="utf-8"><title>CapMac</title><p style="font:16px -apple-system;padding:2em">Waiting for the dev server (CapMac live reload)…</p>\n');
   return true;
 }
 

@@ -1,8 +1,8 @@
 # capmac Studio for Windows: an installer (per-user by default) and a portable
 # exe, for x64 and arm64. npm run desktop:build (builds out/ first).
 appId: dev.capmac.studio
-productName: capmac Studio
-executableName: capmac Studio
+productName: CapMac Studio
+executableName: CapMac Studio
 copyright: Copyright © 2026 capmac contributors
 
 directories:
@@ -53,8 +53,8 @@ nsis:
   allowToChangeInstallationDirectory: true
   buildUniversalInstaller: false
   artifactName: capmac-studio-${version}-${arch}-setup.${ext}
-  shortcutName: capmac Studio
-  uninstallDisplayName: capmac Studio
+  shortcutName: CapMac Studio
+  uninstallDisplayName: CapMac Studio
   installerIcon: resources/icons/icon.ico
   uninstallerIcon: resources/icons/icon.ico
   runAfterFinish: true

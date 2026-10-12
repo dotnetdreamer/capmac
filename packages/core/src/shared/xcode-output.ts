@@ -195,7 +195,7 @@ export function hintForBuildOutput(text: string): { code?: string; hint: string 
   if (/errSecInternalComponent/.test(text)) {
     return {
       code: 'KEYCHAIN_LOCKED',
-      hint: 'Code signing could not use the login keychain over SSH. capmac will offer to unlock it; or run `capmac keychain unlock`.',
+      hint: 'Code signing could not use the login keychain over SSH. CapMac will offer to unlock it; or run `capmac keychain unlock`.',
     };
   }
   if (/requires a development team|No Account for Team|No signing certificate|No profiles for/i.test(text)) {

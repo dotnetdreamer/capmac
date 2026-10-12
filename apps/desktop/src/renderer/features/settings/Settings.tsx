@@ -68,7 +68,7 @@ export function Settings() {
         <Row
           icon="flash"
           title="Simulator stream"
-          description="Smooth streams the screen as video, up to 60 frames a second. Compatible sends a few screenshots a second; capmac switches to it by itself when the smooth stream can’t run."
+          description="Smooth streams the screen as video, up to 60 frames a second. Compatible sends a few screenshots a second; CapMac switches to it by itself when the smooth stream can’t run."
         >
           <Segmented
             label="Simulator stream"
@@ -130,7 +130,7 @@ export function Settings() {
         </Row>
 
         <h2 className="section-title">Behaviour</h2>
-        <Row icon="info" title="Notifications" description="Tell me when a build finishes or fails while capmac Studio is in the background.">
+        <Row icon="info" title="Notifications" description="Tell me when a build finishes or fails while CapMac Studio is in the background.">
           <Toggle label="Notifications" checked={settings.notifications} onChange={set('notifications')} />
         </Row>
         <Row icon="pin" title="Keep running in the tray" description="Closing the window during a session keeps your app running; quit from the tray icon.">
@@ -140,7 +140,7 @@ export function Settings() {
         <h2 className="section-title">About</h2>
         <div className="settings-card settings-about">
           <div className="settings-about__grid">
-            <span>capmac Studio</span>
+            <span>CapMac Studio</span>
             <strong className="tabular">{info?.version}</strong>
             <span>Mac agent</span>
             <strong className="tabular">{info?.agent}</strong>
@@ -156,9 +156,9 @@ export function Settings() {
           <UpdatesPanel />
           <div className="settings-about__actions">
             <Button icon="folderOpen" onClick={() => info && void window.capmac.invoke('app:open-path', { path: info.configDir })}>
-              Open capmac folder
+              Open CapMac folder
             </Button>
-            <span className="faint">Paired Macs and capmac’s SSH key are shared with the capmac CLI.</span>
+            <span className="faint">Paired Macs and CapMac’s SSH key are shared with the CapMac CLI.</span>
           </div>
         </div>
       </div>

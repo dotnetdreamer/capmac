@@ -116,7 +116,7 @@ export function fallbackFor(error: unknown): StreamFallback | null {
     case 'STREAM_UNSUPPORTED':
       return { code: 'unsupported', message: info.message, hint: info.hint };
     case 'BAD_REQUEST':
-      return { code: 'unsupported', message: 'The capmac agent on the Mac has no smooth stream.', details: [info.message] };
+      return { code: 'unsupported', message: 'The CapMac agent on the Mac has no smooth stream.', details: [info.message] };
     case 'HELPER_START_FAILED':
       return { code: 'helper-start', message: info.message, hint: info.hint, details: info.details, restartSimulator: true };
     case 'HELPER_EXITED':

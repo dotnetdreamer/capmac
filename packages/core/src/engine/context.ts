@@ -53,7 +53,7 @@ export interface EngineContext {
   verbose: boolean;
 }
 
-const notInteractive = () => Promise.reject(new UserError('capmac needs an answer, but it cannot ask here (not an interactive terminal).'));
+const notInteractive = () => Promise.reject(new UserError('CapMac needs an answer, but it cannot ask here (not an interactive terminal).'));
 
 /** A prompter for CI and tests: every question fails, `confirm` says no. */
 export const nonInteractivePrompter: Prompter = {

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>capmac screen</title>
+<title>CapMac screen</title>
 <style>
   :root {
     --bg: #f4f5f7; --panel: #ffffff; --text: #16181d; --muted: #6b7280; --border: #e3e5ea;
@@ -63,7 +63,7 @@
 <body>
 <header>
   <span class="dot" id="dot"></span>
-  <h1 id="title">capmac screen</h1>
+  <h1 id="title">CapMac screen</h1>
   <span class="meta" id="meta">connecting…</span>
   <span class="spacer"></span>
   <button id="home" title="Home (H)">⌂ Home</button>
@@ -91,7 +91,7 @@
       <span class="spacer"></span>
       <button id="clear">Clear</button>
     </div>
-    <div class="log" id="log"><div class="empty">App logs appear here while capmac is attached.</div></div>
+    <div class="log" id="log"><div class="empty">App logs appear here while CapMac is attached.</div></div>
   </aside>
 </main>
 <script>
@@ -109,8 +109,8 @@
   async function loadInfo() {
     try {
       info = await (await fetch('/api/info')).json();
-      document.title = info.title || 'capmac screen';
-      $('title').textContent = info.title || 'capmac screen';
+      document.title = info.title || 'CapMac screen';
+      $('title').textContent = info.title || 'CapMac screen';
       const input = info.screen && info.screen.input;
       screenEl.classList.toggle('input', !!input);
       for (const id of ['home', 'lock', 'type']) $(id).disabled = !input;

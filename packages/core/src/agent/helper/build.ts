@@ -72,7 +72,7 @@ function buildError(xcode: XcodeIdentity, output: string): AgentError {
   return new AgentError(
     `The smooth stream's helper does not compile with Xcode ${xcode.version || '(unknown version)'}.`,
     'HELPER_BUILD_FAILED',
-    'capmac shows the compatible stream instead. Updating capmac usually fixes this after an Xcode update.',
+    'CapMac shows the compatible stream instead. Updating CapMac usually fixes this after an Xcode update.',
     compilerSummary(output),
   );
 }

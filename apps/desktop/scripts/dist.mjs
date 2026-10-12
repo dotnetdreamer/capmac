@@ -14,10 +14,10 @@ let release;
 try {
   release = releaseConfig(process.env);
 } catch (err) {
-  console.error(`capmac Studio: ${err.message}`);
+  console.error(`CapMac Studio: ${err.message}`);
   process.exit(1);
 }
-for (const note of release.notes) console.log(`capmac Studio: ${note}`);
+for (const note of release.notes) console.log(`CapMac Studio: ${note}`);
 
 await import('./build.mjs');
 

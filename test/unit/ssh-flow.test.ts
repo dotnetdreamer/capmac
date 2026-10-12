@@ -119,7 +119,7 @@ describe.skipIf(!canRun)('SSH flow against an in-process server', () => {
 
   it('pairs with a password, installs the key and pins the host key', async () => {
     const result = await capmac(['pair', `${os.userInfo().username}@127.0.0.1:${port}`, '--password-env', 'CAPMAC_TEST_PW', '--yes', '--name', 'testmac']);
-    expect(result.out).toContain('Installing capmac\'s SSH key');
+    expect(result.out).toContain('Installing CapMac\'s SSH key');
     expect(result.out).toContain('Paired with');
     expect(result.code).toBe(0);
     const keys = await fs.readFile(path.join(fakeHome, '.ssh', 'authorized_keys'), 'utf8');
@@ -133,7 +133,7 @@ describe.skipIf(!canRun)('SSH flow against an in-process server', () => {
   it('re-pairs without a password once the key is installed', async () => {
     const result = await capmac(['pair', `${os.userInfo().username}@127.0.0.1:${port}`, '--yes', '--name', 'testmac']);
     expect(result.code).toBe(0);
-    expect(result.out).not.toContain('Installing capmac\'s SSH key');
+    expect(result.out).not.toContain('Installing CapMac\'s SSH key');
     const keys = (await fs.readFile(path.join(fakeHome, '.ssh', 'authorized_keys'), 'utf8')).trim().split('\n');
     expect(keys).toHaveLength(1);
   }, 120_000);

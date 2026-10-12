@@ -18,7 +18,7 @@ function loadPage(): string {
       // next
     }
   }
-  return '<!doctype html><title>capmac</title><p>Viewer page missing; rebuild capmac.</p>';
+  return '<!doctype html><title>CapMac</title><p>Viewer page missing; rebuild CapMac.</p>';
 }
 
 export function openInBrowser(url: string): void {

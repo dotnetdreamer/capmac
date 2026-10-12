@@ -492,7 +492,7 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
                   <>
                     <Spinner size={20} />
                     <span>{reconnecting ? 'Reconnecting to the Mac…' : connectingText}</span>
-                    {!reconnecting && preparing?.stage === 'building' && <span className="faint">First time on this Mac: compiling capmac’s screen helper. It takes a few seconds.</span>}
+                    {!reconnecting && preparing?.stage === 'building' && <span className="faint">First time on this Mac: compiling CapMac’s screen helper. It takes a few seconds.</span>}
                   </>
                 )}
               </div>

@@ -35,7 +35,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode; label: strin
           </>
         }
       >
-        This is a bug in capmac Studio, not in your app. Reloading usually helps; the details help us fix it.
+        This is a bug in CapMac Studio, not in your app. Reloading usually helps; the details help us fix it.
       </EmptyState>
     );
   }

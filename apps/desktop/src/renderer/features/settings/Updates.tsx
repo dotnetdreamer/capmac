@@ -15,17 +15,17 @@ function describe(info: UpdateInfo): { icon: IconName | 'spinner'; title: string
     case 'unavailable':
       return { icon: 'info', title: 'Updates are off', detail: s.reason };
     case 'idle':
-      return { icon: 'checkCircle', title: `capmac Studio ${info.current}`, detail: 'capmac Studio checks for updates every few hours.' };
+      return { icon: 'checkCircle', title: `CapMac Studio ${info.current}`, detail: 'CapMac Studio checks for updates every few hours.' };
     case 'checking':
       return { icon: 'spinner', title: 'Checking for updates…' };
     case 'up-to-date':
-      return { icon: 'checkCircle', title: 'capmac Studio is up to date', detail: `Checked at ${time(s.checkedAt)}.` };
+      return { icon: 'checkCircle', title: 'CapMac Studio is up to date', detail: `Checked at ${time(s.checkedAt)}.` };
     case 'available':
-      return { icon: 'download', title: `capmac Studio ${s.version} is available`, detail: 'The portable app can’t update itself: download the new version and replace this one.' };
+      return { icon: 'download', title: `CapMac Studio ${s.version} is available`, detail: 'The portable app can’t update itself: download the new version and replace this one.' };
     case 'downloading':
-      return { icon: 'download', title: `Downloading capmac Studio ${s.version}…`, detail: `${s.percent}%` };
+      return { icon: 'download', title: `Downloading CapMac Studio ${s.version}…`, detail: `${s.percent}%` };
     case 'ready':
-      return { icon: 'checkCircle', title: `capmac Studio ${s.version} is ready`, detail: 'It installs when you restart or quit capmac Studio.' };
+      return { icon: 'checkCircle', title: `CapMac Studio ${s.version} is ready`, detail: 'It installs when you restart or quit CapMac Studio.' };
     case 'error':
       return { icon: 'warning', title: 'Couldn’t check for updates', detail: `${s.message} (${time(s.checkedAt)})`, tone: 'caution' };
   }
@@ -59,7 +59,7 @@ export function UpdatesPanel() {
         <div className="settings-updates__text" aria-live="polite">
           <strong>{d.title}</strong>
           {d.detail && <span>{d.detail}</span>}
-          {s.state === 'downloading' && <ProgressBar value={s.percent / 100} label={`Downloading capmac Studio ${s.version}`} className="settings-updates__progress" />}
+          {s.state === 'downloading' && <ProgressBar value={s.percent / 100} label={`Downloading CapMac Studio ${s.version}`} className="settings-updates__progress" />}
           {info.feed && <span className="settings-updates__feed">Updates from {new URL(info.feed).host}</span>}
         </div>
       </div>

@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Smallest useful Capacitor app for trying capmac: Vite, one plugin, console logs.",
+  "description": "Smallest useful Capacitor app for trying CapMac: Vite, one plugin, console logs.",
   "scripts": {
     "dev": "vite",
     "build": "vite build"

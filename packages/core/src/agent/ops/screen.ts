@@ -128,7 +128,7 @@ async function startHelperInput(udid: string, env: NodeJS.ProcessEnv, io: AgentI
     const hello = await helper.hello;
     if (!hello?.input) {
       await helper.stop();
-      return { reason: hello?.inputReason ?? "capmac's helper takes no input on this Mac." };
+      return { reason: hello?.inputReason ?? "CapMac's helper takes no input on this Mac." };
     }
     const input = new HelperInput({
       send: (line) => helper.send(line),
@@ -185,7 +185,7 @@ export async function opScreen(params: ScreenParams, io: AgentIO): Promise<{ fra
       points,
       input,
       inputMode: helper ? 'touch' : axe ? 'gestures' : undefined,
-      inputReason: helper ? undefined : viaHelper && 'reason' in viaHelper ? viaHelper.reason : axe ? undefined : "Touch and typing need capmac's helper or AXe on the Mac.",
+      inputReason: helper ? undefined : viaHelper && 'reason' in viaHelper ? viaHelper.reason : axe ? undefined : "Touch and typing need CapMac's helper or AXe on the Mac.",
     };
     io.send(info);
     announced = true;

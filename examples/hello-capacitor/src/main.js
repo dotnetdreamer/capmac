@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { Device } from '@capacitor/device';
 
-console.log(`Hello capmac! Running on ${Capacitor.getPlatform()}`);
+console.log(`Hello CapMac! Running on ${Capacitor.getPlatform()}`);
 
 async function showDevice() {
   const list = document.getElementById('device');

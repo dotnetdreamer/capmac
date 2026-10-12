@@ -1,9 +1,9 @@
-# Captures the capmac Studio window exactly as it appears on screen (Mica, caption buttons included).
-# usage: powershell -ExecutionPolicy Bypass -File apps/desktop/scripts/tools/capture.ps1 -Out shot.png [-Title "capmac Studio"] [-NoActivate]
+# Captures the CapMac Studio window exactly as it appears on screen (Mica, caption buttons included).
+# usage: powershell -ExecutionPolicy Bypass -File apps/desktop/scripts/tools/capture.ps1 -Out shot.png [-Title "CapMac Studio"] [-NoActivate]
 # Brings the window to the front for a moment (topmost while capturing), then restores its z-order.
 param(
   [Parameter(Mandatory = $true)][string]$Out,
-  [string]$Title = 'capmac Studio',
+  [string]$Title = 'CapMac Studio',
   [switch]$NoActivate
 )
 # .NET resolves relative paths against the process directory, not Set-Location.

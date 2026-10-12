@@ -69,11 +69,11 @@ describe('AgentEventTranslator', () => {
   it('classifies app output', () => {
     const { ctx, events } = recorder();
     const t = new AgentEventTranslator(ctx, 'deploy');
-    t.handle({ t: 'app', stream: 'stdout', text: '⚡️  [log] - Hello capmac!' });
+    t.handle({ t: 'app', stream: 'stdout', text: '⚡️  [log] - Hello CapMac!' });
     t.handle({ t: 'app', stream: 'stderr', text: '⚡️  To Native ->  Device getInfo 123' });
     t.handle({ t: 'app', stream: 'stdout', text: '   ' });
     expect(events).toHaveLength(2);
-    expect(events[0]).toMatchObject({ type: 'app-log', entry: { kind: 'console', level: 'log', text: 'Hello capmac!', stream: 'stdout' } });
+    expect(events[0]).toMatchObject({ type: 'app-log', entry: { kind: 'console', level: 'log', text: 'Hello CapMac!', stream: 'stdout' } });
     expect(events[1]).toMatchObject({ type: 'app-log', entry: { kind: 'bridge', stream: 'stderr' } });
   });
 });
@@ -93,7 +93,7 @@ describe('AppLogClassifier', () => {
 });
 
 describe('toErrorInfo', () => {
-  it('keeps hints and tool output of capmac errors', () => {
+  it('keeps hints and tool output of CapMac errors', () => {
     expect(toErrorInfo(new UserError('No Mac is paired yet.', 'Run `capmac pair`.'))).toMatchObject({ message: 'No Mac is paired yet.', hint: 'Run `capmac pair`.', expected: true });
     expect(toErrorInfo(new AgentCallError({ message: 'Build failed', code: 'BUILD_FAILED', tail: ['error: x'] }))).toMatchObject({ code: 'BUILD_FAILED', details: ['error: x'], expected: true });
     expect(toErrorInfo(new SshError('The connection to the Mac was closed.'))).toMatchObject({ expected: true });
@@ -136,7 +136,7 @@ describe('doctor checks', () => {
     simulators: { devices: 28, runtimes: ['iOS 26.5'] }, freeDiskGb: 27.1, keychainLocked: true, signingIdentities: [], consoleUser: 'ik',
   };
 
-  it('offers one-click fixes where capmac can fix things', () => {
+  it('offers one-click fixes where CapMac can fix things', () => {
     const checks = macChecks(probe);
     expect(checks.find((c) => c.id === 'axe')?.action?.id).toBe('install-axe');
     expect(checks.find((c) => c.id === 'keychain')?.action?.id).toBe('unlock-keychain');

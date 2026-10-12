@@ -81,7 +81,7 @@ export function BuildIpaDialog({ path, open, onClose }: { path: string; open: bo
           }
         />
       )}
-      <InfoBar tone="info">Signing over SSH needs the Mac’s login keychain unlocked. capmac asks for your Mac password if needed and never stores it.</InfoBar>
+      <InfoBar tone="info">Signing over SSH needs the Mac’s login keychain unlocked. CapMac asks for your Mac password if needed and never stores it.</InfoBar>
     </Dialog>
   );
 }

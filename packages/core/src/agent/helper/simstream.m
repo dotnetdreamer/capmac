@@ -694,7 +694,7 @@ static void setupInput(id device, NSString *developerDir) {
   NSString *coreSimulator = [[NSBundle bundleForClass:NSClassFromString(@"SimDevice")] infoDictionary][@"CFBundleVersion"] ?: @"";
   // CoreSimulator 1155.4 (Xcode 27) ignores legacy Indigo input; it needs Apple's newer HID service.
   if (coreSimulator.length && compareVersions(coreSimulator, @"1155.4") >= 0) {
-    inputUnavailable = [NSString stringWithFormat:@"This Xcode's simulator (CoreSimulator %@) takes input through a service capmac does not support yet.", coreSimulator];
+    inputUnavailable = [NSString stringWithFormat:@"This Xcode's simulator (CoreSimulator %@) takes input through a service CapMac does not support yet.", coreSimulator];
     return;
   }
   NSString *kitPath = [developerDir stringByAppendingPathComponent:@"Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"];

@@ -68,7 +68,7 @@ function Welcome({ next }: { next: () => void }) {
     <div className="ob-page ob-page--welcome">
       <HeroArt />
       <h1 className="ob-title ob-title--display">Build and run your iOS&nbsp;app from Windows</h1>
-      <p className="ob-lead">capmac Studio pairs this PC with a Mac on your network. Your Capacitor app is built there with Xcode and shows up here, live, on the iOS simulator.</p>
+      <p className="ob-lead">CapMac Studio pairs this PC with a Mac on your network. Your Capacitor app is built there with Xcode and shows up here, live, on the iOS simulator.</p>
       <div className="ob-actions ob-actions--center">
         <Button size="lg" variant="accent" onClick={next} data-autofocus>
           Get started
@@ -92,7 +92,7 @@ function Prepare({ next, back }: { next: () => void; back: () => void }) {
           <div>
             <div className="ob-card__title">Turn on Remote Login</div>
             <div className="ob-card__text">
-              System Settings › General › Sharing › <strong>Remote Login</strong>. capmac talks to the Mac over SSH; nothing else is installed.
+              System Settings › General › Sharing › <strong>Remote Login</strong>. CapMac talks to the Mac over SSH; nothing else is installed.
             </div>
           </div>
         </div>
@@ -107,7 +107,7 @@ function Prepare({ next, back }: { next: () => void; back: () => void }) {
         </div>
       </div>
       <InfoBar tone="info" title="Windows may ask about network access">
-        To find Macs, capmac Studio listens for them on your local network. If Windows asks, allow it on <strong>private networks</strong>.
+        To find Macs, CapMac Studio listens for them on your local network. If Windows asks, allow it on <strong>private networks</strong>.
       </InfoBar>
       <div className="ob-actions">
         <Button variant="subtle" onClick={back}>
@@ -258,7 +258,7 @@ function SignIn({ mac, back, paired }: { mac: { host: string; port: number; labe
       }}
     >
       <h1 className="ob-title">Sign in to {mac.label ?? mac.host}</h1>
-      <p className="ob-lead">Your Mac password is used once, to install capmac’s own SSH key. It is never stored.</p>
+      <p className="ob-lead">Your Mac password is used once, to install CapMac’s own SSH key. It is never stored.</p>
       <div className="ob-form">
         <TextField label="Mac user name" value={user} onChange={(e) => setUser(e.target.value.trim())} hint={<>The short name, as shown by <code>whoami</code> in Terminal on the Mac.</>} autoComplete="off" data-autofocus disabled={busy} />
         <PasswordField label="Password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} />
@@ -312,7 +312,7 @@ function Health({ name, next }: { name: string; next: () => void }) {
   return (
     <div className="ob-page ob-page--wide">
       <h1 className="ob-title">Checking {mac?.label ?? 'your Mac'}</h1>
-      <p className="ob-lead">Xcode, simulators and tools. capmac fixes what it can with one click.</p>
+      <p className="ob-lead">Xcode, simulators and tools. CapMac fixes what it can with one click.</p>
       <CheckList mac={name} checks={checks} checking={health?.status === 'checking'} />
       {health?.status === 'error' && health.error && (
         <InfoBar tone="critical" title={health.error.message}>

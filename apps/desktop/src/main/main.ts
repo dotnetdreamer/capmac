@@ -263,11 +263,11 @@ function registerIpc(): void {
   });
   handle('app:engine-call', async ({ method, params }) => {
     if (!Object.hasOwn(engineMethods, method) || (method === 'debug.dropConnection' && app.isPackaged)) {
-      return { ok: false, error: { message: `capmac Studio does not know "${method}".`, expected: false } };
+      return { ok: false, error: { message: `CapMac Studio does not know "${method}".`, expected: false } };
     }
     const parsed = engineMethods[method as EngineMethod].safeParse(params ?? {});
     if (!parsed.success) {
-      return { ok: false, error: { message: 'capmac Studio sent an invalid request.', details: z.prettifyError(parsed.error).split('\n'), expected: false } };
+      return { ok: false, error: { message: 'CapMac Studio sent an invalid request.', details: z.prettifyError(parsed.error).split('\n'), expected: false } };
     }
     return engine.call(method as EngineMethod, parsed.data);
   });
@@ -301,9 +301,9 @@ async function restartToUpdate(): Promise<void> {
       buttons: ['Restart and update', 'Cancel'],
       defaultId: 1,
       cancelId: 1,
-      title: 'Update capmac Studio',
-      message: `Restart into capmac Studio ${version} now?`,
-      detail: `${names} stops. Otherwise the update installs when you quit capmac Studio.`,
+      title: 'Update CapMac Studio',
+      message: `Restart into CapMac Studio ${version} now?`,
+      detail: `${names} stops. Otherwise the update installs when you quit CapMac Studio.`,
     };
     const { response } = await (win && !win.isDestroyed() ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options));
     if (response !== 0) return;
@@ -332,7 +332,7 @@ function openWindow(): BrowserWindow {
     w.hide();
     if (!settings.get().trayHintShown) {
       settings.update({ trayHintShown: true });
-      new Notification({ title: 'capmac Studio is still running', body: 'Your app keeps running. Find capmac Studio in the notification area to stop it or quit.', icon: path.join(iconsDir(), 'icon.png') }).show();
+      new Notification({ title: 'CapMac Studio is still running', body: 'Your app keeps running. Find CapMac Studio in the notification area to stop it or quit.', icon: path.join(iconsDir(), 'icon.png') }).show();
     }
   });
   w.on('closed', () => {
@@ -368,7 +368,7 @@ app.whenReady().then(async () => {
   engine = new EngineProcess(outDir('engine', 'engine.cjs'), () => ({
     agentPath: agentPath(),
     sampleDir: sampleDir(),
-    samplesHome: path.join(app.getPath('documents'), 'capmac Studio'),
+    samplesHome: path.join(app.getPath('documents'), 'CapMac Studio'),
     settings: { verbose: settings.get().verbose, osLogs: settings.get().osLogs },
   }), {
     onEvents: onEngineEvents,

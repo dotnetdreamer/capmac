@@ -7,7 +7,7 @@ to WebCodecs on Windows. Results and the recommendation are in
 | File | What it is |
 |---|---|
 | `simstream.m` | The Mac helper: CoreSimulator `SimScreen` frame callbacks → framebuffer `IOSurface` → VideoToolbox H.264 → length-prefixed frames on stdout. Keyframe, clock-ping and quit commands on stdin. |
-| `bench.ts` | Builds the helper on the paired Mac and measures frame rate, bandwidth and latency, for the helper (`v2`) and for today's JPEG stream (`v1`). Uses capmac's own SSH connection. |
+| `bench.ts` | Builds the helper on the paired Mac and measures frame rate, bandwidth and latency, for the helper (`v2`) and for today's JPEG stream (`v1`). Uses CapMac's own SSH connection. |
 | `decode-test.mjs` | Decodes a recorded stream with WebCodecs (hardware and software) inside a running `npm run desktop:dev` app. |
 
 ## Run it
@@ -44,7 +44,7 @@ only documentation. Two tools in `tools/`:
 
 | File | What it does |
 |---|---|
-| `mac.ts` | Runs a script on the paired Mac (`sh '<command>'`, `sh -f <file>`) or copies a file to it (`put <local> <remote>`, relative to the Mac user's home), over capmac's own SSH connection. Bundle it like `bench.ts`. |
+| `mac.ts` | Runs a script on the paired Mac (`sh '<command>'`, `sh -f <file>`) or copies a file to it (`put <local> <remote>`, relative to the Mac user's home), over CapMac's own SSH connection. Bundle it like `bench.ts`. |
 | `introspect.m` | Lists the display and input classes and protocols in the installed Xcode, dumps a class (`./introspect SimDeviceIOClient`), a protocol with its block signatures (`./introspect @SimScreen`), or every class in a framework (`./introspect --image SimulatorKit`). |
 
 ```sh

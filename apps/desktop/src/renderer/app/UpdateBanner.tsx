@@ -18,7 +18,7 @@ export function UpdateBanner() {
     <div className="engine-banner">
       <InfoBar
         tone="info"
-        title={`capmac Studio ${version} is ready`}
+        title={`CapMac Studio ${version} is ready`}
         live
         onDismiss={() => dismiss(version)}
         actions={
@@ -34,7 +34,7 @@ export function UpdateBanner() {
           </>
         }
       >
-        {busy ? 'It installs when you quit capmac Studio, so your running app keeps going.' : 'Restarting takes a few seconds.'}
+        {busy ? 'It installs when you quit CapMac Studio, so your running app keeps going.' : 'Restarting takes a few seconds.'}
       </InfoBar>
     </div>
   );

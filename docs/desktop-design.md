@@ -1,6 +1,6 @@
-# capmac Studio — design
+# CapMac Studio — design
 
-capmac Studio is the Windows desktop app for capmac. It does what the CLI does: pair with a Mac, then build, run, live-reload and see a Capacitor iOS app on it. It adds the views a terminal can't give you: a live simulator, a build timeline, clickable problems, and a console you can filter. It is built to grow into a full remote iOS Simulator for Windows.
+CapMac Studio is the Windows desktop app for CapMac. It does what the CLI does: pair with a Mac, then build, run, live-reload and see a Capacitor iOS app on it. It adds the views a terminal can't give you: a live simulator, a build timeline, clickable problems, and a console you can filter. It is built to grow into a full remote iOS Simulator for Windows.
 
 This document covers:
 
@@ -18,24 +18,24 @@ This document covers:
 
 - **Calm by default.** Most of the time nothing is happening. The idle UI is quiet: no spinners, no polling, near-zero CPU. Motion and colour only show up when something changes state.
 - **One loop, one click.** The core loop is: open project → **Live** → the app appears → edit in VS Code → it updates. Everything else supports that loop, and nothing gets in its way.
-- **Every state is designed.** Loading, empty, offline, reconnecting, failed and cancelled all have their own state. Every error says what happened and how to fix it, often with a button that does the fix. Raw stack traces never reach the UI. Engine errors carry `message`, `hint` and `details`; anything unexpected becomes "Something went wrong in capmac", with a "Copy details" button.
+- **Every state is designed.** Loading, empty, offline, reconnecting, failed and cancelled all have their own state. Every error says what happened and how to fix it, often with a button that does the fix. Raw stack traces never reach the UI. Engine errors carry `message`, `hint` and `details`; anything unexpected becomes "Something went wrong in CapMac", with a "Copy details" button.
 - **Native to Windows 11.** The app uses a Mica backdrop, Segoe UI Variable, the user's accent colour and the system caption buttons with snap layouts. Focus rectangles follow Fluent. The tray icon and toast notifications work as Windows users expect.
 - **Keyboard first.** Every action is reachable from the command palette (Ctrl+K) and most have a shortcut. Full screen-reader support.
 - **The terminal stays first-class.** The CLI and the app share one engine, so they can't drift apart, and the CLI keeps working on its own.
 
 ### Name
 
-The working name **capmac Studio** is clear and continuous with the CLI, and the code uses it. Alternatives, if you want one:
+The working name **CapMac Studio** is clear and continuous with the CLI, and the code uses it. Alternatives, if you want one:
 
 - **Ferry**: it carries your app across to the Mac.
-- **capmac Desktop**: plain, like GitHub Desktop.
+- **CapMac Desktop**: plain, like GitHub Desktop.
 
 "Studio" slightly suggests an editor, which this isn't.
 
 ### Information architecture
 
 ```
-capmac Studio
+CapMac Studio
 ├── First run (also "Pair a Mac" later)
 │   ├── Welcome
 │   ├── Prepare your Mac ........ Remote Login on, stay logged in to the desktop
@@ -78,7 +78,7 @@ Wireframes use these markers:
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┬──────────┐
-│ ◆ capmac Studio › Hello capmac       [ 🔍 Search or run a command   Ctrl+K ]   │ ─  ▢  ✕ │
+│ ◆ CapMac Studio › Hello CapMac       [ 🔍 Search or run a command   Ctrl+K ]   │ ─  ▢  ✕ │
 └──────────────────────────────────────────────────────────────────────────────┴──────────┘
 ```
 
@@ -93,9 +93,9 @@ The flow is a centred column, 520 px max, on Mica. A thin step indicator sits at
    - "Turn on Remote Login": System Settings › General › Sharing.
    - "Stay logged in": simulators need a desktop session.
 
-   A note warns that Windows may ask to let capmac Studio find devices on the network: allow it on private networks. This note comes before the first scan, which binds UDP 5353. "Find my Mac ▸".
+   A note warns that Windows may ask to let CapMac Studio find devices on the network: allow it on private networks. This note comes before the first scan, which binds UDP 5353. "Find my Mac ▸".
 3. **Find your Mac.** A radar-style scanning indicator, then a list of discovered Macs with name, host and IP. "Enter an address instead" reveals a text field. Empty state: "No Macs found" with the likely causes (Remote Login off, different network or VPN, the firewall prompt was declined), plus "Scan again" and manual entry.
-4. **Sign in.** The Mac's name, a user name field (with a hint: "the short name from `whoami`") and a password field: "used once to install capmac's key, never stored". On the first connection, a dialog shows the host-key fingerprint: "Trust this Mac?". Progress runs as a checklist:
+4. **Sign in.** The Mac's name, a user name field (with a hint: "the short name from `whoami`") and a password field: "used once to install CapMac's key, never stored". On the first connection, a dialog shows the host-key fingerprint: "Trust this Mac?". Progress runs as a checklist:
    1. Connecting.
    2. Installing key.
    3. Inspecting the Mac.
@@ -107,14 +107,14 @@ The flow is a centred column, 520 px max, on Mica. A thin step indicator sits at
    - Install CocoaPods or AXe (asks for confirmation).
 
    Warnings never block "Continue".
-6. **You're set.** The success moment: "Run the sample app ▸". It copies the bundled sample to `Documents\capmac Studio\Hello capmac`, opens its workspace and starts Run. Under 2 minutes from install to an app on the simulator. A secondary action: "Open my own project".
+6. **You're set.** The success moment: "Run the sample app ▸". It copies the bundled sample to `Documents\CapMac Studio\Hello CapMac`, opens its workspace and starts Run. Under 2 minutes from install to an app on the simulator. A secondary action: "Open my own project".
 
 #### Home
 
 ```
 Projects                                                    [▸ Add project  Ctrl+O]
 ┌───────────────────────────┐ ┌───────────────────────────┐ ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐
-│ [icon] Hello capmac   ● Live│ │ [icon] Shop               │   Drop a Capacitor app
+│ [icon] Hello CapMac   ● Live│ │ [icon] Shop               │   Drop a Capacitor app
 │ dev.capmac.hello           │ │ com.acme.shop             │ │ folder here         │
 │ SPM · 142 files · 1.2 MB   │ │ CocoaPods · 2.3k · 18 MB  │   or browse…
 │ Ran 2 min ago on iPhone 17 │ │ Ran yesterday on iPhone…  │ └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┘
@@ -134,7 +134,7 @@ Projects                                                    [▸ Add project  Ct
 #### Workspace
 
 ```
-┌ [icon] Hello capmac   [IK's M1 ▾] [● iPhone 17 · iOS 26.5 ▾]     [▸ Run] [⚡ Live] [■] │ [Build IPA] [Xcode] ⋯ ┐
+┌ [icon] Hello CapMac   [IK's M1 ▾] [● iPhone 17 · iOS 26.5 ▾]     [▸ Run] [⚡ Live] [■] │ [Build IPA] [Xcode] ⋯ ┐
 ├──────────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ ⚡ Live  http://localhost:5173 ⟶ tunnel ⟶ IK's M1   ● HMR connected · updated 12:04:31   [↻ Rebuild] │
 ├───────────────────────┬──────────────────────────────────────────────────────────────────────────────┤
@@ -143,7 +143,7 @@ Projects                                                    [▸ Add project  Ct
 │   │               │   │ ✓ Boot (running)  ✓ Install 1.1s  ✓ Launch 1.6s                               │
 │   │   simulator   │   ├──────────────────────────────────────────────────────────────────────────────┤
 │   │    canvas     │   │ [Console] [Problems 2]   JS Capacitor Native Bridge │ Level ▾ │ 🔍 search   ⏸ ⋯ │
-│   │               │   │ 12:04:31.204  JS   Hello from capmac                                         │
+│   │               │   │ 12:04:31.204  JS   Hello from CapMac                                         │
 │   │               │   │ 12:04:31.207  JS ▸ {device: {…}, ready: true}                                 │
 │   ╰───────────────╯   │ 12:04:32.010  iOS  WebContent process launched                               │
 │ [⌂][⏻][⌨][⤓] 5.1 fps  │                                                     ↓ 23 new lines          │
@@ -191,7 +191,7 @@ Projects                                                    [▸ Add project  Ct
   - Copy (one item, or all as `file:line:col: error: …`), and "Show full build log", which downloads the Mac-side log into a read-only viewer.
   - Warnings from dependencies (Pods, Swift packages, node_modules) are collapsed under "37 warnings from dependencies".
 - **Console**: virtualized (TanStack Virtual), 100k lines by default (Settings: 10k to 1M); old lines drop in chunks.
-  - Source chips: JS, Capacitor, Native, Bridge, Dev server, capmac.
+  - Source chips: JS, Capacitor, Native, Bridge, Dev server, CapMac.
   - Level menu: Errors, Warnings, Info, Debug.
   - Search with highlighted matches, a match count and F3/Shift+F3 navigation.
   - Auto-scroll pauses when you scroll up. "↓ 23 new lines" jumps back. ⏸ freezes the view.
@@ -204,10 +204,10 @@ Projects                                                    [▸ Add project  Ct
 #### Simulator pane
 
 - Frames come straight from the engine to a Web Worker over a transferable MessagePort, and the worker draws them on an OffscreenCanvas; the main thread never touches pixels.
-  - **The smooth stream** (default): H.264 from capmac's helper on the Mac, decoded with WebCodecs. See §5.
-  - **The compatible stream**: JPEG screenshots, decoded with `createImageBitmap`. Chosen in Settings, or by capmac itself when the smooth stream cannot run.
+  - **The smooth stream** (default): H.264 from CapMac's helper on the Mac, decoded with WebCodecs. See §5.
+  - **The compatible stream**: JPEG screenshots, decoded with `createImageBitmap`. Chosen in Settings, or by CapMac itself when the smooth stream cannot run.
 - The device frame is drawn in CSS, as a neutral rounded bezel, and can be turned off.
-- **Input through capmac's helper** (*touch* mode):
+- **Input through CapMac's helper** (*touch* mode):
   - the pointer is a finger: down, move and up go to the simulator as they happen, so drags, scrolling and long presses behave as on the device; a ripple marks each touch;
   - Alt+drag is two fingers, mirrored around the centre, to pinch and rotate (Simulator's Option-drag);
   - the wheel and the touchpad scroll, as a finger drag that follows them;
@@ -224,7 +224,7 @@ Projects                                                    [▸ Add project  Ct
   - **No simulator selected:** "Pick a simulator".
   - **Shut down:** "Boot iPhone 17".
   - **Booting:** a spinner with the boot progress.
-  - **First smooth stream on a Mac:** "Setting up the smooth stream for Xcode 26.6…" while capmac compiles its helper (about two seconds).
+  - **First smooth stream on a Mac:** "Setting up the smooth stream for Xcode 26.6…" while CapMac compiles its helper (about two seconds).
   - **Stream lost:** retrying.
   - **Device target:** "The screen is only available for simulators".
 
@@ -260,7 +260,7 @@ Projects                                                    [▸ Add project  Ct
 | Console | Line limit (100k / 200k / 500k), timestamps, wrap long lines, show OS logs (`--os-logs`). |
 | Builds | Default configuration, show dependency warnings, verbose tool output. |
 | Behaviour | Notify when a build finishes in the background. Keep running in the tray when the window is closed during a session. |
-| About | App, Electron, Chromium, Node and agent versions; the capmac config folder; licences. |
+| About | App, Electron, Chromium, Node and agent versions; the CapMac config folder; licences. |
 
 ### Global patterns
 
@@ -294,10 +294,10 @@ Projects                                                    [▸ Add project  Ct
   - Build IPA: export type, team, output folder, optional upload to TestFlight.
 - **Toasts** (bottom right, 4 s, pause on hover) confirm actions. **InfoBars** (inline, Fluent style) report state that needs attention.
 - **Tray**
-  - Menu: Run «last project», Live «last project», Stop, Open capmac Studio, Quit.
+  - Menu: Run «last project», Live «last project», Stop, Open CapMac Studio, Quit.
   - The icon shows a dot while a session runs.
   - Closing the window during a session keeps the app in the tray (a one-time toast says so). Otherwise closing quits.
-- **Notifications**: when a run finishes or fails while the window is in the background ("Hello capmac is running on iPhone 17 · 6.2 s" / "Build failed: 2 errors in AppDelegate.swift"). Clicking one focuses that workspace.
+- **Notifications**: when a run finishes or fails while the window is in the background ("Hello CapMac is running on iPhone 17 · 6.2 s" / "Build failed: 2 errors in AppDelegate.swift"). Clicking one focuses that workspace.
 
 ### Accessibility
 
@@ -504,7 +504,7 @@ packages/
   cli/       capmac (the published npm package): commander, terminal renderer,
              prompts, key shortcuts, browser screen viewer
 apps/
-  desktop/   capmac Studio (Electron 44, React 19, Vite 8)
+  desktop/   CapMac Studio (Electron 44, React 19, Vite 8)
 bin/capmac.js    dev shim → packages/cli (so `node bin/capmac.js` keeps working)
 test/unit/       the CLI/engine/agent tests (vitest)
 apps/desktop/test/  desktop logic tests (vitest): URL trust, palette matching, console, timeline
@@ -706,11 +706,11 @@ Events reach the renderer as `{ scope: { sessionId?, mac?, watchId? }, event }` 
 
 **Goal:** 30–60 fps and under 100 ms latency over Wi-Fi, carried by the existing SSH connection. No new ports.
 
-**Status:** shipped in capmac Studio as *the smooth stream*, with the JPEG stream (v1, *the compatible stream*) as its automatic fallback. On the LAN: 55–61 fps, 7–16 ms (p50) from the Mac's screen to the PC's, and a median of 54 ms from a click to the app's answer on screen.
+**Status:** shipped in CapMac Studio as *the smooth stream*, with the JPEG stream (v1, *the compatible stream*) as its automatic fallback. On the LAN: 55–61 fps, 7–16 ms (p50) from the Mac's screen to the PC's, and a median of 54 ms from a click to the app's answer on screen.
 
 ### The compatible stream (v1)
 
-The agent polls `simctl io screenshot --type=jpeg` (160–205 ms per shot, measured on an M1 with Xcode 26.6) and downscales with `sips` (80–93 ms). That gives about 4 fps, 80–115 KB a frame, 2.5–3.6 Mbps while the screen changes, and frames that are already ~250–300 ms old when they leave the Mac. Unchanged frames are skipped. The ceiling is the screenshot round trip, not the network. It now takes input through capmac's helper too (an input-only helper, `--video 0`), so a fallback keeps touch and typing.
+The agent polls `simctl io screenshot --type=jpeg` (160–205 ms per shot, measured on an M1 with Xcode 26.6) and downscales with `sips` (80–93 ms). That gives about 4 fps, 80–115 KB a frame, 2.5–3.6 Mbps while the screen changes, and frames that are already ~250–300 ms old when they leave the Mac. Unchanged frames are skipped. The ceiling is the screenshot round trip, not the network. It now takes input through CapMac's helper too (an input-only helper, `--video 0`), so a fallback keeps touch and typing.
 
 ### How it works
 
@@ -750,12 +750,12 @@ Mac                                                         Windows
 
   A fallback lasts for the stream; *Try the smooth stream* clears it. Pings every 2 s also keep an NTP-style clock offset (the shortest round trip wins) for the latency readout.
 - **The screen worker** configures WebCodecs' `VideoDecoder` from the config message (the codec string and `description` come from the avcC record) with `prefer-hardware` and `optimizeForLatency`. Each `VideoFrame` is drawn as soon as it is decoded and closed when the next one arrives; the newest is kept for redraws on resize. When more than three frames wait in the decoder, it skips deltas up to the next keyframe and asks for one; a decoder error resets it the same way.
-- **The SPS says frames come in order.** VideoToolbox writes no VUI bitstream restriction, so a decoder has to assume frames may be reordered and holds up to a DPB's worth of them: on this PC, about 16 frames, or 270 ms at 60 fps. capmac rewrites the SPS in the avcC record to declare `max_num_reorder_frames = 0` (`shared/h264.ts`, applied when the worker reads the config). Decoding went from about 270 ms to 0.5 ms a frame.
+- **The SPS says frames come in order.** VideoToolbox writes no VUI bitstream restriction, so a decoder has to assume frames may be reordered and holds up to a DPB's worth of them: on this PC, about 16 frames, or 270 ms at 60 fps. CapMac rewrites the SPS in the avcC record to declare `max_num_reorder_frames = 0` (`shared/h264.ts`, applied when the worker reads the config). Decoding went from about 270 ms to 0.5 ms a frame.
 - **The picture's edges.** The encoder pads 642×1398 to 656×1408. Scaling down with high-quality smoothing samples past the visible edge into that green padding, so the worker draws from a source rectangle one pixel smaller.
 
 ### Input
 
-- capmac's helper sends Indigo HID messages through `SimulatorKit.SimDeviceLegacyHIDClient`, built the way idb (FBSimulatorControl, MIT) builds them for Xcode 26:
+- CapMac's helper sends Indigo HID messages through `SimulatorKit.SimDeviceLegacyHIDClient`, built the way idb (FBSimulatorControl, MIT) builds them for Xcode 26:
   - **One finger.** SimulatorKit only builds multi-touch messages, with `IndigoHIDMessageForMouseNSEvent(p1, p2, target 0x32, type, size, edge)`. The helper takes their digitizer contact and wraps it as a single-touch message. A move is another touch-down at the new point.
   - **Two fingers** use the builder's multi-touch message as it is.
   - **Buttons:** `IndigoHIDMessageForButton(source, direction, 0x33)`; home 0, lock 1, side 0xbb8, Siri 0x400002, Apple Pay 0x1f4.
@@ -793,7 +793,7 @@ Verified on the Mac:
 | Project | What it offers | Use |
 |---|---|---|
 | serve-sim (EvanBacon, Apache-2.0) | IOSurface → H.264 over WebSocket, WebCodecs client | Closest match. Its capture and encode approach can be studied and adapted (licence permits). |
-| idb (Meta, MIT) | `idb video-stream --format h264`; Indigo HID on Xcode 26, DTUHID on Xcode 27 | The source of capmac's Indigo message layout. A heavy install (Python client and companion), so not a runtime dependency. |
+| idb (Meta, MIT) | `idb video-stream --format h264`; Indigo HID on Xcode 26, DTUHID on Xcode 27 | The source of CapMac's Indigo message layout. A heavy install (Python client and companion), so not a runtime dependency. |
 | baguette (tddworks, Apache-2.0) | `baguette serve`: WebSocket with MJPEG/AVCC, gesture JSON | Its notes on the Xcode 26 mouse message: the real signature has the edge in the fifth integer argument. |
 | AXe | Input (tap, swipe, type, buttons) | Now the fallback for input. **Not** for streaming (`stream-video` leak, issue #72). |
 | Radon IDE simulator-server | — | Closed source; not used. |

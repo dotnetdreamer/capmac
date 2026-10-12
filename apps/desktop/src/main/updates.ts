@@ -55,7 +55,7 @@ export class Updates {
     const devConfig = process.env.CAPMAC_UPDATE_DEV_CONFIG;
     const config = app.isPackaged ? path.join(process.resourcesPath, 'app-update.yml') : devConfig ? path.resolve(devConfig) : null;
     if (!config || !existsSync(config)) {
-      this.set({ state: 'unavailable', reason: app.isPackaged ? 'This build of capmac Studio has no update feed.' : 'Updates are off in development builds.' });
+      this.set({ state: 'unavailable', reason: app.isPackaged ? 'This build of CapMac Studio has no update feed.' : 'Updates are off in development builds.' });
       return;
     }
     this.feed = feedUrl(readFileSync(config, 'utf8'));

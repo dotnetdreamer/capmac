@@ -155,7 +155,7 @@ function MacCard({ mac, expanded, onToggle }: { mac: MacSummary; expanded: boole
             </>
           }
         >
-          <p>capmac forgets this Mac. Its key stays in ~/.ssh/authorized_keys on the Mac; remove the line ending in “capmac@” there to revoke it.</p>
+          <p>CapMac forgets this Mac. Its key stays in ~/.ssh/authorized_keys on the Mac; remove the line ending in “capmac@” there to revoke it.</p>
         </Dialog>
       )}
     </article>
@@ -198,7 +198,7 @@ export function Macs() {
         </header>
         {loaded && macs.length === 0 ? (
           <EmptyState icon="mac" title="No Mac paired yet" actions={<Button variant="accent" icon="add" onClick={() => navigate({ name: 'onboarding' })}>Pair a Mac</Button>}>
-            capmac Studio builds your app with Xcode on a Mac on your network. Pairing takes a minute: turn on Remote Login on the Mac and sign in once.
+            CapMac Studio builds your app with Xcode on a Mac on your network. Pairing takes a minute: turn on Remote Login on the Mac and sign in once.
           </EmptyState>
         ) : (
           <div className="mac-list">

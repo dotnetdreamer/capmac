@@ -27,7 +27,7 @@ export interface PairOptions {
 
 async function chooseDestination(arg: string | undefined, ctx: EngineContext): Promise<Destination> {
   if (arg) return parseDestination(arg);
-  if (!canPrompt()) throw new UserError('Tell capmac which Mac to pair with: `capmac pair user@my-mac.local`.');
+  if (!canPrompt()) throw new UserError('Tell CapMac which Mac to pair with: `capmac pair user@my-mac.local`.');
   const found = await withStep(ctx, 'Looking for Macs with Remote Login on your network', 'other', () => discoverMacs(), (list) => (list.length ? `${list.length} found` : 'none found'));
   if (found.length > 0) {
     const choice = await select<Destination | null>('Which Mac?', [
@@ -70,7 +70,7 @@ export async function macsCommand(): Promise<void> {
 
 export async function unpairCommand(name: string): Promise<void> {
   await unpairMac(name);
-  log.success(`Forgot "${name}". (capmac's key is still in ~/.ssh/authorized_keys on that Mac; remove the line ending in "${keyComment()}" if you like.)`);
+  log.success(`Forgot "${name}". (CapMac's key is still in ~/.ssh/authorized_keys on that Mac; remove the line ending in "${keyComment()}" if you like.)`);
 }
 
 export async function setDefaultCommand(name: string): Promise<void> {

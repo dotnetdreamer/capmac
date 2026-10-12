@@ -104,7 +104,7 @@ describe('jsonPayload', () => {
   });
 
   it('ignores plain text', () => {
-    expect(jsonPayload(line('Hello capmac! Running on ios'))).toBeNull();
+    expect(jsonPayload(line('Hello CapMac! Running on ios'))).toBeNull();
     expect(jsonPayload(line('[vite] connected.'))).toBeNull();
   });
 });

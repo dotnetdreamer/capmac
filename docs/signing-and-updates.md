@@ -1,6 +1,6 @@
-# capmac Studio: code signing and updates
+# CapMac Studio: code signing and updates
 
-How capmac Studio's Windows builds get signed and how installed copies update themselves. Everything is driven by environment variables at build time (`apps/desktop/scripts/release-config.mjs`); without them, `npm run desktop:build` makes the same unsigned builds as before, with updates off.
+How CapMac Studio's Windows builds get signed and how installed copies update themselves. Everything is driven by environment variables at build time (`apps/desktop/scripts/release-config.mjs`); without them, `npm run desktop:build` makes the same unsigned builds as before, with updates off.
 
 ## Decision 1: how to sign
 
@@ -14,7 +14,7 @@ Windows shows unsigned installers as "Unknown publisher", and SmartScreen blocks
 | Where the key lives | In Azure; you never hold it | A USB token or a cloud HSM (required since June 2023) | A USB token or a cloud HSM |
 | Signing on a build machine | An Azure app registration's secret in the environment | Token plugged in (or the vendor's cloud signing tool) | Same as OV |
 | SmartScreen | Builds reputation with downloads | Builds reputation with downloads | Same as OV (EV no longer skips the warning) |
-| Effort in capmac | Ready: set 7 variables | Ready: `CSC_LINK` + password, or a thumbprint for a token | Ready: a thumbprint for the token |
+| Effort in CapMac | Ready: set 7 variables | Ready: `CSC_LINK` + password, or a thumbprint for a token | Ready: a thumbprint for the token |
 
 **Recommendation:** Azure Artifact Signing if you can get it (US or Canada, or as an organization in the EU or UK). It is the cheapest, needs no hardware and works unattended on any build machine. Otherwise, an OV certificate in a cloud HSM or on a token; EV adds cost without a SmartScreen benefit any more.
 
@@ -54,7 +54,7 @@ Optional: `CAPMAC_TIMESTAMP_URL` (default `http://timestamp.digicert.com`).
 
 The build signs, with SHA-256 and a timestamp:
 
-- `capmac Studio.exe`;
+- `CapMac Studio.exe`;
 - `elevate.exe` (used by the installer to install for all users);
 - the uninstaller;
 - the installer;
@@ -67,7 +67,7 @@ Azure signing runs Microsoft's `Invoke-TrustedSigning` PowerShell module, which 
 **Verify** a signed build:
 
 ```powershell
-Get-ChildItem apps\desktop\release\<version> -Recurse -Include 'capmac Studio.exe','elevate.exe','*-setup.exe','*-portable.exe' |
+Get-ChildItem apps\desktop\release\<version> -Recurse -Include 'CapMac Studio.exe','elevate.exe','*-setup.exe','*-portable.exe' |
   Get-AuthenticodeSignature | Format-Table Status, @{n='File';e={Split-Path $_.Path -Leaf}}, @{n='Signer';e={$_.SignerCertificate.Subject}}
 ```
 
@@ -97,10 +97,10 @@ Every row should say `Valid`. The build pipeline was checked with a throwaway se
 - **Checks:** 15 seconds after start, then every 4 hours, and on *Check for updates* in Settings › About.
 - **Download:** in the background. Nothing interrupts a running session.
 - **Install:**
-  - when the update is ready, an InfoBar says "capmac Studio 0.2.0 is ready", with *Restart to update*; Settings and the tray menu offer the same;
+  - when the update is ready, an InfoBar says "CapMac Studio 0.2.0 is ready", with *Restart to update*; Settings and the tray menu offer the same;
   - with a session running, restarting first asks for confirmation;
-  - otherwise the update installs when capmac Studio quits.
-- **Portable exe:** it cannot replace itself, so it shows "capmac Studio 0.2.0 is available" with a link to the new portable exe.
+  - otherwise the update installs when CapMac Studio quits.
+- **Portable exe:** it cannot replace itself, so it shows "CapMac Studio 0.2.0 is available" with a link to the new portable exe.
 - **Without a feed** (a local build, a development build), Settings › About says updates are off.
 
 **Signature check:** a signed build records its publisher in `resources/app-update.yml`. Before installing, the updater checks that the new installer is signed by that same publisher (`verifyUpdateCodeSignature`).
@@ -114,7 +114,7 @@ This is how the update path was verified on this PC, without installing anything
 1. `CAPMAC_UPDATE_URL=http://127.0.0.1:47219/ npm run dist -w @capmac/desktop -- --x64`, then copy `release\0.1.0\win-unpacked` aside: the "installed" old version.
 2. `CAPMAC_VERSION=0.2.0`, the same build again: the new version, with its `latest.yml`, installer and blockmap.
 3. Serve `release\0.2.0` on that port with any static server that supports byte ranges.
-4. Start the old `capmac Studio.exe` with `CAPMAC_VIA=update-test`, `CAPMAC_STUDIO_USER_DATA` and `CAPMAC_CONFIG_DIR` set to temp folders. `CAPMAC_VIA` keeps the packaged build from turning on terminal takeover.
+4. Start the old `CapMac Studio.exe` with `CAPMAC_VIA=update-test`, `CAPMAC_STUDIO_USER_DATA` and `CAPMAC_CONFIG_DIR` set to temp folders. `CAPMAC_VIA` keeps the packaged build from turning on terminal takeover.
 
 It found 0.2.0, downloaded it in the background, and showed the InfoBar and *Restart to update*. The portable exe showed the download link instead.
 

@@ -42,7 +42,7 @@ grep -qxF ${shQuote(key)} "$HOME/.ssh/authorized_keys" || printf '%s\\n' ${shQuo
 echo ok
 `;
   const result = await conn.runScript(script, { timeoutMs: 30_000 });
-  if (!result.stdout.includes('ok')) throw new UserError(`Could not add capmac's key on the Mac: ${result.stderr.trim()}`);
+  if (!result.stdout.includes('ok')) throw new UserError(`Could not add CapMac's key on the Mac: ${result.stderr.trim()}`);
 }
 
 /**
@@ -122,7 +122,7 @@ async function connectForPairing(dest: Destination, username: string, options: P
   }
   let pw = options.password;
   if (!pw) {
-    if (!ctx.prompter.interactive) throw new UserError(`The Mac needs ${username}'s password once to install capmac's key.`, 'Run `capmac pair` in an interactive terminal, or pass --password-env <VAR>.');
+    if (!ctx.prompter.interactive) throw new UserError(`The Mac needs ${username}'s password once to install CapMac's key.`, 'Run `capmac pair` in an interactive terminal, or pass --password-env <VAR>.');
     pw = await ctx.prompter.password({ purpose: 'pair', message: `Password for ${username} on ${dest.host} (used once, never stored):`, mac: dest.label ?? dest.host, user: username });
   }
   try {
@@ -144,7 +144,7 @@ export async function pairMac(dest: Destination, username: string, options: Pair
   try {
     if (usedPassword && !options.identity && !options.agent) {
       const { publicKey, privateKey } = await ensureClientKey();
-      await withStep(ctx, 'Installing capmac\'s SSH key on the Mac (password-free from now on)', 'other', () => installKey(conn, publicKey));
+      await withStep(ctx, 'Installing CapMac\'s SSH key on the Mac (password-free from now on)', 'other', () => installKey(conn, publicKey));
       // Prove the key works before we rely on it.
       const check = await MacConnection.connect({ host: address, label: dest.host, port: dest.port, username, privateKey, verifyHostKey: (fp) => fp === fingerprint });
       check.close();
@@ -153,7 +153,7 @@ export async function pairMac(dest: Destination, username: string, options: Pair
     const runtime = await withStep(ctx, 'Inspecting the Mac', 'other', () => discoverRuntime(conn), (r) => (r.node ? `Node.js ${r.node.version}` : 'no Node.js yet'));
     if (runtime.os && runtime.os !== 'Darwin') log(ctx, 'warn', `This machine reports "${runtime.os}", not macOS. Builds will not work there.`);
     const nodePath = await ensureNode(conn, runtime, { yes: options.yes }, ctx);
-    if (!nodePath) throw new UserError('capmac needs Node.js on the Mac.', 'Install it (https://nodejs.org or `brew install node`) and pair again.');
+    if (!nodePath) throw new UserError('CapMac needs Node.js on the Mac.', 'Install it (https://nodejs.org or `brew install node`) and pair again.');
 
     const agent = new AgentClient(conn, nodePath, runtime.home);
     const probe = await withStep(ctx, 'Checking Xcode, simulators and tools', 'other', () => agent.call<ProbeResult>('probe'));

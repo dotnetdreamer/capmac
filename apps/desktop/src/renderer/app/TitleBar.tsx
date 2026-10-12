@@ -16,7 +16,7 @@ export function TitleBar({ minimal }: { minimal?: boolean }) {
     <header className="titlebar">
       <div className="titlebar__brand">
         <Logo size={16} />
-        <span className="titlebar__app">capmac Studio</span>
+        <span className="titlebar__app">CapMac Studio</span>
         {crumb && !minimal && (
           <>
             <Icon name="chevronRight" size={12} className="titlebar__sep" />

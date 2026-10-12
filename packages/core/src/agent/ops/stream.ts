@@ -130,7 +130,7 @@ export async function opStream(params: StreamParams, io: AgentIO): Promise<{ fra
       scale: hello.scale,
       input: Boolean(helperInput || axeInput),
       inputMode: helperInput ? 'touch' : axeInput ? 'gestures' : undefined,
-      inputReason: helperInput ? undefined : hello.inputReason ?? 'This simulator does not take input from capmac.',
+      inputReason: helperInput ? undefined : hello.inputReason ?? 'This simulator does not take input from CapMac.',
     };
     io.send(info);
     io.send({ t: 'ready', data: { xcode: binary.xcode.version, compiled: binary.compiled } });

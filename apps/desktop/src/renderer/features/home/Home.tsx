@@ -193,7 +193,7 @@ export function Home() {
                 </>
               }
             >
-              Pick the folder with your capacitor.config, or drop it anywhere on this window. capmac syncs it to {mac?.label ?? 'your Mac'} and runs it on the iOS simulator.
+              Pick the folder with your capacitor.config, or drop it anywhere on this window. CapMac syncs it to {mac?.label ?? 'your Mac'} and runs it on the iOS simulator.
             </EmptyState>
           </div>
         ) : (

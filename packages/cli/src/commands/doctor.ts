@@ -86,7 +86,7 @@ export async function doctorCommand(options: DoctorOptions): Promise<void> {
     const failing = checks.filter((c) => c.level === 'fail' || c.level === 'warn');
     if (!options.fix) {
       log.line();
-      if (failing.length) log.line(`Run ${pc.cyan('capmac doctor --fix')} to let capmac fix what it can.`);
+      if (failing.length) log.line(`Run ${pc.cyan('capmac doctor --fix')} to let CapMac fix what it can.`);
       else log.success('Everything looks good.');
       return;
     }

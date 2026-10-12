@@ -157,7 +157,7 @@ export function Devices() {
             </div>
           </header>
           <EmptyState icon="phone" title="Pair a Mac to see its simulators" actions={<Button variant="accent" icon="add" onClick={() => navigate({ name: 'onboarding' })}>Pair a Mac</Button>}>
-            Simulators and iPhones are attached to your Mac; capmac lists them here with their live state.
+            Simulators and iPhones are attached to your Mac; CapMac lists them here with their live state.
           </EmptyState>
         </div>
       </div>

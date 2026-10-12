@@ -51,7 +51,7 @@ function friendlyError(err: any, opts: ConnectOptions): SshError {
     case 'ECONNRESET':
       return new SshError(`The connection to ${name} was reset.`, undefined, code);
     case 'client-authentication':
-      return new SshError(`The Mac rejected the login for "${opts.username}".`, 'Run `capmac pair` again to re-install capmac\'s key, or check the user name and password.', 'AUTH');
+      return new SshError(`The Mac rejected the login for "${opts.username}".`, 'Run `capmac pair` again to re-install CapMac\'s key, or check the user name and password.', 'AUTH');
     case 'client-timeout':
       return new SshError(`Timed out connecting to ${name}.`, 'Make sure the Mac is awake and reachable.', 'TIMEOUT');
     default:
@@ -166,7 +166,7 @@ export class MacConnection {
       const timer = options.timeoutMs
         ? setTimeout(() => {
             channel.close();
-            reject(new SshError('A command on the Mac took too long to respond.', 'If your shell startup files (.zprofile) do slow work, that can delay capmac.'));
+            reject(new SshError('A command on the Mac took too long to respond.', 'If your shell startup files (.zprofile) do slow work, that can delay CapMac.'));
           }, options.timeoutMs)
         : null;
       channel.on('data', (d: Buffer) => (stdout += d.toString('utf8')));

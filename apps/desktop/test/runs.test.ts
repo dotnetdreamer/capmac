@@ -31,7 +31,7 @@ describe('the run timeline', () => {
       { type: 'target', target },
       { type: 'step', id: 'launch', title: 'Launching', phase: 'launch' },
       { type: 'step-end', id: 'launch', status: 'ok', ms: 4000 },
-      { type: 'app', state: 'running', name: 'Hello capmac', target: 'iPhone 17' },
+      { type: 'app', state: 'running', name: 'Hello CapMac', target: 'iPhone 17' },
     );
     expect(run().phases.sync).toMatchObject({ status: 'done', ms: 137 });
     expect(run().phases.web).toMatchObject({ status: 'skipped', detail: 'unchanged' });
@@ -85,7 +85,7 @@ describe('the run timeline', () => {
       { type: 'devserver', url: 'http://localhost:5173/', external: false, command: 'npm run dev' },
       { type: 'tunnel', state: 'up', liveUrl: 'http://localhost:5173/', localUrl: 'http://localhost:5173/' },
       { type: 'hmr', state: 'connected', at: 1 },
-      { type: 'app', state: 'running', name: 'Hello capmac' },
+      { type: 'app', state: 'running', name: 'Hello CapMac' },
       { type: 'session', mode: 'live', state: 'running' },
     );
     expect(run()).toMatchObject({ status: 'running', runNumber: 1 });

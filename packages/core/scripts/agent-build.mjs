@@ -27,7 +27,7 @@ export function agentBuildOptions(outfile) {
     loader: { '.m': 'text' },
     legalComments: 'none',
     logLevel: 'warning',
-    banner: { js: '// capmac agent — uploaded to the Mac by capmac. Safe to delete; it is re-uploaded on demand.' },
+    banner: { js: '// CapMac agent — uploaded to the Mac by CapMac. Safe to delete; it is re-uploaded on demand.' },
   };
 }
 
