@@ -179,3 +179,123 @@
   color: var(--text-2);
   font: var(--type-small);
 }
+
+/* Remote access ("Reach this Mac from anywhere"), in each Mac's card */
+/* The 32 px icon sits under the card's 44 px glyph; the text lines up with the Mac's name. */
+.mac-remote {
+  --remote-gap: calc(var(--s-4) + 6px);
+  border-top: 1px solid var(--stroke-divider);
+  padding: var(--s-3) var(--s-4) var(--s-3) calc(var(--s-4) + 6px);
+}
+.mac-remote__row {
+  display: flex;
+  align-items: center;
+  gap: var(--remote-gap);
+}
+.mac-remote__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-control);
+  background: var(--fill-subtle-hover);
+  color: var(--text-2);
+  flex: none;
+}
+.mac-remote__icon--ok {
+  background: var(--success-bg);
+  color: var(--success);
+}
+.mac-remote__icon--warn {
+  background: var(--caution-bg);
+  color: var(--caution);
+}
+.mac-remote__text {
+  flex: 1;
+  min-width: 0;
+}
+.mac-remote__title {
+  font: var(--type-body);
+  font-weight: 600;
+}
+.mac-remote__desc {
+  margin-top: 2px;
+  font: var(--type-small);
+  color: var(--text-2);
+}
+.mac-remote__warn {
+  color: var(--caution);
+}
+.mac-remote__options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--s-6);
+  row-gap: var(--s-2);
+  margin: var(--s-3) 0 0 calc(32px + var(--remote-gap));
+  animation: fade-in var(--dur-slow) linear;
+}
+.mac-remote__option {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.mac-remote__label {
+  color: var(--text-2);
+  font: var(--type-small);
+}
+.mac-remote__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  flex-basis: 100%;
+}
+.mac-remote__fine {
+  font: var(--type-caption);
+  margin-left: var(--s-1);
+}
+.mac-remote__loading {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  color: var(--text-2);
+}
+.mac-remote__pcs {
+  list-style: none;
+  margin: var(--s-3) 0 0;
+  padding: 0;
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--r-card);
+  background: var(--card-2);
+  li {
+    display: flex;
+    align-items: center;
+    gap: var(--s-3);
+    min-height: 52px;
+    padding: var(--s-2) var(--s-3);
+    color: var(--text-2);
+    & + li {
+      border-top: 1px solid var(--stroke-divider);
+    }
+  }
+}
+.mac-remote__pc {
+  flex: 1;
+  min-width: 0;
+}
+.mac-remote__pc-name {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+  color: var(--text-1);
+}
+.mac-remote__pc-meta {
+  margin-top: 2px;
+  font: var(--type-caption);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -4,6 +4,7 @@ import { forgetProject, macFor, openInXcode, openProject, pickProject, rebuild, 
 import { call } from '../state/engine';
 import { resolveMac, useMacs } from '../state/macs';
 import { projectKey } from '../state/projects';
+import { ROUTE_LABEL, setOptions, testConnection, turnOn, useRemote } from '../state/remote';
 import { isActive, useRuns } from '../state/runs';
 import type { IconName } from '../ui/Icon';
 
@@ -113,6 +114,40 @@ export function buildCommands(): Command[] {
         }),
     },
   );
+  if (mac) {
+    // Remote access: the same options as `capmac remote`.
+    const remote = mac.remote;
+    if (!remote.enabled) {
+      commands.push({
+        id: 'remote-on',
+        title: `Remote access: reach ${mac.label} from anywhere`,
+        group: 'Mac',
+        icon: 'globe',
+        keywords: 'internet away remote access peer to peer',
+        run: () => {
+          if (useRemote.getState().server?.url) void turnOn(mac);
+          else {
+            app.navigate({ name: 'macs' });
+          }
+        },
+      });
+    } else {
+      commands.push(
+        { id: 'remote-off', title: `Remote access: turn it off for ${mac.label}…`, group: 'Mac', icon: 'globe', keywords: 'internet away', run: () => app.navigate({ name: 'macs' }) },
+        ...(['auto', 'lan', 'internet'] as const).map((route): Command => ({
+          id: `remote-route-${route}`,
+          title: `Connection: ${ROUTE_LABEL[route]}`,
+          group: 'Mac',
+          icon: route === 'lan' ? 'wifi' : 'globe',
+          keywords: 'remote access route internet local network lan',
+          enabled: remote.route !== route,
+          run: () => void setOptions(mac, { route }),
+        })),
+        { id: 'remote-awake', title: remote.keepAwake ? `Let ${mac.label} sleep again` : `Keep ${mac.label} awake`, group: 'Mac', icon: 'power', keywords: 'remote access sleep caffeinate', run: () => void setOptions(mac, { keepAwake: !remote.keepAwake }) },
+        { id: 'remote-test', title: 'Test the connection over the internet', group: 'Mac', icon: 'plugConnected', keywords: 'remote access peer relay', run: () => void testConnection(mac) },
+      );
+    }
+  }
   if (app.info?.dev && mac) {
     commands.push({ id: 'drop', title: 'Developer: drop the connection to the Mac', group: 'App', icon: 'plugDisconnected', keywords: 'reconnect test', run: () => void call('debug.dropConnection', { mac: mac.name }) });
   }

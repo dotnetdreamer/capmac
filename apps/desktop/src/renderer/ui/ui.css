@@ -911,3 +911,15 @@
   align-items: center;
   gap: var(--s-2);
 }
+
+/* An On/Off switch with its state next to it (Toggle in Form.tsx). */
+.toggle-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+}
+.toggle-control__state {
+  min-width: 22px;
+  text-align: right;
+  color: var(--text-1);
+}

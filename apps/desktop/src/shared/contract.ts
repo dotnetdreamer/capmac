@@ -8,12 +8,17 @@ import { z } from 'zod';
 import type { ErrorInfo } from '@capmac/core/engine/errors';
 import type { ConnectionState, EngineEvent, FixId, SessionMode } from '@capmac/core/engine/events';
 import type { ProbeResult, ScreenInfo, StreamFallback, TargetsResult } from '@capmac/core/shared/protocol';
+import { PUBLIC_KEY_RE, RELAY_CHOICES, ROUTE_CHOICES } from '@capmac/core/shared/remote';
+import type { RemoteSettings, RemoteTestResult, Route, SignalServerSetting } from '@capmac/core/shared/remote';
+import type { RemoteDoorStatus, RemotePc } from '@capmac/core/shared/remote-door';
 import type { AgentSkillStatus, CapmacCommandStatus, SkillChange } from '@capmac/core/shared/skills';
 import type { TakeoverStatus } from '@capmac/core/shared/takeover';
 
 export type { ErrorInfo } from '@capmac/core/engine/errors';
 export type { AppLogEntry, Check, CheckLevel, ConnectionState, EngineEvent, FixId, Phase, SessionMode, SessionState, StepStatus } from '@capmac/core/engine/events';
 export type { Diagnostic, InputEvent, ProbeResult, ScreenInfo, StreamFallback, StreamHelperState, Target, TargetsResult } from '@capmac/core/shared/protocol';
+export type { RelayChoice, RemoteSettings, RemoteTestResult, Route, RouteChoice, SignalServerSetting } from '@capmac/core/shared/remote';
+export type { RemoteDoorStatus, RemotePc } from '@capmac/core/shared/remote-door';
 
 // ─── Values ────────────────────────────────────────────────────────────────
 
@@ -47,6 +52,8 @@ export const engineMethods = {
     password: z.string().max(1024).optional(),
     name: z.string().max(40).optional(),
     label: z.string().max(120).optional(),
+    /** Also turn remote access on (needs the signaling server set). */
+    remote: z.boolean().optional(),
   }).strict(),
   'macs.unpair': z.object({ name: macName }).strict(),
   'macs.setDefault': z.object({ name: macName }).strict(),
@@ -87,6 +94,15 @@ export const engineMethods = {
   'screen.stop': z.object({ streamId: id }).strict(),
   'screen.screenshot': z.object({ mac: macName, udid }).strict(),
   'debug.dropConnection': z.object({ mac: macName }).strict(),
+  // Remote access: the same options as `capmac remote`.
+  'remote.server': z.object({}).strict(),
+  'remote.setServer': z.object({ url: z.string().max(2048).nullable() }).strict(),
+  'macs.remote.enable': z.object({ name: macName, keepAwake: z.boolean().optional() }).strict(),
+  'macs.remote.disable': z.object({ name: macName, localOnly: z.boolean().optional() }).strict(),
+  'macs.remote.set': z.object({ name: macName, route: z.enum(ROUTE_CHOICES).optional(), relay: z.enum(RELAY_CHOICES).optional(), keepAwake: z.boolean().optional(), signalUrl: z.string().min(1).max(2048).optional() }).strict(),
+  'macs.remote.status': z.object({ name: macName }).strict(),
+  'macs.remote.revoke': z.object({ name: macName, key: z.string().regex(PUBLIC_KEY_RE) }).strict(),
+  'macs.remote.test': z.object({ name: macName }).strict(),
 } as const;
 
 export type EngineMethod = keyof typeof engineMethods;
@@ -105,6 +121,21 @@ export interface MacSummary {
   state: ConnectionState | 'idle';
   latencyMs: number | null;
   error: string | null;
+  /** Remote access ("Reach this Mac from anywhere"). */
+  remote: RemoteSettings;
+  /** How the current connection goes (null when not connected). */
+  route: Route | null;
+  /** The round trip WebRTC measures, over the internet. */
+  rttMs: number | null;
+}
+
+/** Remote access for one Mac, as the Macs page shows it (needs a connection). */
+export interface RemoteStatusReport {
+  door: RemoteDoorStatus | null;
+  thisPc: { key: string; name: string };
+  pcs: Array<RemotePc & { current: boolean }>;
+  route: Route | null;
+  rttMs: number | null;
 }
 
 export interface DiscoveredMac {
@@ -140,7 +171,7 @@ export interface HealthReport {
 export interface MethodResults {
   'macs.list': MacSummary[];
   'macs.discover': DiscoveredMac[];
-  'macs.pair': { mac: MacSummary; isDefault: boolean };
+  'macs.pair': { mac: MacSummary; isDefault: boolean; remote?: { ok: boolean; test: RemoteTestResult | null; error?: ErrorInfo } };
   'macs.unpair': void;
   'macs.setDefault': void;
   'macs.connect': MacSummary;
@@ -167,6 +198,14 @@ export interface MethodResults {
   'screen.stop': void;
   'screen.screenshot': { png: ArrayBuffer; width: number | null; height: number | null };
   'debug.dropConnection': void;
+  'remote.server': SignalServerSetting;
+  'remote.setServer': SignalServerSetting;
+  'macs.remote.enable': { mac: MacSummary; test: RemoteTestResult | null };
+  'macs.remote.disable': MacSummary;
+  'macs.remote.set': { mac: MacSummary; reconnecting: boolean };
+  'macs.remote.status': RemoteStatusReport;
+  'macs.remote.revoke': Array<RemotePc & { current: boolean }>;
+  'macs.remote.test': RemoteTestResult;
 }
 
 // ─── Events ────────────────────────────────────────────────────────────────

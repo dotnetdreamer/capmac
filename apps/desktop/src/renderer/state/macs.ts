@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { create } from 'zustand';
-import type { Check, ConnectionState, ErrorInfo, MacSummary, ProbeResult, TargetsResult } from '../../shared/contract';
+import type { Check, ConnectionState, ErrorInfo, MacSummary, ProbeResult, Route, TargetsResult } from '../../shared/contract';
 import { call, errorInfo } from './engine';
 
 export interface HealthState {
@@ -25,7 +25,7 @@ interface MacsState {
   health: Record<string, HealthState>;
   pairing: PairStep[];
   refresh(): Promise<void>;
-  setConnection(name: string, state: ConnectionState, extra: { attempt?: number; error?: string; latencyMs?: number; label?: string }): void;
+  setConnection(name: string, state: ConnectionState, extra: { attempt?: number; error?: string; latencyMs?: number; label?: string; route?: Route; rttMs?: number }): void;
   runHealth(name: string, projectPath?: string): Promise<void>;
   applyCheck(name: string, check: Check): void;
 }
@@ -53,6 +53,8 @@ export const useMacs = create<MacsState>((set, get) => ({
               label: extra.label && extra.label !== 'the Mac' ? extra.label : m.label,
               latencyMs: extra.latencyMs ?? m.latencyMs,
               error: state === 'connected' || state === 'restored' ? null : extra.error ?? m.error,
+              route: state === 'connected' || state === 'restored' ? extra.route ?? m.route : null,
+              rttMs: state === 'connected' || state === 'restored' ? extra.rttMs ?? m.rttMs : null,
             }
           : m,
       ),

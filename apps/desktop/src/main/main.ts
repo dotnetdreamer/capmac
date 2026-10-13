@@ -26,7 +26,7 @@ import { openInEditor } from './editor.js';
 import { installSkill, removeSkill, skillProjectRoot, skillStatus } from '@capmac/core/engine/agent-skills';
 import { capmacCommandStatus, installCapmacCommand, removeCapmacCommand } from '@capmac/core/engine/capmac-command';
 import { disableTakeover, enableTakeover, ensureTakeoverDefault, samePath, takeoverStatus, type TakeoverInstall } from '@capmac/core/engine/takeover';
-import { agentPath, cliDir, iconsDir, outDir, sampleDir } from './paths.js';
+import { agentPath, cliDir, iconsDir, outDir, remoteModulesDir, sampleDir } from './paths.js';
 import { SettingsStore } from './settings.js';
 import { AppTray } from './tray.js';
 import { Updates } from './updates.js';
@@ -401,6 +401,7 @@ app.whenReady().then(async () => {
     agentPath: agentPath(),
     sampleDir: sampleDir(),
     samplesHome: path.join(app.getPath('documents'), 'CapMac Studio'),
+    remoteModulesDir: remoteModulesDir(),
     settings: { verbose: settings.get().verbose, osLogs: settings.get().osLogs },
   }), {
     onEvents: onEngineEvents,

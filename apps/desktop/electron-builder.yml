@@ -16,9 +16,11 @@ files:
   - '!out/agent/**'
   - '!out/cli/**'
   - '!out/sample/**'
+  - '!out/remote/**'
   - '!**/*.map'
 # Outside app.asar: the agent is uploaded to Macs, the sample is copied to Documents,
-# and the CLI is run by the Node.js in the user's terminals (takeover).
+# the CLI is run by the Node.js in the user's terminals (takeover), and
+# node-datachannel is a native module (remote access).
 extraResources:
   - from: out/agent
     to: agent
@@ -26,6 +28,9 @@ extraResources:
     to: cli
   - from: out/sample
     to: sample
+  # node-datachannel (native) for remote access, for this build's architecture.
+  - from: out/remote/${arch}
+    to: remote
   - from: resources/icons
     to: icons
 asar: true

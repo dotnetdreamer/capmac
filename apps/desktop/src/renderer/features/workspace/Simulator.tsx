@@ -88,6 +88,8 @@ function CompatibleNote({ fallback, onRetry, onRestart }: { fallback: StreamFall
 
 /** The live simulator screen: a canvas fed by a worker that decodes frames off the main thread. */
 function Screen({ mac, target, frame }: { mac: string; target: Target; frame: boolean }) {
+  const macRoute = useMacs((s) => s.macs.find((m) => m.name === mac)?.route ?? null);
+  const macRtt = useMacs((s) => s.macs.find((m) => m.name === mac)?.rttMs ?? null);
   const stageRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -441,8 +443,10 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
         ? `Starting the smooth stream…`
         : `Connecting to ${target.name}…`;
   const streamName = codec === 'h264' ? 'Smooth stream (H.264)' : codec === 'jpeg' ? 'Compatible stream (screenshots)' : 'Stream';
+  const overInternet = macRoute === 'direct' || macRoute === 'relay';
   const statsTip = [
     streamName,
+    overInternet ? `Over the internet, ${macRoute === 'direct' ? 'peer to peer' : 'through the relay'}${macRtt !== null ? ` (round trip ${macRtt} ms)` : ''}` : null,
     stats && codec === 'h264' && stats.latencyMs !== null ? `Latency ${Math.round(stats.latencyMs)} ms (p95 ${Math.round(stats.latencyP95Ms ?? stats.latencyMs)} ms)` : null,
     stats && stats.fps > 0 ? `Decoding ${stats.decodeMs.toFixed(1)} ms a frame` : null,
     stats?.inputMs != null ? `Touch to picture ${Math.round(stats.inputMs)} ms` : null,
@@ -559,6 +563,7 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
             {state.kind === 'streaming' && hasFrame ? (
               <>
                 <StatusDot tone="live" />
+                {overInternet && <Icon name="globe" size={12} className="sim__route" label="Over the internet" />}
                 {/* Next to the compatible-stream note, the frame rate says enough. */}
                 {stats && stats.fps > 0 ? (fallback && codec === 'jpeg' ? `${stats.fps} fps` : `${stats.fps} fps · ${formatRate(stats.kbps)}`) : 'Live'}
               </>

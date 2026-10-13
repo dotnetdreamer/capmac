@@ -15,6 +15,8 @@ const LEVEL_ICON: Record<Check['level'], IconName> = { ok: 'checkCircle', warn: 
 function fixText(check: Check): string | undefined {
   if (!check.fix || check.level === 'ok') return undefined;
   if (check.action && /capmac doctor --fix/.test(check.fix)) return undefined;
+  // Remote access off: its switch is right above the checklist (the hint is for the CLI).
+  if (check.id === 'remote' && check.level === 'info') return undefined;
   return check.fix.replace(/`capmac doctor`/g, 'Check again');
 }
 

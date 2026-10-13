@@ -4,10 +4,10 @@
  * Mac lets in, and the signaling server. Both front ends call these, so they
  * offer the same options with the same defaults and share one config.
  */
-import { RELAY_CHOICES, ROUTE_CHOICES, signalUrlProblem, type PublicKey, type RelayChoice, type Route, type RouteChoice } from '../../shared/remote.js';
+import { RELAY_CHOICES, ROUTE_CHOICES, signalUrlProblem, type PublicKey, type RelayChoice, type RemoteSettings, type RemoteTestResult, type RouteChoice, type SignalServerSetting } from '../../shared/remote.js';
 import type { RemoteDoorStatus, RemotePc } from '../../shared/remote-door.js';
 import { loadGlobalConfig, resolveHost, saveGlobalConfig, type HostConfig, type HostRemote } from '../config.js';
-import { log, withStep, type EngineContext } from '../context.js';
+import { log, wait, withStep, type EngineContext } from '../context.js';
 import { UserError } from '../errors.js';
 import { privateKeyFor, type MacSession } from '../session.js';
 import { MacConnection } from '../ssh.js';
@@ -19,16 +19,7 @@ declare const __CAPMAC_SIGNAL_URL__: string | undefined;
 /** The signaling server a release of CapMac was built with (CAPMAC_DEFAULT_SIGNAL_URL at build time). */
 const BUILT_IN_SIGNAL_URL = typeof __CAPMAC_SIGNAL_URL__ === 'string' && __CAPMAC_SIGNAL_URL__ ? __CAPMAC_SIGNAL_URL__ : null;
 
-/** Remote access for one Mac, as both front ends show it. */
-export interface RemoteSettings {
-  enabled: boolean;
-  route: RouteChoice;
-  relay: RelayChoice;
-  keepAwake: boolean;
-  signalUrl: string | null;
-  macKey: string | null;
-  enabledAt: string | null;
-}
+export type { RemoteSettings, RemoteTestResult, SignalServerSetting } from '../../shared/remote.js';
 
 export const DEFAULT_ROUTE: RouteChoice = 'auto';
 export const DEFAULT_RELAY: RelayChoice = 'allow';
@@ -44,12 +35,6 @@ export function remoteSettings(host: HostConfig): RemoteSettings {
     macKey: r?.macKey ?? null,
     enabledAt: r?.enabledAt ?? null,
   };
-}
-
-/** Where the signaling server address comes from, in order. */
-export interface SignalServerSetting {
-  url: string | null;
-  source: 'environment' | 'settings' | 'built-in' | 'none';
 }
 
 /** The signaling server for turning remote access on: CAPMAC_SIGNAL_URL, then the setting, then the build's. */
@@ -108,14 +93,6 @@ async function callDoor<T>(session: MacSession, op: string, params: object, ctx:
     }
     throw err;
   }
-}
-
-export interface RemoteTestResult {
-  ok: boolean;
-  route?: Exclude<Route, 'lan'>;
-  detail?: string;
-  ms?: number;
-  error?: string;
 }
 
 /** Connects to the Mac the way a PC elsewhere would (signaling, WebRTC or relay, then SSH), and hangs up. */
@@ -188,7 +165,13 @@ export async function enableRemote(session: MacSession, options: EnableRemoteOpt
   }
   let test: RemoteTestResult | null = null;
   if (options.test !== false) {
-    test = await withStep(ctx, 'Testing the connection over the internet', 'other', () => testRemote(saved), (r) => (r.ok ? `${r.route === 'relay' ? 'through the relay' : 'peer to peer'} · ${r.ms} ms` : 'failed'));
+    test = await withStep(ctx, 'Testing the connection over the internet', 'other', async () => {
+      const first = await testRemote(saved);
+      if (first.ok || session.route === 'lan') return first;
+      // Reached through the door, which restarts a moment after an update: give it that moment.
+      await wait(2500);
+      return testRemote(saved);
+    }, (r) => (r.ok ? `${r.route === 'relay' ? 'through the relay' : 'peer to peer'} · ${r.ms} ms` : 'failed'));
     if (!test.ok) log(ctx, 'warn', `This PC could not reach ${session.label} over the internet: ${test.error}`, 'Check the signaling server’s address, and that this PC can reach it.');
   }
   return { host: saved, door, test };

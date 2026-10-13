@@ -1370,3 +1370,6 @@
   color: var(--text-2);
   padding: var(--s-6) 0;
 }
+.sim__route {
+  color: var(--accent-text);
+}

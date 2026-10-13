@@ -34,6 +34,13 @@ export function sampleDir(): string | null {
   return existsSync(dir) ? dir : null;
 }
 
+/** node-datachannel (WebRTC for remote access), shipped next to app.asar; in development it comes from node_modules. */
+export function remoteModulesDir(): string | null {
+  if (!app.isPackaged) return null;
+  const dir = resources('remote');
+  return existsSync(dir) ? dir : null;
+}
+
 export function rendererDir(): string {
   return outDir('renderer');
 }

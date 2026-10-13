@@ -13,6 +13,8 @@ export interface HostInit {
   sampleDir: string | null;
   /** Where "Run the sample app" puts its copy (Documents\capmac Studio). */
   samplesHome: string;
+  /** node-datachannel for remote access (resources/remote when packaged; null: from node_modules). */
+  remoteModulesDir: string | null;
   settings: HostSettings;
 }
 

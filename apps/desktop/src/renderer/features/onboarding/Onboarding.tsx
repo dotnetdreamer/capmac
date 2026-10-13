@@ -4,10 +4,12 @@ import { openProject, pickProject, startSession } from '../../state/actions';
 import { toast, useApp } from '../../state/app';
 import { call, errorInfo } from '../../state/engine';
 import { useMacs } from '../../state/macs';
+import { useRemote } from '../../state/remote';
+import { signalUrlProblem } from '@capmac/core/shared/remote';
 import { Logo } from '../../ui/AppIcon';
 import { Button } from '../../ui/Button';
 import { InfoBar, Spinner } from '../../ui/Feedback';
-import { PasswordField, TextField } from '../../ui/Form';
+import { PasswordField, Switch, TextField } from '../../ui/Form';
 import { Icon } from '../../ui/Icon';
 import { CheckList } from '../macs/CheckList';
 import './onboarding.css';
@@ -230,18 +232,39 @@ function SignIn({ mac, back, paired }: { mac: { host: string; port: number; labe
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ErrorInfo | null>(null);
+  // Remote access: off unless asked for (it can be turned on later in Macs).
+  const server = useRemote((s) => s.server);
+  const [remote, setRemote] = useState(false);
+  const [serverUrl, setServerUrl] = useState('');
+  const [serverError, setServerError] = useState<string | null>(null);
   // Progress from an earlier pairing does not belong to this one.
   useEffect(() => {
     useMacs.setState({ pairing: [] });
+    void useRemote.getState().loadServer();
   }, []);
+  const needsServer = remote && !server?.url;
   const submit = async () => {
     if (!user || busy) return;
+    if (needsServer) {
+      const problem = signalUrlProblem(serverUrl);
+      if (problem) {
+        setServerError(problem);
+        return;
+      }
+    }
     setBusy(true);
     setError(null);
     useMacs.setState({ pairing: [] });
     try {
-      const result = await call('macs.pair', { host: mac.host, port: mac.port, username: user, password: password || undefined, label: mac.label });
+      if (needsServer) await useRemote.getState().setServer(serverUrl.trim());
+      const result = await call('macs.pair', { host: mac.host, port: mac.port, username: user, password: password || undefined, label: mac.label, remote: remote || undefined });
       setPassword('');
+      if (result.remote?.ok === false) {
+        toast({ tone: 'caution', title: 'Paired, but remote access is not on yet', body: `${result.remote.error?.message ?? ''} Turn it on later in Macs.`.trim(), timeout: 0 });
+      } else if (result.remote?.ok) {
+        const test = result.remote.test;
+        toast({ tone: 'success', title: 'Remote access is on', body: test?.ok && test.route ? `Tested: ${test.route === 'relay' ? 'through the relay' : 'peer to peer over the internet'}, ${test.ms} ms.` : undefined });
+      }
       paired(result.mac.name);
     } catch (err) {
       setError(errorInfo(err));
@@ -262,6 +285,27 @@ function SignIn({ mac, back, paired }: { mac: { host: string; port: number; labe
       <div className="ob-form">
         <TextField label="Mac user name" value={user} onChange={(e) => setUser(e.target.value.trim())} hint={<>The short name, as shown by <code>whoami</code> in Terminal on the Mac.</>} autoComplete="off" data-autofocus disabled={busy} />
         <PasswordField label="Password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} />
+        <Switch
+          checked={remote}
+          onChange={setRemote}
+          disabled={busy}
+          label="Reach this Mac from anywhere"
+          description="Also build and run on it when you’re away from its network, over the internet. You can turn this on later in Macs."
+        />
+        {needsServer && (
+          <TextField
+            label="Your signaling server"
+            placeholder="wss://signal.example.com"
+            value={serverUrl}
+            disabled={busy}
+            error={serverError}
+            hint="Remote access goes through a small server of your own (see services/signal). CapMac remembers it."
+            onChange={(e) => {
+              setServerUrl(e.target.value);
+              setServerError(null);
+            }}
+          />
+        )}
       </div>
       {busy || steps.length > 0 ? (
         <ul className="ob-progress" aria-live="polite">

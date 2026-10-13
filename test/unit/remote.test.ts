@@ -256,3 +256,13 @@ describe('remote access, the pieces', () => {
     expect(existsSync(path.join(process.env.CAPMAC_CONFIG_DIR!, 'remote_ed25519'))).toBe(true);
   });
 });
+
+describe('the door on the Mac', () => {
+  it('knows when a request came in through itself (sshd sees the loopback address)', async () => {
+    const { throughDoor } = await import('../../packages/core/src/agent/ops/remote.js');
+    expect(throughDoor({ SSH_CONNECTION: '127.0.0.1 52344 127.0.0.1 22' })).toBe(true);
+    expect(throughDoor({ SSH_CONNECTION: '::1 52344 ::1 22' })).toBe(true);
+    expect(throughDoor({ SSH_CONNECTION: '192.168.2.34 52344 192.168.2.48 22' })).toBe(false);
+    expect(throughDoor({})).toBe(false);
+  });
+});

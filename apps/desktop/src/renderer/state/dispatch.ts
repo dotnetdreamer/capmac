@@ -80,7 +80,7 @@ export function handleBatch(batch: Envelope[]): void {
     if (scope.mac) {
       switch (event.type) {
         case 'connection':
-          useMacs.getState().setConnection(scope.mac, event.state, { attempt: event.attempt, error: event.error, latencyMs: event.latencyMs, label: event.label });
+          useMacs.getState().setConnection(scope.mac, event.state, { attempt: event.attempt, error: event.error, latencyMs: event.latencyMs, label: event.label, route: event.route, rttMs: event.rttMs });
           break;
         case 'targets':
           useTargets.getState().set(scope.mac, event.targets);

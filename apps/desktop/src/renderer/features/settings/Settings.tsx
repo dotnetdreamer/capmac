@@ -1,10 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { Settings as SettingsShape, TakeoverInfo } from '../../../shared/contract';
 import { toast, useApp } from '../../state/app';
+import { signalUrlProblem } from '@capmac/core/shared/remote';
 import { errorInfo } from '../../state/engine';
+import { useRemote } from '../../state/remote';
+import { DEPLOY_GUIDE_URL } from '../macs/RemoteAccess';
 import { AgentSkillsButton } from './AgentSkills';
 import { Button } from '../../ui/Button';
-import { Segmented, Select } from '../../ui/Form';
+import { Segmented, Select, TextField, Toggle } from '../../ui/Form';
 import { Icon, type IconName } from '../../ui/Icon';
 import { UpdatesPanel } from './Updates';
 import './settings.css';
@@ -19,19 +22,6 @@ function Row({ icon, title, description, children }: { icon: IconName; title: Re
       </div>
       <div className="settings-card__control">{children}</div>
     </div>
-  );
-}
-
-function Toggle({ checked, onChange, label, disabled, loading }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean; loading?: boolean }) {
-  return (
-    <span className="toggle-control">
-      <span className="toggle-control__state" aria-hidden="true">
-        {loading ? '…' : checked ? 'On' : 'Off'}
-      </span>
-      <button type="button" role="switch" aria-checked={checked} aria-label={label} className="switch" disabled={disabled} onClick={() => onChange(!checked)}>
-        <span className="switch__thumb" />
-      </button>
-    </span>
   );
 }
 
@@ -79,6 +69,81 @@ function TerminalCommands() {
       </Row>
       <Row icon="sparkle" title="AI coding agents" description="Let Claude Code, Codex, Copilot, Cursor and other agents build, run and check your iOS app with CapMac, in all your projects or one.">
         <AgentSkillsButton />
+      </Row>
+    </>
+  );
+}
+
+/** Remote access: your signaling server (the same setting as `capmac remote server`). */
+function RemoteAccessSettings() {
+  const server = useRemote((s) => s.server);
+  const [value, setValue] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void useRemote.getState().loadServer().then((s) => setValue(s?.url ?? ''));
+  }, []);
+  const fromEnvironment = server?.source === 'environment';
+  const saved = server?.url ?? '';
+  const dirty = value.trim() !== saved;
+  const save = async () => {
+    const url = value.trim();
+    const problem = url ? signalUrlProblem(url) : null;
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    setBusy(true);
+    try {
+      const next = await useRemote.getState().setServer(url || null);
+      setValue(next.url ?? '');
+      toast(next.url ? { tone: 'success', title: 'Signaling server saved', body: 'Turn remote access on for a Mac in Macs.' } : { tone: 'info', title: 'Signaling server cleared' });
+    } catch (err) {
+      setError(errorInfo(err).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <h2 className="section-title">Remote access</h2>
+      <Row
+        icon="globe"
+        title="Signaling server"
+        description={
+          <>
+            Your own server, which lets CapMac reach your Macs over the internet: peer to peer when the networks allow it, else through its relay. It never sees inside a connection.{' '}
+            <a href={DEPLOY_GUIDE_URL} onClick={(e) => {
+              e.preventDefault();
+              void window.capmac.invoke('app:open-external', { url: DEPLOY_GUIDE_URL });
+            }}>How to deploy it</a>
+            {fromEnvironment && <span className="settings-takeover__note">Set by the CAPMAC_SIGNAL_URL environment variable.</span>}
+            {server?.source === 'built-in' && <span className="settings-takeover__note">The server this build of CapMac Studio came with.</span>}
+          </>
+        }
+      >
+        <form
+          className="settings-server"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+        >
+          <TextField
+            aria-label="Signaling server"
+            placeholder="wss://signal.example.com"
+            value={value}
+            disabled={fromEnvironment || busy}
+            error={error}
+            onChange={(e) => {
+              setValue(e.target.value);
+              setError(null);
+            }}
+          />
+          <Button type="submit" disabled={!dirty || fromEnvironment} busy={busy}>
+            Save
+          </Button>
+        </form>
       </Row>
     </>
   );
@@ -148,6 +213,8 @@ export function Settings() {
         </Row>
 
         <TerminalCommands />
+
+        <RemoteAccessSettings />
 
         <h2 className="section-title">Console</h2>
         <Row icon="console" title="Line limit" description="Older lines are dropped beyond this; memory stays bounded.">

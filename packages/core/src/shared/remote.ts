@@ -38,6 +38,32 @@ export type Route = 'lan' | 'direct' | 'relay';
 export const ROUTE_CHOICES = ['auto', 'lan', 'internet'] as const satisfies readonly RouteChoice[];
 export const RELAY_CHOICES = ['allow', 'never', 'always'] as const satisfies readonly RelayChoice[];
 
+/** Remote access for one Mac, as the CLI and CapMac Studio show it. */
+export interface RemoteSettings {
+  enabled: boolean;
+  route: RouteChoice;
+  relay: RelayChoice;
+  keepAwake: boolean;
+  signalUrl: string | null;
+  macKey: string | null;
+  enabledAt: string | null;
+}
+
+/** The signaling server for turning remote access on, and where that setting comes from. */
+export interface SignalServerSetting {
+  url: string | null;
+  source: 'environment' | 'settings' | 'built-in' | 'none';
+}
+
+/** Connecting to a Mac the way a PC elsewhere would (signaling, WebRTC or the relay, then SSH). */
+export interface RemoteTestResult {
+  ok: boolean;
+  route?: Exclude<Route, 'lan'>;
+  detail?: string;
+  ms?: number;
+  error?: string;
+}
+
 /** An ICE server, as WebRTC describes it. */
 export interface IceServerSpec {
   urls: string | string[];

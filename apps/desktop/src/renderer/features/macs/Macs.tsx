@@ -11,7 +11,15 @@ import { Badge, EmptyState, StatusDot, type Tone } from '../../ui/Feedback';
 import { Icon } from '../../ui/Icon';
 import { Menu, usePopover } from '../../ui/Popover';
 import { CheckList } from './CheckList';
+import { RemoteAccess } from './RemoteAccess';
 import './macs.css';
+
+/** "Connected", or how over the internet: "Connected peer to peer · 42 ms". */
+function connectedText(mac: MacSummary): string {
+  if (mac.route === 'direct') return `Connected peer to peer${mac.rttMs !== null ? ` · ${mac.rttMs} ms` : ''}`;
+  if (mac.route === 'relay') return 'Connected through the relay';
+  return 'Connected';
+}
 
 const TONE: Record<string, Tone> = { connected: 'ok', restored: 'ok', connecting: 'busy', reconnecting: 'warn', lost: 'warn', offline: 'error', idle: 'idle', closed: 'idle' };
 
@@ -54,7 +62,7 @@ function MacCard({ mac, expanded, onToggle }: { mac: MacSummary; expanded: boole
           </div>
         </div>
         <div className="mac-card__status">
-          <span className={`mac-card__state mac-card__state--${tone}`}>{mac.state === 'connected' || mac.state === 'restored' ? 'Connected' : macStatusText(mac)}</span>
+          <span className={`mac-card__state mac-card__state--${tone}`}>{mac.state === 'connected' || mac.state === 'restored' ? connectedText(mac) : macStatusText(mac)}</span>
           {mac.state === 'offline' && mac.error && <span className="mac-card__error">{mac.error}</span>}
         </div>
         <div className="mac-card__actions">
@@ -108,6 +116,7 @@ function MacCard({ mac, expanded, onToggle }: { mac: MacSummary; expanded: boole
           <dd>{timeAgo(Date.parse(mac.pairedAt))}</dd>
         </div>
       </dl>
+      <RemoteAccess mac={mac} />
       {expanded && (
         <div className="mac-card__health">
           {health ? (
@@ -186,7 +195,7 @@ export function Macs() {
         <header className="page__header">
           <div>
             <h1 className="page__title">Macs</h1>
-            <p className="page__subtitle">The Macs this PC builds on, over one SSH connection each.</p>
+            <p className="page__subtitle">The Macs this PC builds on, over one SSH connection each: on your network, or from anywhere with remote access.</p>
           </div>
           {macs.length > 0 && (
             <div className="page__actions">

@@ -4,6 +4,7 @@
  * and manages which PCs it lets in. Everything lives in ~/.capmac/remote,
  * plus ~/Library/LaunchAgents/dev.capmac.remote.plist.
  */
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -199,13 +200,31 @@ async function launchState(system: RemoteSystem): Promise<{ loaded: boolean; pid
   return { loaded: true, pid: pid ? Number(pid[1]) : null };
 }
 
-/** Loads the LaunchAgent, or restarts the door when it already runs. */
-async function startDoor(paths: RemotePaths, system: RemoteSystem): Promise<void> {
+/**
+ * This request came in through the door (sshd sees the door's connection from
+ * the loopback address): restarting or stopping the door would cut it.
+ */
+export function throughDoor(env: NodeJS.ProcessEnv = process.env): boolean {
+  return /^(127.0.0.1|::1|::ffff:127.0.0.1) /.test(env.SSH_CONNECTION ?? '');
+}
+
+/** Restarts the door a moment from now, from a process of its own (so this answer gets out first). */
+function restartDoorSoon(system: RemoteSystem): void {
+  const child = spawn('/bin/sh', ['-c', `sleep 1; /bin/launchctl kickstart -k ${domain(system)}/${DOOR_LABEL} 2>/dev/null; true`], { detached: true, stdio: 'ignore' });
+  child.unref();
+}
+
+/** Loads the LaunchAgent, or restarts the door when it already runs. Returns false when the restart was left for later. */
+async function startDoor(paths: RemotePaths, system: RemoteSystem): Promise<boolean> {
+  if (system === macSystem && throughDoor() && (await launchState(system)).loaded) {
+    restartDoorSoon(system);
+    return false;
+  }
   const target = `${domain(system)}/${DOOR_LABEL}`;
   const state = await launchState(system);
   if (state.loaded) {
     const r = await system.launchctl(['kickstart', '-k', target]);
-    if (r.code === 0) return;
+    if (r.code === 0) return true;
   }
   await system.launchctl(['enable', target]).catch(() => undefined);
   let r = await system.launchctl(['bootstrap', domain(system), paths.plist]);
@@ -221,6 +240,7 @@ async function startDoor(paths: RemotePaths, system: RemoteSystem): Promise<void
       `${r.stderr}\n${r.stdout}`.trim().split('\n').slice(-6),
     );
   }
+  return true;
 }
 
 async function stopDoor(system: RemoteSystem): Promise<void> {
@@ -327,8 +347,8 @@ export async function opRemoteInstall(params: RemoteInstallParams & { nodePath?:
     await fs.mkdir(path.dirname(paths.plist), { recursive: true });
     await fs.writeFile(paths.plist, launchAgentPlist(nodePath, paths), { mode: 0o644 });
     const started = Date.now();
-    await startDoor(paths, system);
-    const status = await waitForDoor(paths, started, 12_000, io.signal);
+    const now = await startDoor(paths, system);
+    const status = now ? await waitForDoor(paths, started, 12_000, io.signal) : null;
     if (status?.state === 'error') throw new AgentError(`CapMac’s remote-access service on the Mac stopped: ${status.error}`, 'REMOTE_DOOR');
     return remoteStatus(system);
   });
@@ -347,8 +367,7 @@ export async function opRemoteSet(params: RemoteSetParams, io: AgentIO, system: 
   if (params.keepAwake !== undefined) config.keepAwake = Boolean(params.keepAwake);
   await writePrivate(paths.config, `${JSON.stringify(config, null, 2)}\n`);
   const started = Date.now();
-  await startDoor(paths, system);
-  await waitForDoor(paths, started, 8000, io.signal);
+  if (await startDoor(paths, system)) await waitForDoor(paths, started, 8000, io.signal);
   return remoteStatus(system);
 }
 
@@ -361,11 +380,24 @@ export async function opRemoteRevoke(params: { key: string; uninstallIfLast?: bo
   return remoteStatus(system);
 }
 
-/** Removes the door, its LaunchAgent and its files. */
+/**
+ * Removes the door, its LaunchAgent and its files. The PC asking may be
+ * connected through the door itself: stopping it would cut that connection
+ * before the answer gets back, so the files go first and the door is stopped
+ * a moment later by a process of its own.
+ */
 export async function opRemoteUninstall(_params: object, _io: AgentIO, system: RemoteSystem = macSystem): Promise<RemoteDoorStatus> {
   const paths = remotePaths();
-  await stopDoor(system);
+  const loaded = (await launchState(system)).loaded;
   await fs.rm(paths.plist, { force: true });
   await fs.rm(paths.dir, { recursive: true, force: true });
-  return remoteStatus(system);
+  if (loaded) {
+    if (system === macSystem && throughDoor()) {
+      const child = spawn('/bin/sh', ['-c', `sleep 1; /bin/launchctl bootout ${domain(system)}/${DOOR_LABEL} 2>/dev/null; true`], { detached: true, stdio: 'ignore' });
+      child.unref();
+    } else {
+      await stopDoor(system);
+    }
+  }
+  return { ...(await remoteStatus(system)), loaded: false, pid: null, status: null };
 }

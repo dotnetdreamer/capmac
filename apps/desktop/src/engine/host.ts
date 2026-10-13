@@ -13,7 +13,9 @@ import {
   bootSimulator,
   buildApp,
   CancelledError,
+  disableRemote,
   discoverMacs,
+  enableRemote,
   inspectProject,
   installLocalDependencies,
   LiveSession,
@@ -25,12 +27,22 @@ import {
   openInXcode,
   pairMac,
   readFromMac,
+  remoteChecks,
+  remoteDoorStatus,
+  remoteSettings,
   requireIos,
   resolveHost,
+  revokeRemotePc,
   runApp,
   ScreenStream,
   setAgentBundlePath,
   setDefaultMac,
+  setNodeDataChannelDir,
+  setRemoteOptions,
+  setSignalServer,
+  signalServer,
+  testRemote,
+  thisPc,
   shutdownSimulator,
   syncSize,
   takeScreenshot,
@@ -180,7 +192,22 @@ function summarize(host: HostConfig, defaultHost: string | undefined): MacSummar
     state: l ? (l.state === 'idle' ? 'idle' : l.state) : 'idle',
     latencyMs: l?.latencyMs ?? null,
     error: l?.lastError ?? null,
+    remote: remoteSettings(host),
+    route: l?.connected ? l.route : null,
+    rttMs: l?.currentSession?.rttMs ?? null,
   };
+}
+
+async function summaryOf(name: string): Promise<MacSummary> {
+  const config = await loadGlobalConfig();
+  const host = resolveHost(config, name);
+  if (!host) throw new UserError(`No paired Mac called "${name}".`);
+  return summarize(host, config.defaultHost);
+}
+
+/** Something is running on this Mac that a reconnect would interrupt. */
+function macBusy(name: string): boolean {
+  return [...sessions.values()].some((s) => s.mac === name);
 }
 
 async function listMacSummaries(): Promise<MacSummary[]> {
@@ -216,7 +243,8 @@ async function health(name: string, projectPath?: string): Promise<HealthReport>
   }
   const latencyMs = Date.now() - started;
   const probe = await session.call<ProbeResult>('probe');
-  const mac = macChecks(probe, project);
+  const door = await remoteDoorStatus(session).catch(() => null);
+  const mac = [...macChecks(probe, project), ...remoteChecks(host, door, session.route, (await thisPc()).key)];
   for (const check of mac) emit(scope, { type: 'check', check });
   return { mac: name, checks: [...pc, ...mac], probe, latencyMs: l.latencyMs ?? latencyMs };
 }
@@ -504,12 +532,22 @@ type Handlers = { [M in EngineMethod]: (params: MethodParams<M>) => Promise<Meth
 const handlers: Handlers = {
   'macs.list': () => listMacSummaries(),
   'macs.discover': async ({ timeoutMs }) => discoverMacs(timeoutMs ?? 3000),
-  'macs.pair': async ({ host, port, username, password, name, label }) => {
+  'macs.pair': async ({ host, port, username, password, name, label, remote }) => {
     const ctx = contextFor({ mac: '#pairing' });
     const result = await pairMac({ host, port: port ?? 22, username, label }, username, { password, name }, ctx);
     emit({}, { type: 'macs-changed' });
-    const config = await loadGlobalConfig();
-    return { mac: summarize(result.host, config.defaultHost), isDefault: result.isDefault };
+    let remoteResult: MethodResults['macs.pair']['remote'];
+    if (remote) {
+      // Pairing worked either way; remote access can be turned on later from Macs.
+      try {
+        const r = await enableRemote(await link(result.host.name).session(), {}, ctx);
+        remoteResult = { ok: true, test: r.test };
+      } catch (err) {
+        remoteResult = { ok: false, test: null, error: toErrorInfo(err) };
+      }
+      emit({}, { type: 'macs-changed' });
+    }
+    return { mac: await summaryOf(result.host.name), isDefault: result.isDefault, remote: remoteResult };
   },
   'macs.unpair': async ({ name }) => {
     links.get(name)?.close();
@@ -586,6 +624,49 @@ const handlers: Handlers = {
     return { png: toArrayBuffer(shot.png), width: shot.width, height: shot.height };
   },
   'debug.dropConnection': async ({ mac }) => links.get(mac)?.dropConnection(),
+  'remote.server': () => signalServer(),
+  'remote.setServer': async ({ url }) => setSignalServer(url),
+  'macs.remote.enable': async ({ name, keepAwake }) => {
+    const result = await enableRemote(await link(name).session(), { keepAwake }, contextFor({ mac: name }));
+    emit({}, { type: 'macs-changed' });
+    return { mac: await summaryOf(name), test: result.test };
+  },
+  'macs.remote.disable': async ({ name, localOnly }) => {
+    const ctx = contextFor({ mac: name });
+    if (localOnly) await disableRemote(name, ctx, { localOnly: true });
+    else await disableRemote(await link(name).session(), ctx);
+    // A connection over the internet ends with remote access: dial in again the local way.
+    const l = links.get(name);
+    if (l?.connected && l.route !== 'lan') l.dropConnection();
+    emit({}, { type: 'macs-changed' });
+    return summaryOf(name);
+  },
+  'macs.remote.set': async ({ name, route, relay, keepAwake, signalUrl }) => {
+    const session = keepAwake !== undefined || signalUrl !== undefined ? await link(name).session() : null;
+    await setRemoteOptions(name, { route, relay, keepAwake, signalUrl }, session, contextFor({ mac: name }));
+    // A new route applies to the next connection: reconnect now, unless that would interrupt a run.
+    let reconnecting = false;
+    const l = links.get(name);
+    if ((route !== undefined || relay !== undefined) && l?.connected && !macBusy(name)) {
+      l.dropConnection();
+      reconnecting = true;
+    }
+    emit({}, { type: 'macs-changed' });
+    return { mac: await summaryOf(name), reconnecting };
+  },
+  'macs.remote.status': async ({ name }) => {
+    const session = await link(name).session();
+    const [door, me] = await Promise.all([remoteDoorStatus(session).catch(() => null), thisPc()]);
+    return {
+      door,
+      thisPc: me,
+      pcs: (door?.pcs ?? []).map((pc) => ({ ...pc, current: pc.key === me.key })),
+      route: session.route,
+      rttMs: session.rttMs,
+    };
+  },
+  'macs.remote.revoke': async ({ name, key }) => revokeRemotePc(await link(name).session(), key, contextFor({ mac: name })),
+  'macs.remote.test': async ({ name }) => testRemote(await hostConfig(name)),
 };
 
 async function handleCall(id: number, method: EngineMethod, params: unknown): Promise<void> {
@@ -630,6 +711,7 @@ parent.on('message', (e) => {
       init = message.init;
       settings = message.init.settings;
       setAgentBundlePath(message.init.agentPath);
+      if (message.init.remoteModulesDir) setNodeDataChannelDir(message.init.remoteModulesDir);
       send({ kind: 'ready' });
       break;
     case 'call':

@@ -101,6 +101,20 @@ export function Switch({ checked, onChange, label, description, disabled }: { ch
   );
 }
 
+/** An On/Off switch with its state written next to it (settings rows, cards). */
+export function Toggle({ checked, onChange, label, disabled, loading }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean; loading?: boolean }) {
+  return (
+    <span className="toggle-control">
+      <span className="toggle-control__state" aria-hidden="true">
+        {loading ? '…' : checked ? 'On' : 'Off'}
+      </span>
+      <button type="button" role="switch" aria-checked={checked} aria-label={label} className="switch" disabled={disabled} aria-busy={loading || undefined} onClick={() => onChange(!checked)}>
+        <span className="switch__thumb" />
+      </button>
+    </span>
+  );
+}
+
 /** A segmented control (radio group) for 2–4 choices. */
 export function Segmented<T extends string>({ value, onChange, options, label }: { value: T; onChange: (value: T) => void; options: Array<{ value: T; label: string; icon?: IconName }>; label: string }) {
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {

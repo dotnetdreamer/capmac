@@ -41,6 +41,8 @@ export function macStatusText(mac: MacSummary): string {
   switch (mac.state) {
     case 'connected':
     case 'restored':
+      if (mac.route === 'direct') return 'Connected · peer to peer';
+      if (mac.route === 'relay') return 'Connected · through the relay';
       return mac.xcode ? `Connected · Xcode ${mac.xcode}` : 'Connected';
     case 'connecting':
       return 'Connecting…';
