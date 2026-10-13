@@ -50,6 +50,15 @@ export async function refreshWebAssets(appPath: string, iosAppDir: string): Prom
   await capture('codesign', ['--force', '--sign', '-', '--preserve-metadata=identifier,entitlements,flags', '--timestamp=none', appPath], { env });
 }
 
+/** Whether a built app carries the same capacitor.config.json as the project (it may have the live-reload one). */
+export async function bundledConfigMatches(appPath: string, iosAppDir: string): Promise<boolean> {
+  const [built, source] = await Promise.all([
+    fs.readFile(path.join(appPath, 'capacitor.config.json'), 'utf8').catch(() => null),
+    fs.readFile(path.join(iosAppDir, 'capacitor.config.json'), 'utf8').catch(() => null),
+  ]);
+  return built === source;
+}
+
 /** xcodebuild bookkeeping lines that never help explain a failure. */
 const BUILD_NOISE = /^\s*(cd |export |builtin-|\/Applications\/Xcode|ExecuteExternalTool|Build description (signature|path)|ClangStatCache|CpResource|SwiftDriver|SwiftEmitModule|EmitSwiftModule|SwiftCompile|CompileC|ProcessInfoPlistFile|CopySwiftLibs|RegisterExecutionPolicyException|Validate|Touch|CodeSign|ProcessProductPackaging|GenerateDSYMFile|Ld |WriteAuxiliaryFile|CreateBuildDirectory|MkDir|SymLink|PhaseScriptExecution|Command line invocation|note: |Prepare packages|ComputeTargetDependencyGraph|ComputePackagePrebuildTargetDependencyGraph|CreateBuildDescription|Resolve Package Graph|Resolved source packages|  [\w-]+: (https?:|\/))/;
 
@@ -77,7 +86,9 @@ export async function opBuild(params: BuildParams, io: AgentIO): Promise<BuildRe
 
     // Nothing native changed since the last good build: reuse it.
     if (!params.force && !params.clean && previous && previous.nativeGen === state.nativeGen && (await exists(previous.appPath))) {
-      if (previous.webGen === state.webGen) {
+      // The build's own Capacitor config must match the project's: a build left over from live
+      // reload still points at the dev server, and would show a blank page.
+      if (previous.webGen === state.webGen && (await bundledConfigMatches(previous.appPath, ios.appDir))) {
         return { skipped: true, ...previous, warnings: 0, logPath: null };
       }
       if (params.target.kind === 'simulator') {
@@ -175,6 +186,8 @@ export async function opBuild(params: BuildParams, io: AgentIO): Promise<BuildRe
 
     const productsDir = path.join(paths.derivedData, 'Build', 'Products', `${params.configuration}-${isSim ? 'iphonesimulator' : 'iphoneos'}`);
     const appPath = await findBuiltApp(productsDir, scheme);
+    // Xcode can leave a resource it thinks unchanged (the live-reload config): bring it in step.
+    if (isSim && !(await bundledConfigMatches(appPath, ios.appDir))) await refreshWebAssets(appPath, ios.appDir);
     const info = await readAppInfo(appPath);
     const record: BuildRecord = { appPath, ...info, nativeGen: state.nativeGen, webGen: state.webGen, at: Date.now() };
     state.builds[key] = record;
