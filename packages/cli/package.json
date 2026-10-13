@@ -1,6 +1,6 @@
 {
   "name": "capmac",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pair to Mac for Capacitor: build, run, live-reload and see your iOS app on a remote Mac, straight from Windows.",
   "license": "MIT",
   "repository": {
@@ -43,7 +43,7 @@
     "ssh2": "^1.17.0"
   },
   "devDependencies": {
-    "@capmac/core": "0.1.0"
+    "@capmac/core": "0.1.1"
   },
   "optionalDependencies": {
     "node-datachannel": "0.33.4"

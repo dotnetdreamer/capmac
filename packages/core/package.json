@@ -1,6 +1,6 @@
 {
   "name": "@capmac/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "CapMac's engine (shared by the CLI and CapMac Studio), the wire protocol and the Mac agent. Consumed as TypeScript source and bundled by each front end.",
   "license": "MIT",
