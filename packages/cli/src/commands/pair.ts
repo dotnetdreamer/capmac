@@ -1,9 +1,13 @@
 import os from 'node:os';
 import {
+  disableRemote,
   discoverMacs,
   keyComment,
   listMacs,
+  loadGlobalConfig,
+  MacSession,
   pairMac,
+  remoteSettings,
   parseDestination,
   setDefaultMac,
   unpairMac,
@@ -13,8 +17,10 @@ import {
   type EngineContext,
 } from '@capmac/core/engine';
 import { terminalContext } from '../terminal.js';
-import { ask, canPrompt, log, pc, select } from '../ui.js';
+import { reportError } from '../report.js';
+import { ask, canPrompt, confirm, log, pc, select } from '../ui.js';
 import { printProbe } from './doctor.js';
+import { turnRemoteOn } from './remote.js';
 
 export interface PairOptions {
   name?: string;
@@ -23,6 +29,9 @@ export interface PairOptions {
   passwordEnv?: string;
   yes?: boolean;
   default?: boolean;
+  /** Remote access: true turns it on, false skips the question. */
+  remote?: boolean;
+  signalUrl?: string;
 }
 
 async function chooseDestination(arg: string | undefined, ctx: EngineContext): Promise<Destination> {
@@ -52,6 +61,26 @@ export async function pairCommand(destinationArg: string | undefined, options: P
   log.line();
   log.success(`Paired with ${pc.bold(host.macName ?? host.host)} as "${host.name}"${isDefault ? ' (default)' : ''}`);
   printProbe(probe);
+  let remote = options.remote;
+  if (remote === undefined && canPrompt()) {
+    log.line();
+    remote = await confirm('Also reach this Mac from anywhere, over the internet (remote access)?', false);
+  }
+  if (remote) {
+    log.line();
+    const session = await MacSession.open({ host: host.name, route: 'lan' });
+    try {
+      await turnRemoteOn(session, { signalUrl: options.signalUrl }, ctx);
+    } catch (err) {
+      // Pairing worked; remote access can be turned on later.
+      reportError(err);
+      log.line(pc.dim(`  Pairing is done. Try remote access again with ${pc.cyan('capmac remote on')}.`));
+    } finally {
+      session.close();
+    }
+  } else if (remote === undefined) {
+    log.line(pc.dim(`  To reach this Mac from anywhere later: ${pc.cyan('capmac remote on')}.`));
+  }
   log.line();
   log.line(`Next: ${pc.cyan('cd')} into your Capacitor app and run ${pc.cyan('capmac run')} (or ${pc.cyan('capmac dev')} for live reload).`);
 }
@@ -64,11 +93,28 @@ export async function macsCommand(): Promise<void> {
   }
   for (const h of hosts) {
     const isDefault = defaultHost === h.name;
-    log.line(`${isDefault ? pc.green('●') : pc.dim('○')} ${pc.bold(h.name)}  ${h.username}@${h.host}${h.port !== 22 ? `:${h.port}` : ''}  ${pc.dim(`${h.macName ?? ''}${h.xcode ? ` · Xcode ${h.xcode}` : ''}`)}`);
+    const remote = remoteSettings(h);
+    const reach = remote.enabled ? ` · remote access on${remote.route !== 'auto' ? ` (${remote.route === 'lan' ? 'local network only' : 'internet only'})` : ''}` : '';
+    log.line(`${isDefault ? pc.green('●') : pc.dim('○')} ${pc.bold(h.name)}  ${h.username}@${h.host}${h.port !== 22 ? `:${h.port}` : ''}  ${pc.dim(`${h.macName ?? ''}${h.xcode ? ` · Xcode ${h.xcode}` : ''}${reach}`)}`);
   }
 }
 
 export async function unpairCommand(name: string): Promise<void> {
+  // With remote access on, ask the Mac to stop letting this PC in first (when it can be reached).
+  const host = (await loadGlobalConfig()).hosts[name];
+  if (host?.remote) {
+    const { ctx } = terminalContext();
+    try {
+      const session = await MacSession.open({ host: name, signal: AbortSignal.timeout(15_000) });
+      try {
+        await disableRemote(session, ctx);
+      } finally {
+        session.close();
+      }
+    } catch {
+      log.warn(`Could not reach ${host.macName ?? host.host}: it still lets this PC in over the internet until you turn remote access off there.`);
+    }
+  }
   await unpairMac(name);
   log.success(`Forgot "${name}". (CapMac's key is still in ~/.ssh/authorized_keys on that Mac; remove the line ending in "${keyComment()}" if you like.)`);
 }

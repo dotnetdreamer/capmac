@@ -1,0 +1,33 @@
+# CapMac's signaling server as a systemd service (without Docker).
+#   sudo mkdir -p /opt/capmac-signal && sudo cp capmac-signal.mjs /opt/capmac-signal/
+#   sudo cp capmac-signal.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now capmac-signal
+# Put a TLS proxy in front (Caddy, nginx): see README.md.
+[Unit]
+Description=CapMac signaling server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=HOST=127.0.0.1
+Environment=PORT=8787
+Environment=STUN_PORT=3478
+Environment=TRUST_PROXY=1
+# Your server's name, for the STUN address CapMac is given:
+Environment=PUBLIC_HOST=signal.example.com
+ExecStart=/usr/bin/env node /opt/capmac-signal/capmac-signal.mjs
+Restart=always
+RestartSec=2
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

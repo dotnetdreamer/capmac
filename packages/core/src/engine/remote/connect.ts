@@ -26,7 +26,7 @@ export interface RemoteTarget {
 export interface RemoteStream {
   sock: Duplex;
   route: Exclude<Route, 'lan'>;
-  /** "peer to peer (srflx → host, UDP)" or "through signal.example.com". */
+  /** The specifics, for diagnostics: "srflx → host, UDP" (ICE candidate types), or the relay's host. */
   readonly detail: string;
   /** The round trip, when WebRTC measures it. */
   rttMs(): number | null;
@@ -248,7 +248,7 @@ function peerStream(pc: PeerConnection, dc: DataChannel, release: () => void): R
   return {
     sock,
     route: relayed ? 'relay' : 'direct',
-    detail: pair ? `${relayed ? 'TURN relay' : 'peer to peer'} (${pair.local.type} → ${pair.remote.type}, ${pair.local.transportType})` : 'peer to peer',
+    detail: pair ? `${relayed ? 'TURN, ' : ''}${pair.local.type} → ${pair.remote.type}, ${pair.local.transportType}` : 'WebRTC',
     rttMs: () => {
       if (finished) return null;
       try {
@@ -305,7 +305,7 @@ async function relay(target: RemoteTarget, identity: Identity, signaling: Signal
     return {
       sock,
       route: 'relay',
-      detail: `through ${signaling.serverHost}`,
+      detail: signaling.serverHost,
       rttMs: () => null,
       close: () => sock.destroy(),
       closed,

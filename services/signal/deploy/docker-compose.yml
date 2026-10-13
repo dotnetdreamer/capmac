@@ -1,0 +1,40 @@
+# CapMac's signaling server behind Caddy (automatic HTTPS from Let's Encrypt).
+#   cp .env.example .env    # then set DOMAIN
+#   docker compose up -d --build
+#
+# Both containers use the host's network: STUN must see each client's real
+# address and port, which Docker's port mapping can hide. The server listens on
+# 127.0.0.1:8787 only; Caddy serves https://DOMAIN and proxies to it.
+services:
+  signal:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: capmac-signal
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      HOST: 127.0.0.1
+      PORT: "8787"
+      STUN_PORT: "3478"
+      PUBLIC_HOST: ${DOMAIN:?Set DOMAIN in .env}
+      TRUST_PROXY: "1"
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Optional TURN through coturn (see README.md):
+      TURN_URLS: ${TURN_URLS:-}
+      TURN_SECRET: ${TURN_SECRET:-}
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

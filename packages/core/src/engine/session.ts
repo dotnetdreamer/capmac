@@ -228,9 +228,9 @@ export class MacSession {
     return this.remoteStream?.rttMs() ?? null;
   }
 
-  /** "peer to peer (srflx → host, UDP)", "through signal.example.com", or "local network". */
+  /** The route's specifics, for diagnostics ("srflx → host, UDP", the relay's host, or the Mac's address). */
   get routeDetail(): string {
-    return this.remoteStream?.detail ?? 'local network';
+    return this.remoteStream?.detail ?? this.conn.options.host;
   }
 
   /** Runs an agent operation; re-discovers Node once if the configured one vanished. */

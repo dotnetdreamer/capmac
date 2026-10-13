@@ -116,12 +116,17 @@ export class TerminalReporter {
         log.info(`Native change (${shown}) → rebuilding`);
         break;
       }
-      case 'connection':
+      case 'connection': {
+        // Over the internet, say so (on the local network nothing changes).
+        const via = event.route === 'direct' ? ' peer to peer over the internet' : event.route === 'relay' ? ' through the relay' : '';
+        const rtt = via && event.rttMs !== undefined ? pc.dim(` (${event.rttMs} ms)`) : '';
         // Only live reload (dev) dials back in by itself.
         if (event.state === 'lost') log.warn(this.options.mode === 'dev' ? `Lost the connection to ${event.label}. Reconnecting…` : `Lost the connection to ${event.label}.`);
         else if (event.state === 'reconnecting' && event.attempt && (event.attempt === 1 || event.attempt % 10 === 0)) log.dim(`  still trying to reach the Mac… (${event.error ?? 'no answer'})`);
-        else if (event.state === 'restored') log.success(`Reconnected to ${event.label}`);
+        else if (event.state === 'restored') log.success(`Reconnected to ${event.label}${via}${rtt}`);
+        else if (event.state === 'connected' && via) log.dim(`  Connected to ${event.label}${via}${rtt}`);
         break;
+      }
       default:
         break;
     }

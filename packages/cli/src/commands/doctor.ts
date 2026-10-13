@@ -9,7 +9,10 @@ import {
   MacConnection,
   macChecks,
   MacSession,
+  remoteChecks,
+  remoteDoorStatus,
   resolveHost,
+  thisPc,
   updateHost,
   UserError,
   withStep,
@@ -80,8 +83,10 @@ export async function doctorCommand(options: DoctorOptions): Promise<void> {
   }
   try {
     const latency = Date.now() - started;
-    const probe = await withStep(ctx, `Checking ${session.label}`, 'other', () => session.call<ProbeResult>('probe'), () => `connected in ${latency}ms`);
-    const checks = macChecks(probe, project);
+    const how = session.route === 'lan' ? '' : `, ${session.route === 'direct' ? 'peer to peer over the internet' : 'through the relay'}`;
+    const probe = await withStep(ctx, `Checking ${session.label}`, 'other', () => session.call<ProbeResult>('probe'), () => `connected in ${latency}ms${how}`);
+    const door = await remoteDoorStatus(session).catch(() => null);
+    const checks = [...macChecks(probe, project), ...remoteChecks(host, door, session.route, (await thisPc()).key)];
     printChecks('Mac', checks);
     const failing = checks.filter((c) => c.level === 'fail' || c.level === 'warn');
     if (!options.fix) {

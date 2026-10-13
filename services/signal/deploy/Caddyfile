@@ -1,0 +1,6 @@
+# https://DOMAIN → CapMac's signaling server. Caddy gets and renews the certificate
+# itself (ports 80 and 443 must be open, and DOMAIN must point at this server).
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8787
+}

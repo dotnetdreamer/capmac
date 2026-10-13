@@ -63,10 +63,14 @@ A typical check after changing code: \`capmac run --for 15\`, read the console f
 
 With CapMac's takeover on (check with \`capmac takeover\`), \`npx cap run ios\`, \`npx cap run ios --list\`, \`ionic capacitor run ios\`, \`npx cap open ios\` and \`npx cap build ios\` also run through CapMac. \`cap sync\`, \`cap copy\`, \`cap add\` and Android stay on this PC. Prefer the \`capmac\` commands above: their options are made for this.
 
+## When the Mac is far away
+
+With remote access on, CapMac reaches the Mac over the internet when it is not on this network, and every command works the same (a little slower). \`capmac remote status\` says how it connects. If a command reports the Mac offline, it is asleep or logged out: tell the user.
+
 ## Leave these to the user
 
 - Anything that needs the Mac's password or a hand on a device: \`capmac pair\`, \`capmac keychain\` (unlocks code signing for iPhones and .ipa exports), \`capmac doctor --fix\` when it asks for a password, plugging in an iPhone and tapping Trust.
-- Ask before you run \`capmac clean --all\` (deletes the project's copy on the Mac), \`capmac unpair\` or \`capmac takeover off\`.
+- Ask before you run \`capmac clean --all\` (deletes the project's copy on the Mac), \`capmac unpair\`, \`capmac takeover off\`, or a \`capmac remote\` command that changes settings (\`on\`, \`off\`, \`set\`, \`server\`, \`revoke\`).
 
 Every command and option is listed in [references/commands.md](references/commands.md).
 `;
@@ -74,7 +78,7 @@ Every command and option is listed in [references/commands.md](references/comman
 
 const COMMANDS_MD = `# capmac commands
 
-Every command accepts \`--mac <name>\` (which paired Mac) and \`--verbose\`. Options can also be set per project in \`capmac.json\`, next to \`capacitor.config.*\`:
+Every command accepts \`--mac <name>\` (which paired Mac) and \`--verbose\`; the ones that talk to the Mac also take \`--route auto|lan|internet\` (how to reach it this time). Options can also be set per project in \`capmac.json\`, next to \`capacitor.config.*\`:
 
 \`\`\`json
 { "host": "studio", "ios": { "target": "iPhone 17 Pro", "team": "ABCDE12345", "scheme": "App" }, "web": { "build": "npm run build", "dev": "npm run dev" } }
@@ -133,6 +137,15 @@ Options shared by \`run\`, \`dev\` and \`build\`:
 | \`capmac pair\`, \`capmac unpair <name>\`, \`capmac keychain\` | Need the user: passwords and trust decisions. |
 | \`capmac takeover [on\\|off]\` | Whether \`npx cap run ios\` and \`ionic capacitor run ios\` go through CapMac. |
 | \`capmac cap <capacitor arguments>\` | Runs \`cap run ios\`, \`cap open ios\` or \`cap build ios\` with Capacitor's own options. |
+
+## Remote access (the Mac over the internet)
+
+| Command | What it does |
+|---|---|
+| \`capmac remote [status] [--test] [--json]\` | Whether remote access is on, its settings, the service on the Mac, and how CapMac connects; \`--test\` also connects over the internet. |
+| \`capmac remote test [--json]\` | Connects over the internet now and says how: peer to peer, or through the relay. |
+| \`capmac remote pcs [--json]\` | The PCs that can reach the Mac over the internet. |
+| \`capmac remote on\`, \`off\`, \`set\`, \`server\`, \`revoke\` | Change remote access. Ask the user first. |
 `;
 
 /** The files of the capmac skill folder, by path relative to it. */

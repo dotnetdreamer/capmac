@@ -4,6 +4,16 @@ import { capCommand } from './commands/cap.js';
 import { devCommand } from './commands/dev.js';
 import { doctorCommand } from './commands/doctor.js';
 import { macsCommand, pairCommand, setDefaultCommand, unpairCommand } from './commands/pair.js';
+import {
+  remoteOffCommand,
+  remoteOnCommand,
+  remotePcsCommand,
+  remoteRevokeCommand,
+  remoteServerCommand,
+  remoteSetCommand,
+  remoteStatusCommand,
+  remoteTestCommand,
+} from './commands/remote.js';
 import { runCommand } from './commands/run.js';
 import { screenshotCommand } from './commands/screenshot.js';
 import { skillAddCommand, skillRemoveCommand, skillShowCommand, skillStatusCommand } from './commands/skill.js';
@@ -20,6 +30,8 @@ import {
   syncCommand,
   targetsCommand,
 } from './commands/tools.js';
+import { setRouteOverride } from '@capmac/core/engine';
+import { RELAY_CHOICES, ROUTE_CHOICES, type RouteChoice } from '@capmac/core/shared/remote';
 import { reportError } from './report.js';
 import { setVerbose } from './ui.js';
 
@@ -48,11 +60,15 @@ program
   .showHelpAfterError()
   .hook('preAction', async (cmd, action) => {
     if (cmd.opts().verbose || cmd.optsWithGlobals?.().verbose) setVerbose(true);
+    // --route is "this time" everywhere except `capmac remote set`, where it is the Mac's setting.
+    const route = action.opts().route as RouteChoice | undefined;
+    if (route && !(action.name() === 'set' && action.parent?.name() === 'remote')) setRouteOverride(route);
     // Takeover is on by default: the first capmac command (usually `capmac pair`) turns it on.
     if (action.name() !== 'takeover') await takeoverByDefault();
   });
 
 const mac = () => new Option('--mac <name>', 'which paired Mac to use');
+const routeOption = () => new Option('--route <how>', 'how to reach the Mac this time (default: its remote-access setting)').choices(ROUTE_CHOICES);
 
 function targetOptions(cmd: Command): Command {
   return cmd
@@ -84,6 +100,9 @@ program
   .option('--password-env <var>', 'read the Mac password from this environment variable (CI)')
   .option('-y, --yes', 'trust the host key and install Node.js without asking')
   .option('--default', 'make this the default Mac')
+  .option('--remote', 'also reach this Mac from anywhere, over the internet (remote access)')
+  .option('--no-remote', 'do not ask about remote access')
+  .option('--signal-url <url>', 'your signaling server for remote access (wss://…)')
   .action(wrap(pairCommand));
 
 program.command('macs').description('list paired Macs').action(wrap(macsCommand));
@@ -93,7 +112,7 @@ program.command('unpair <name>').description('forget a paired Mac').action(wrap(
 program
   .command('doctor')
   .description('check this PC, the connection and the Mac (Xcode, simulators, Node, CocoaPods…)')
-  .addOption(mac())
+  .addOption(mac()).addOption(routeOption())
   .option('--fix', 'fix what can be fixed (license, Node.js, iOS platform, AXe…)')
   .option('-y, --yes', 'do not ask before fixing')
   .action(wrap(doctorCommand));
@@ -102,7 +121,7 @@ buildOptions(targetOptions(
   program
     .command('run')
     .description('build the web app, sync, build on the Mac and launch on a simulator or device')
-    .addOption(mac())
+    .addOption(mac()).addOption(routeOption())
     .option('--release', 'shortcut for --configuration Release')
     .option('--no-web-build', 'do not run the web build first (use the existing web dir)')
     .option('--no-logs', 'launch and return instead of streaming app logs')
@@ -116,7 +135,7 @@ buildOptions(targetOptions(
   program
     .command('dev')
     .description('live reload: your dev server runs here, the app on the Mac loads it through an SSH tunnel')
-    .addOption(mac())
+    .addOption(mac()).addOption(routeOption())
     .option('--url <url>', 'use an already running dev server (e.g. http://localhost:5173)')
     .option('--dev-command <cmd>', 'command that starts the dev server (default: the "dev"/"start" script)')
     .option('--screen', 'open the remote simulator screen in your browser')
@@ -130,7 +149,7 @@ buildOptions(targetOptions(
   program
     .command('build')
     .description('build on the Mac without launching; --ipa exports a signed .ipa to this PC')
-    .addOption(mac())
+    .addOption(mac()).addOption(routeOption())
     .option('--release', 'shortcut for --configuration Release')
     .option('--no-web-build', 'do not run the web build first')
     .option('--ipa', 'archive and export an .ipa, then download it')
@@ -149,14 +168,14 @@ program
 program
   .command('targets')
   .description('list simulators and devices available on the Mac')
-  .addOption(mac())
+  .addOption(mac()).addOption(routeOption())
   .option('--json', 'machine-readable output')
   .action(wrap(targetsCommand));
 
 program
   .command('screen')
   .description('show the Mac\'s simulator in your browser, with touch and keyboard input')
-  .addOption(mac())
+  .addOption(mac()).addOption(routeOption())
   .option('-t, --target <name|udid>', 'simulator to show')
   .option('--port <port>', 'local port for the viewer (default 7373)')
   .option('--no-open', 'do not open the browser automatically')
@@ -165,21 +184,21 @@ program
 program
   .command('screenshot [file]')
   .description("save a PNG of the running simulator's screen (default: a temp file; the path is printed)")
-  .addOption(mac())
+  .addOption(mac()).addOption(routeOption())
   .option('-t, --target <name|udid>', 'simulator (default: the booted one this app last ran on)')
   .action(wrap((file: string | undefined, options) => screenshotCommand(file, options)));
 
 program
   .command('logs')
   .description('stream the app\'s system log from a simulator')
-  .addOption(mac())
+  .addOption(mac()).addOption(routeOption())
   .option('-t, --target <name|udid>', 'simulator')
   .action(wrap(logsCommand));
 
 program
   .command('sync')
   .description('sync the project to the Mac and run `cap sync` there')
-  .addOption(mac())
+  .addOption(mac()).addOption(routeOption())
   .option('--live', 'leave out the web build output')
   .option('--full', 'reinstall dependencies and run a full `cap sync`')
   .option('--no-prepare', 'only copy files')
@@ -188,7 +207,7 @@ program
 program
   .command('exec')
   .description('run a command inside the project on the Mac, e.g. `capmac exec -- pod update`')
-  .addOption(mac())
+  .addOption(mac()).addOption(routeOption())
   .addOption(new Option('--cwd <where>', 'working directory').choices(['project', 'root', 'ios']).default('project'))
   .option('--no-sync', 'do not sync first')
   .argument('<command...>')
@@ -197,25 +216,74 @@ program
 program
   .command('pull <paths...>')
   .description('copy files from the Mac back to this PC (e.g. `capmac pull ios` after `cap add ios` on the Mac)')
-  .addOption(mac())
+  .addOption(mac()).addOption(routeOption())
   .option('-y, --yes', 'overwrite without asking')
   .action(wrap((paths: string[], options) => pullCommand(paths, options)));
 
-program.command('open').description('open the project in Xcode on the Mac').addOption(mac()).action(wrap(openXcodeCommand));
+program.command('open').description('open the project in Xcode on the Mac').addOption(mac()).addOption(routeOption()).action(wrap(openXcodeCommand));
 
 program
   .command('clean')
   .description('delete build products on the Mac (or the whole copy with --all)')
-  .addOption(mac())
+  .addOption(mac()).addOption(routeOption())
   .option('--all', 'remove the project from the Mac entirely')
   .action(wrap(cleanCommand));
 
 program
   .command('keychain')
   .description('unlock the Mac\'s login keychain so code signing works over SSH')
-  .addOption(mac())
+  .addOption(mac()).addOption(routeOption())
   .option('--no-allow-codesign', 'only unlock; do not allow codesign to use keys without a prompt')
   .action(wrap(keychainCommand));
+
+const remote = program
+  .command('remote')
+  .description('reach a Mac from anywhere, over the internet: status | on | off | set | server | pcs | revoke | test');
+remote
+  .command('status', { isDefault: true })
+  .description('remote access for a Mac: its settings, the service on the Mac, and how CapMac connects')
+  .addOption(mac())
+  .addOption(routeOption())
+  .option('--test', 'also connect over the internet now, and say how it went')
+  .option('--json', 'machine-readable output')
+  .action(wrap(remoteStatusCommand));
+remote
+  .command('on')
+  .description('turn remote access on for a Mac (run it while this PC is on the Mac’s network)')
+  .addOption(mac())
+  .option('--signal-url <url>', 'your signaling server (wss://…); remembered for next time')
+  .option('--keep-awake', 'keep the Mac awake while remote access is on')
+  .action(wrap(remoteOnCommand));
+remote
+  .command('off')
+  .description('turn remote access off: the Mac stops letting this PC in over the internet')
+  .addOption(mac())
+  .addOption(routeOption())
+  .option('--local', 'only stop using it from this PC (when the Mac cannot be reached)')
+  .action(wrap(remoteOffCommand));
+remote
+  .command('set')
+  .description('change remote-access options for a Mac')
+  .addOption(mac())
+  .addOption(new Option('--route <how>', 'auto: the local network when the Mac answers there, else the internet; lan or internet: only that way').choices(ROUTE_CHOICES))
+  .addOption(new Option('--relay <when>', 'allow: the relay when peer to peer is not possible; never; always (testing)').choices(RELAY_CHOICES))
+  .option('--keep-awake <on|off>', 'keep the Mac awake while remote access is on')
+  .option('--signal-url <url>', 'move this Mac to another signaling server')
+  .action(wrap(remoteSetCommand));
+remote
+  .command('server [url]')
+  .description('show or set your signaling server (used when remote access is turned on)')
+  .option('--clear', 'forget the server setting')
+  .option('--json', 'machine-readable output')
+  .action(wrap(remoteServerCommand));
+remote.command('pcs').description('list the PCs that can reach a Mac over the internet').addOption(mac()).addOption(routeOption()).option('--json', 'machine-readable output').action(wrap(remotePcsCommand));
+remote
+  .command('revoke <pc>')
+  .description('stop letting another PC reach a Mac over the internet (its name or key: see `capmac remote pcs`)')
+  .addOption(mac())
+  .addOption(routeOption())
+  .action(wrap((which: string, options) => remoteRevokeCommand(which, options)));
+remote.command('test').description('connect to a Mac over the internet now, and say how').addOption(mac()).option('--json', 'machine-readable output').action(wrap(remoteTestCommand));
 
 program
   .command('takeover [action]')

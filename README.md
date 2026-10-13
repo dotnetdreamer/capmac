@@ -112,6 +112,7 @@ Everything else (`cap sync`, `cap copy`, `cap add` and all of Android) still run
 | **`capmac pull <path>`** | Copies files back from the Mac (e.g. after `capmac exec -- npx cap add ios`, run `capmac pull ios`). |
 | **`capmac open`** | Opens the synced project in Xcode on the Mac's screen. |
 | **`capmac info`** | Shows what CapMac detected and which files it would sync — no Mac needed. |
+| **`capmac remote [on\|off\|set\|status]`** | Reach the Mac from anywhere, over the internet (see [Away from the Mac's network](#away-from-the-macs-network)). |
 | **`capmac sync`, `logs`, `clean`, `keychain`, `macs`, `use`, `unpair`** | The rest of the toolbox; `capmac <command> --help` for details. |
 
 Build errors come back as `C:\path\to\your\file.swift:12:9: error: …` — clickable in VS Code's terminal and matched by the built-in `$gcc` problem matcher. App logs show JS `console.*` calls (`js`), Capacitor's own messages (`cap`) and native output (`ios`); add `--os-logs` to also see NSLog/os_log like Xcode's console, or `--bridge` for plugin call traffic.
@@ -191,9 +192,32 @@ capmac run --device --team ABCDE12345 --api-key C:\keys\AuthKey_ABC123XYZ9.p8 --
 
 Monorepos work: CapMac syncs from the folder that holds the lockfile and runs Capacitor in your app's subfolder.
 
+## Away from the Mac's network
+
+With **remote access** on, CapMac reaches your Mac from anywhere: at a café, at the office, on your phone's hotspot. Everything works as at home: run, live reload, the simulator, builds. When the two networks allow it, the connection goes **peer to peer** (WebRTC), as fast as your internet connection; when they don't, it goes **through the relay** on your server.
+
+It needs a small signaling server of your own (it introduces the two ends, relays when needed, and never sees inside the connection):
+
+1. **Deploy the server** on your VPS: see [services/signal/deploy](services/signal/deploy/README.md) (one Docker container, or one Node.js file).
+2. **Tell CapMac where it is:** `capmac remote server wss://signal.example.com` (or CapMac Studio › Settings › Remote access).
+3. **On the Mac's network, turn it on:** `capmac remote on` (or tick *Reach this Mac from anywhere* when pairing, or Macs › Remote access in CapMac Studio).
+
+From then on, CapMac uses the local network when the Mac answers there and the internet otherwise. `capmac remote status --test` shows how it connects. The options, in the CLI and in CapMac Studio:
+
+| Option | CLI | CapMac Studio |
+|---|---|---|
+| Reach this Mac from anywhere | `capmac remote on` / `off`, `capmac pair --remote` | Macs › Remote access; the pairing screen |
+| Connection: automatic, local network only, or internet only | `capmac remote set --route auto\|lan\|internet`; `--route` on any command, for one time | Macs › Remote access › Connection |
+| Relay: when needed, never, or always | `capmac remote set --relay allow\|never\|always` | Macs › Remote access › Advanced |
+| Keep the Mac awake | `capmac remote set --keep-awake on\|off` | Macs › Remote access |
+| The PCs that can reach the Mac | `capmac remote pcs`, `capmac remote revoke <pc>` | Macs › Remote access › PCs |
+| Your signaling server | `capmac remote server <url>`, `CAPMAC_SIGNAL_URL` | Settings › Remote access |
+
+The Mac has to be awake and you logged in to it (the service runs in your login session, like the simulators). *Keep the Mac awake* stops it from sleeping while remote access is on; a MacBook with its lid closed and no display attached sleeps anyway.
+
 ## How it works
 
-- **One SSH connection** (via [ssh2](https://github.com/mscdex/ssh2)) carries everything: commands, file transfers, log streams, screen frames and the dev-server tunnel. No extra ports, no daemon, no firewall changes on the Mac.
+- **One SSH connection** (via [ssh2](https://github.com/mscdex/ssh2)) carries everything: commands, file transfers, log streams, screen frames and the dev-server tunnel. On the local network: no extra ports, no daemon, no firewall changes on the Mac. With remote access on, the same SSH connection travels inside a WebRTC data channel, or through your server's relay, and a small LaunchAgent on the Mac (`dev.capmac.remote`) lets it in.
 - **The agent** is a single dependency-free Node.js script that CapMac uploads to `~/.capmac/agent/<hash>/` and runs per operation. Closing the connection (Ctrl+C) stops whatever it was running.
 - **Incremental sync:** CapMac hashes your files (cached by size + mtime), the Mac replies with what it is missing, and only those files travel as one compressed stream.
 - **Smart rebuilds:** CapMac classifies each change — dependencies → `npm install` + `cap sync`; native → `xcodebuild`; web only → `cap copy` and a one-second update of the installed simulator app.
@@ -203,8 +227,9 @@ Monorepos work: CapMac syncs from the folder that holds the lockfile and runs Ca
 
 - SSH key authentication with a dedicated ed25519 key; the Mac's host key is pinned at pairing time and checked on every connection.
 - Your Mac password is used once at pairing (to install the key) and, if needed, to unlock the keychain for code signing. It's never stored.
-- CapMac only writes inside `~/.capmac` on the Mac (and `~/.ssh/authorized_keys` once, at pairing).
+- CapMac only writes inside `~/.capmac` on the Mac (and `~/.ssh/authorized_keys` once, at pairing; with remote access, `~/Library/LaunchAgents/dev.capmac.remote.plist`).
 - The remote-screen page listens on `127.0.0.1` only.
+- **Remote access** keeps SSH as the security boundary: the pinned host key and CapMac's key protect the connection end to end, so the signaling server and the relay only ever see encrypted bytes. The service on the Mac lets in only the PCs you turned remote access on from (each has its own key, `remote_ed25519`), before a single byte reaches sshd. Both ends sign their WebRTC certificates, so the server cannot put itself in the middle of a peer-to-peer connection either.
 
 ## Troubleshooting
 
@@ -220,6 +245,9 @@ Monorepos work: CapMac syncs from the folder that holds the lockfile and runs Ca
 | App built with Xcode 27 doesn't launch | iOS 27 requires the UIScene lifecycle: run `npx cap migrate` (Capacitor 8.5+). |
 | Device build: "No Accounts" / "session has expired" | Use an App Store Connect API key (`--api-key`, see above). |
 | Wrong files synced | `capmac info --files`, then adjust `.capmacignore` / `capmac.json`. |
+| Away from home: `… is offline` | The Mac is asleep, logged out, or its remote access is off. Wake it or log in; *Keep the Mac awake* prevents it next time. |
+| `Cannot reach the signaling server` | Check its address (`capmac remote server`) and that it is running (`https://<server>/healthz`). |
+| `… no longer lets this PC in over the internet` | On the Mac's network, run `capmac remote on` again. |
 | CapMac Studio shows the *compatible* stream | The note under the simulator says why. *Try the smooth stream* starts it again; *Restart simulator* fixes a simulator whose screen stopped updating. If the helper doesn't compile after an Xcode update, update CapMac. |
 
 Add `--verbose` to any command to see full tool output. Build logs are kept on the Mac in `~/.capmac/projects/<id>/logs/`.
