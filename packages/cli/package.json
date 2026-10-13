@@ -3,6 +3,11 @@
   "version": "0.1.0",
   "description": "Pair to Mac for Capacitor: build, run, live-reload and see your iOS app on a remote Mac, straight from Windows.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dotnetdreamer/capmac.git",
+    "directory": "packages/cli"
+  },
   "type": "module",
   "bin": {
     "capmac": "./bin/capmac.js"

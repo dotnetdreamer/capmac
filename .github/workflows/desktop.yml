@@ -1,0 +1,239 @@
+name: Release CapMac Studio
+
+# Manual releases, like artboard-studio. Build everything before changing the
+# branch or publishing assets; a dry run only produces downloadable artifacts.
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version increment (ignored when version is set)'
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: 'Exact stable version, e.g. 1.2.0; empty uses bump'
+        type: string
+        default: ''
+      dry_run:
+        description: 'Build only: no commit, tag, release or npm publish'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.version.outputs.sha }}
+    steps:
+      # Resolve the branch now, including releases queued behind another run.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Choose release version
+        id: version
+        shell: bash
+        env:
+          SELECTOR: ${{ inputs.version || inputs.bump }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "$DRY_RUN" != true && "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]]; then
+            echo 'Real releases must run from the default branch.' >&2
+            exit 1
+          fi
+          version=$(node scripts/set-version.mjs "$SELECTOR" --dry-run)
+          existing=$(git ls-remote --tags origin "refs/tags/v${version}")
+          if [[ -n "$existing" ]]; then
+            echo "Tag v${version} already exists. Choose a new version." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Building CapMac v${version} (dry run: $DRY_RUN)" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      RELEASE_VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      # Staging versions in this checkout also makes dry-run binaries carry the
+      # proposed version. The source branch stays untouched until release.
+      - name: Stage release version
+        run: node scripts/set-version.mjs "$env:RELEASE_VERSION"
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Build CLI
+        run: npm run build
+        env:
+          CAPMAC_DEFAULT_SIGNAL_URL: ${{ vars.CAPMAC_DEFAULT_SIGNAL_URL }}
+      - name: Smoke test CLI
+        run: |
+          $version = node packages/cli/bin/capmac.js --version
+          if ($LASTEXITCODE -ne 0 -or $version -ne $env:RELEASE_VERSION) {
+            throw 'Built CLI version does not match the release.'
+          }
+          node packages/cli/bin/capmac.js --help
+          if ($LASTEXITCODE -ne 0) { throw 'CLI help failed.' }
+      - name: Pack CLI
+        run: npm pack --workspace capmac --ignore-scripts --pack-destination "$env:RUNNER_TEMP"
+      - name: Build Windows installers and portable executables
+        run: npm run desktop:build
+        env:
+          CAPMAC_UPDATE_URL: ${{ vars.CAPMAC_UPDATE_URL || format('https://github.com/{0}/releases/latest/download/', github.repository) }}
+          CAPMAC_RELEASE_NOTES_URL: ${{ vars.CAPMAC_RELEASE_NOTES_URL || format('https://github.com/{0}/releases/tag/v{{version}}', github.repository) }}
+          CAPMAC_DEFAULT_SIGNAL_URL: ${{ vars.CAPMAC_DEFAULT_SIGNAL_URL }}
+          CAPMAC_AZURE_SIGNING_ENDPOINT: ${{ vars.CAPMAC_AZURE_SIGNING_ENDPOINT }}
+          CAPMAC_AZURE_SIGNING_ACCOUNT: ${{ vars.CAPMAC_AZURE_SIGNING_ACCOUNT }}
+          CAPMAC_AZURE_SIGNING_PROFILE: ${{ vars.CAPMAC_AZURE_SIGNING_PROFILE }}
+          CAPMAC_SIGNING_PUBLISHER: ${{ vars.CAPMAC_SIGNING_PUBLISHER }}
+          CAPMAC_TIMESTAMP_URL: ${{ vars.CAPMAC_TIMESTAMP_URL }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - name: Check release assets
+        run: |
+          $releaseDir = "apps/desktop/release/$env:RELEASE_VERSION"
+          foreach ($arch in @('x64', 'arm64')) {
+            foreach ($suffix in @('setup.exe', 'setup.exe.blockmap', 'portable.exe')) {
+              $asset = Join-Path $releaseDir "capmac-studio-$env:RELEASE_VERSION-$arch-$suffix"
+              if (-not (Test-Path -LiteralPath $asset -PathType Leaf)) {
+                throw "Missing release asset: $asset"
+              }
+            }
+          }
+          $feed = Get-Content -LiteralPath (Join-Path $releaseDir 'latest.yml') -Raw
+          foreach ($arch in @('x64', 'arm64')) {
+            if (-not $feed.Contains("capmac-studio-$env:RELEASE_VERSION-$arch-setup.exe")) {
+              throw "Update feed is missing the $arch installer."
+            }
+          }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: capmac-studio-${{ needs.version.outputs.version }}
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          path: |
+            apps/desktop/release/${{ needs.version.outputs.version }}/*.exe
+            apps/desktop/release/${{ needs.version.outputs.version }}/*.blockmap
+            apps/desktop/release/${{ needs.version.outputs.version }}/latest.yml
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-tarball
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14
+          path: ${{ runner.temp }}/capmac-${{ needs.version.outputs.version }}.tgz
+
+  release:
+    needs: [version, build]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: capmac-studio-${{ needs.version.outputs.version }}
+          path: assets
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-tarball
+          path: assets
+      - name: Commit version, tag and publish release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+          SOURCE_SHA: ${{ needs.version.outputs.sha }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          node scripts/set-version.mjs "$VERSION"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json package-lock.json packages/core/package.json packages/cli/package.json apps/desktop/package.json services/signal/package.json
+          tag="v${VERSION}"
+          existing=$(git ls-remote --tags origin "refs/tags/$tag")
+          if [[ -n "$existing" ]]; then
+            # An upload failure can be retried with the same built artifacts.
+            # Refuse to attach them to a tag made from different source.
+            git fetch --depth=2 origin "refs/tags/$tag:refs/tags/$tag"
+            if [[ "$(git rev-parse "$tag^{tree}")" != "$(git write-tree)" || "$(git rev-parse "$tag^1")" != "$SOURCE_SHA" ]]; then
+              echo "Tag $tag does not match this build." >&2
+              exit 1
+            fi
+          else
+            git commit -m "release: $tag"
+            git tag -a "$tag" -m "CapMac $tag"
+            # Also rejects a branch that changed while the build was running.
+            git push --atomic origin "HEAD:refs/heads/$DEFAULT_BRANCH" "refs/tags/$tag"
+          fi
+          cat > "$RUNNER_TEMP/release-notes.md" <<EOF
+          CapMac Studio ${VERSION} for Windows: choose the x64 or arm64 setup executable to install, or the portable executable to run without installing.
+
+          Install the capmac CLI tarball with: npm install -g ./capmac-${VERSION}.tgz
+
+          The update feed and installer blockmaps are included for installed copies of Studio. Builds are unsigned unless repository signing settings are configured.
+          EOF
+          if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "CapMac $tag" --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
+          gh release upload "$tag" assets/* --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Released [CapMac $tag](https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag)" >> "$GITHUB_STEP_SUMMARY"
+
+  npm:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      # Releases created with GITHUB_TOKEN do not trigger other workflows.
+      # An explicit dispatch publishes precisely the newly released tag.
+      - name: Start CLI publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release.outputs.tag }}
+        run: gh workflow run npm.yml --repo "$GITHUB_REPOSITORY" --ref "$RELEASE_TAG"

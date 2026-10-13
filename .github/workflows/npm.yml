@@ -1,0 +1,119 @@
+name: Publish CLI to npm
+
+# desktop.yml dispatches this workflow on the release tag after publishing.
+# It can also be dispatched manually on the default branch or a stable vX.Y.Z tag.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capmac-npm-publish
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'dotnetdreamer/capmac'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Validate the version and ref
+        id: version
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const read = (path) => JSON.parse(fs.readFileSync(path, 'utf8'));
+          const cli = read('packages/cli/package.json');
+          const version = cli.version;
+          if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) {
+            throw new Error(`Expected a stable X.Y.Z CLI version, got ${version}`);
+          }
+          const allowedRefs = [`refs/heads/${process.env.DEFAULT_BRANCH}`, `refs/tags/v${version}`];
+          if (!allowedRefs.includes(process.env.GITHUB_REF)) {
+            throw new Error(`Publish from the default branch or the matching v${version} tag.`);
+          }
+          for (const path of ['package.json', 'packages/core/package.json', 'apps/desktop/package.json', 'services/signal/package.json']) {
+            const pkg = read(path);
+            if (pkg.version !== version) throw new Error(`${path} does not match CLI version ${version}`);
+            if (pkg.devDependencies?.['@capmac/core'] && pkg.devDependencies['@capmac/core'] !== version) {
+              throw new Error(`${path} has a mismatched @capmac/core version`);
+            }
+          }
+          if (cli.devDependencies['@capmac/core'] !== version) throw new Error('CLI has a mismatched @capmac/core version');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+          NODE
+
+      - run: npm ci
+
+      - run: npm run build
+        env:
+          CAPMAC_DEFAULT_SIGNAL_URL: ${{ vars.CAPMAC_DEFAULT_SIGNAL_URL }}
+
+      - name: Smoke test the built CLI
+        run: |
+          node packages/cli/bin/capmac.js --version
+          node packages/cli/bin/capmac.js --help
+
+      - name: Pack the built CLI
+        working-directory: packages/cli
+        run: |
+          mkdir -p "$RUNNER_TEMP/package"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/package"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-tarball
+          overwrite: true
+          path: ${{ runner.temp }}/package/*.tgz
+          archive: true
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-tarball
+          path: package
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      # No checkout, install or project scripts in the job with publish rights.
+      # npm tries trusted publishing first; NPM_TOKEN is a first-publish fallback.
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish ./package/*.tgz --provenance --access public
+
+      - name: Summary
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          {
+            echo "Published capmac@$VERSION to npm."
+            echo
+            echo "Install with: npm install -g capmac@$VERSION"
+          } >> "$GITHUB_STEP_SUMMARY"

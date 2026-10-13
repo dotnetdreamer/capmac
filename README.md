@@ -64,6 +64,9 @@ From a [development checkout](#developing-capmac), `npm run desktop:build` creat
 Builds are unsigned by default and updates stay off without a configured feed
 See [signing and updates](docs/signing-and-updates.md) for distribution setup
 
+Download installers and portable builds from [GitHub Releases](https://github.com/dotnetdreamer/capmac/releases/latest)
+Maintainers can use **Actions → Release CapMac Studio** to build a dry run or publish a new version; see [releasing CapMac](docs/releases.md) for setup
+
 ## Keep your Capacitor and Ionic commands
 
 A global CapMac install enables takeover on your first command, and the packaged Studio app enables it on launch
