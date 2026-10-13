@@ -4,6 +4,7 @@
 // upload on the Mac.
 import { build, context } from 'esbuild';
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const coreDir = fileURLToPath(new URL('..', import.meta.url));
@@ -11,6 +12,46 @@ const core = JSON.parse(readFileSync(new URL('../package.json', import.meta.url)
 
 /** The core version, which the agent reports as its own. */
 export const agentVersion = core.version;
+
+/**
+ * esbuild options for the door (remote access's service on the Mac). It runs
+ * with the Mac's Node.js 22+ and loads node-datachannel from its own runtime
+ * folder, so that stays out of the bundle.
+ */
+export function doorBuildOptions() {
+  return {
+    absWorkingDir: coreDir,
+    entryPoints: ['src/door/main.ts'],
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node22',
+    write: false,
+    metafile: true,
+    external: ['node-datachannel'],
+    define: { __CAPMAC_VERSION__: JSON.stringify(core.version) },
+    legalComments: 'none',
+    logLevel: 'warning',
+    banner: { js: '// CapMac door: remote access for this Mac (LaunchAgent dev.capmac.remote). Turn it off in CapMac.' },
+  };
+}
+
+/** Builds the door and returns its code (one ES module). */
+export async function buildDoor() {
+  const result = await build(doorBuildOptions());
+  return { code: result.outputFiles[0].text, inputs: Object.keys(result.metafile.inputs).map((file) => path.join(coreDir, file)) };
+}
+
+/** Puts the bundled door into the agent, in place of src/agent/door-source.ts (rebuilt when its sources change). */
+const doorPlugin = {
+  name: 'capmac-door',
+  setup(b) {
+    b.onLoad({ filter: /[\\/]agent[\\/]door-source\.ts$/ }, async () => {
+      const door = await buildDoor();
+      return { contents: `export const DOOR_SOURCE = ${JSON.stringify(door.code)};`, loader: 'js', watchFiles: door.inputs };
+    });
+  },
+};
 
 /** esbuild options for agent.mjs written to `outfile`. */
 export function agentBuildOptions(outfile) {
@@ -25,6 +66,7 @@ export function agentBuildOptions(outfile) {
     define: { __CAPMAC_VERSION__: JSON.stringify(core.version) },
     // The H.264 helper's Objective-C source ships inside the agent; it is compiled on the Mac.
     loader: { '.m': 'text' },
+    plugins: [doorPlugin],
     legalComments: 'none',
     logLevel: 'warning',
     banner: { js: '// CapMac agent — uploaded to the Mac by CapMac. Safe to delete; it is re-uploaded on demand.' },

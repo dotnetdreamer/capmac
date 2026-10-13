@@ -39,5 +39,8 @@
   },
   "devDependencies": {
     "@capmac/core": "0.1.0"
+  },
+  "optionalDependencies": {
+    "node-datachannel": "0.33.4"
   }
 }

@@ -9,6 +9,7 @@ import { opBuild } from './ops/build.js';
 import { opBoot, opDeploy, opLogs, opShutdown } from './ops/deploy.js';
 import { opClean, opExec, opKeychain, opOpenXcode, opPull, opRelay } from './ops/misc.js';
 import { opPrepare } from './ops/prepare.js';
+import { opRemoteInstall, opRemoteRevoke, opRemoteSet, opRemoteStatus, opRemoteUninstall } from './ops/remote.js';
 import { keychainLocked, opProbe } from './ops/probe.js';
 import { toolEnv } from './env.js';
 import { opScreen, opScreenshot } from './ops/screen.js';
@@ -45,6 +46,11 @@ const OPS: Record<string, Handler> = {
   'open-xcode': (params) => opOpenXcode(params),
   relay: opRelay,
   'install-tools': opInstallTools,
+  'remote-status': () => opRemoteStatus(),
+  'remote-install': (params, io) => opRemoteInstall(params, io),
+  'remote-set': (params, io) => opRemoteSet(params, io),
+  'remote-revoke': (params, io) => opRemoteRevoke(params, io),
+  'remote-uninstall': (params, io) => opRemoteUninstall(params, io),
   version: async () => ({ version: AGENT_VERSION, node: process.version, platform: process.platform, arch: process.arch }),
 };
 

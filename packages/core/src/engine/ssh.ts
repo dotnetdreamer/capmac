@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import net from 'node:net';
+import type { Duplex } from 'node:stream';
 import { Client, type ClientChannel, type ConnectConfig } from 'ssh2';
+import { CancelledError } from './errors.js';
 
 export interface ConnectOptions {
   host: string;
@@ -14,6 +16,10 @@ export interface ConnectOptions {
   /** Receives the server's "SHA256:..." fingerprint; return true to trust it. */
   verifyHostKey: (fingerprint: string) => boolean | Promise<boolean>;
   readyTimeoutMs?: number;
+  /** An open byte stream to the Mac's sshd (remote access), used instead of host and port. */
+  sock?: Duplex;
+  /** Gives up the attempt (another route got there first). */
+  signal?: AbortSignal;
 }
 
 /** Watches connections through a reverse tunnel (used to detect the HMR WebSocket). */
@@ -97,14 +103,29 @@ export class MacConnection {
       const client = new Client();
       let rejectedKey: string | null = null;
       let settled = false;
+      const onAbort = () => {
+        fail(new CancelledError());
+        client.destroy();
+      };
       const fail = (err: Error) => {
         if (settled) return;
         settled = true;
+        options.signal?.removeEventListener('abort', onAbort);
         client.end();
         reject(err);
       };
+      if (options.signal?.aborted) {
+        reject(new CancelledError());
+        return;
+      }
+      options.signal?.addEventListener('abort', onAbort, { once: true });
       client.on('ready', () => {
+        if (settled) {
+          client.end();
+          return;
+        }
         settled = true;
+        options.signal?.removeEventListener('abort', onAbort);
         resolve(new MacConnection(client, options));
       });
       client.on('error', (err: any) => fail(rejectedKey ? new HostKeyMismatchError(rejectedKey) : friendlyError(err, options)));
@@ -132,6 +153,7 @@ export class MacConnection {
             });
         },
       };
+      if (options.sock) config.sock = options.sock as unknown as ConnectConfig['sock'];
       if (options.privateKey) config.privateKey = options.privateKey;
       if (options.password) config.password = options.password;
       if (options.agent) config.agent = options.agent;

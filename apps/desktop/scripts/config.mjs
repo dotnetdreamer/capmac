@@ -14,10 +14,13 @@ const define = {
   __CAPMAC_VERSION__: JSON.stringify(pkg.version),
   // Release notes for a version, e.g. https://github.com/<owner>/<repo>/releases/tag/v{version}.
   __RELEASE_NOTES_URL__: JSON.stringify(process.env.CAPMAC_RELEASE_NOTES_URL ?? ''),
+  // The signaling server for remote access a release is built with (people can set their own).
+  __CAPMAC_SIGNAL_URL__: JSON.stringify(process.env.CAPMAC_DEFAULT_SIGNAL_URL ?? ''),
 };
 
 // ssh2's optional native add-ons are not shipped: it falls back to pure JS.
-const external = ['electron', 'cpu-features', '*.node'];
+// node-datachannel (WebRTC for remote access) is native: it ships in resources/remote.
+const external = ['electron', 'cpu-features', '*.node', 'node-datachannel'];
 
 // Main and the engine are CommonJS: bundled CommonJS packages (ssh2, …) expect
 // require/__dirname, which ES module bundles do not have.

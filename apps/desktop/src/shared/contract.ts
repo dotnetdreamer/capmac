@@ -25,7 +25,7 @@ const id = z.string().regex(/^[a-z0-9-]{1,64}$/);
 /** Which agents get (or lose) the capmac skill, and where. */
 const skillTarget = { agents: z.array(id).min(1).max(32), scope: z.enum(['global', 'project']), projectDir: fsPath.optional() };
 const hasProject = (v: { scope: string; projectDir?: string }) => v.scope === 'global' || v.projectDir !== undefined;
-const fixIds = ['install-node', 'xcode-license', 'xcode-first-launch', 'download-ios', 'install-axe', 'install-cocoapods', 'unlock-keychain', 'build-stream-helper'] as const satisfies readonly FixId[];
+const fixIds = ['install-node', 'xcode-license', 'xcode-first-launch', 'download-ios', 'install-axe', 'install-cocoapods', 'unlock-keychain', 'build-stream-helper', 'remote-repair'] as const satisfies readonly FixId[];
 
 export const sessionOptionsSchema = z.object({
   clean: z.boolean().optional(),

@@ -5,6 +5,7 @@
 import type { AppLogKind, AppLogLevel } from '../shared/app-log.js';
 import type { ChangeKind } from '../shared/classify.js';
 import type { Diagnostic, Target, TargetsResult } from '../shared/protocol.js';
+import type { Route } from '../shared/remote.js';
 import type { ErrorInfo } from './errors.js';
 
 /** Where a step belongs in the build timeline. */
@@ -41,7 +42,7 @@ export interface AppLogEntry {
 
 export type CheckLevel = 'ok' | 'warn' | 'fail' | 'info';
 
-export type FixId = 'install-node' | 'xcode-license' | 'xcode-first-launch' | 'download-ios' | 'install-axe' | 'install-cocoapods' | 'unlock-keychain' | 'build-stream-helper';
+export type FixId = 'install-node' | 'xcode-license' | 'xcode-first-launch' | 'download-ios' | 'install-axe' | 'install-cocoapods' | 'unlock-keychain' | 'build-stream-helper' | 'remote-repair';
 
 /** A one-click fix for a health check. */
 export interface FixAction {
@@ -94,7 +95,8 @@ export type EngineEvent =
   | { type: 'build-reused'; reason: 'native-unchanged' | 'web-patched' }
   | { type: 'build-log'; path: string }
   | { type: 'native-change'; paths: string[]; kinds: ChangeKind[] }
-  | { type: 'connection'; mac: string; label: string; state: ConnectionState; attempt?: number; error?: string; latencyMs?: number }
+  /** `route`: how the connection goes (the local network, peer to peer, or the relay), once connected. */
+  | { type: 'connection'; mac: string; label: string; state: ConnectionState; attempt?: number; error?: string; latencyMs?: number; route?: Route; rttMs?: number }
   | { type: 'session'; mode: SessionMode; state: SessionState; error?: ErrorInfo; ms?: number }
   | { type: 'check'; check: Check }
   | { type: 'targets'; targets: TargetsResult };

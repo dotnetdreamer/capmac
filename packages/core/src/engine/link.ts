@@ -7,6 +7,7 @@
 import { loadGlobalConfig, resolveHost } from './config.js';
 import { wait, type EngineContext } from './context.js';
 import { UserError } from './errors.js';
+import type { Route } from '../shared/remote.js';
 import type { ConnectionState } from './events.js';
 import { MacSession } from './session.js';
 
@@ -30,6 +31,8 @@ export class MacLink {
   attempt = 0;
   lastError: string | null = null;
   latencyMs: number | null = null;
+  /** How the current (or last) connection goes. */
+  route: Route | null = null;
   /** Friendly name ("IK's M1"), known once resolved or connected. */
   label: string;
 
@@ -71,7 +74,18 @@ export class MacLink {
   private setState(state: ConnectionState, extra: { attempt?: number; error?: string } = {}): void {
     this.state = state;
     if (extra.error !== undefined) this.lastError = extra.error;
-    this.ctx?.emit({ type: 'connection', mac: this.name, label: this.label, state, attempt: extra.attempt, error: extra.error, latencyMs: this.latencyMs ?? undefined });
+    const live = state === 'connected' || state === 'restored';
+    this.ctx?.emit({
+      type: 'connection',
+      mac: this.name,
+      label: this.label,
+      state,
+      attempt: extra.attempt,
+      error: extra.error,
+      latencyMs: this.latencyMs ?? undefined,
+      route: live ? this.route ?? undefined : undefined,
+      rttMs: live ? this.current?.rttMs ?? undefined : undefined,
+    });
     for (const listener of [...this.listeners]) {
       try {
         listener(state, this.currentSession);
@@ -102,6 +116,7 @@ export class MacLink {
         }
         this.current = session;
         this.label = session.label;
+        this.route = session.route;
         this.latencyMs = Date.now() - started;
         this.lastError = null;
         this.attempt = 0;

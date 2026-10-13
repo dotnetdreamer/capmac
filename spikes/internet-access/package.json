@@ -1,0 +1,11 @@
+{
+  "name": "capmac-spike-internet-access",
+  "private": true,
+  "description": "CapMac's SSH connection over WebRTC and iroh, measured against plain SSH. Not part of the workspace.",
+  "type": "commonjs",
+  "dependencies": {
+    "@number0/iroh": "1.1.0",
+    "node-datachannel": "0.33.4",
+    "ssh2": "1.17.0"
+  }
+}

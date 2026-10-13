@@ -25,7 +25,8 @@ export function cliOptions({ outfile, standalone = false, version = pkg.version 
     platform: 'node',
     format: 'esm',
     target: 'node20',
-    external: standalone ? ['cpu-features', '*.node'] : Object.keys(pkg.dependencies ?? {}),
+    // node-datachannel is native: npm installs it with the CLI; CapMac Studio ships it next to its copy.
+    external: standalone ? ['cpu-features', '*.node', 'node-datachannel'] : [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.optionalDependencies ?? {})],
     // Bundled CommonJS dependencies (ssh2, …) call require and read __dirname.
     banner: standalone
       ? {
@@ -38,7 +39,12 @@ export function cliOptions({ outfile, standalone = false, version = pkg.version 
           ].join('\n'),
         }
       : undefined,
-    define: { __CAPMAC_VERSION__: JSON.stringify(version), __CAPMAC_IN_STUDIO__: JSON.stringify(standalone) },
+    define: {
+      __CAPMAC_VERSION__: JSON.stringify(version),
+      __CAPMAC_IN_STUDIO__: JSON.stringify(standalone),
+      // The signaling server for remote access a release is built with (people can set their own).
+      __CAPMAC_SIGNAL_URL__: JSON.stringify(process.env.CAPMAC_DEFAULT_SIGNAL_URL ?? ''),
+    },
     sourcemap: !standalone,
     minify: standalone,
     legalComments: 'none',

@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { RelayChoice, RouteChoice } from '../shared/remote.js';
 
 export interface HostConfig {
   /** Short alias used on the command line. */
@@ -23,6 +24,23 @@ export interface HostConfig {
   macName?: string;
   xcode?: string;
   pairedAt: string;
+  /** Remote access ("Reach this Mac from anywhere"), when it is on for this Mac. */
+  remote?: HostRemote;
+}
+
+/** Remote access to a Mac, from this PC. */
+export interface HostRemote {
+  /** The door's public key: the Mac's identity for remote access, pinned like the SSH host key. */
+  macKey: string;
+  /** The signaling server this PC and the Mac's door use. */
+  signalUrl: string;
+  enabledAt: string;
+  /** Which way to connect (default 'auto': the local network when it answers, else the internet). */
+  route?: RouteChoice;
+  /** Whether the relay may be used when peer to peer is not possible (default 'allow'). */
+  relay?: RelayChoice;
+  /** The Mac's door keeps it awake (a copy of the Mac's setting, for display). */
+  keepAwake?: boolean;
 }
 
 export interface GlobalConfig {
@@ -31,6 +49,8 @@ export interface GlobalConfig {
   hosts: Record<string, HostConfig>;
   /** Takeover of `npx cap run ios` and friends, as last chosen; unset means on (see takeover.ts). */
   takeover?: 'on' | 'off';
+  /** The signaling server for remote access (your own; see services/signal). */
+  signalUrl?: string;
 }
 
 export interface ProjectConfig {

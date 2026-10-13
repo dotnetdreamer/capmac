@@ -3,6 +3,8 @@
  * can apply itself (`capmac doctor --fix`, the app's one-click fixes).
  */
 import type { ProbeResult, StreamHelperState } from '../shared/protocol.js';
+import type { Route } from '../shared/remote.js';
+import type { RemoteDoorStatus } from '../shared/remote-door.js';
 import type { HostConfig } from './config.js';
 import { updateHost } from './config.js';
 import { log, withStep, type EngineContext } from './context.js';
@@ -11,6 +13,7 @@ import { UserError } from './errors.js';
 import { ensureNode } from './pair.js';
 import { Pipeline, unlockKeychain } from './pipeline.js';
 import { usesSceneLifecycle, type ProjectInfo } from './project.js';
+import { enableRemote } from './remote/manage.js';
 import { discoverRuntime, parseNodeVersion, RECOMMENDED_NODE_MAJOR } from './remote-env.js';
 import type { MacSession } from './session.js';
 
@@ -153,6 +156,39 @@ export function macChecks(probe: ProbeResult, project?: ProjectInfo | null): Che
   return checks;
 }
 
+const ROUTE_TEXT: Record<Route, string> = { lan: 'on the local network', direct: 'peer to peer over the internet', relay: 'through the relay' };
+
+/**
+ * Remote access ("Reach this Mac from anywhere"): whether the door on the Mac
+ * is installed, current, running and online, and that it lets this PC in.
+ * `door` is null when the agent cannot report it (an older agent).
+ */
+export function remoteChecks(host: HostConfig, door: RemoteDoorStatus | null, route: Route | null, pcKey: string | null): Check[] {
+  const check = (c: Omit<Check, 'group' | 'id' | 'label'>): Check[] => [{ id: 'remote', group: 'mac', label: 'Remote access', ...c }];
+  const repair = { id: 'remote-repair' as const, label: 'Repair', confirm: 'Reinstall CapMac’s remote-access service on the Mac with its current settings?' };
+  const settings = host.remote;
+  if (!settings) {
+    const others = door?.installed ? door.pcs.length : 0;
+    return check({ level: 'info', detail: others ? `off for this PC (${others} other PC${others === 1 ? '' : 's'} use it)` : 'off', fix: 'To reach this Mac from anywhere: `capmac remote on` (or Macs › Remote access).' });
+  }
+  if (!door) return check({ level: 'warn', detail: 'the CapMac agent on the Mac cannot report it', fix: 'Update CapMac.' });
+  if (!door.installed) return check({ level: 'fail', detail: 'on for this PC, but missing on the Mac', fix: 'Repair it, or turn remote access off and on.', action: repair });
+  if (door.macKey !== settings.macKey) return check({ level: 'fail', detail: 'the Mac’s remote-access key changed since it was turned on', fix: 'Repair it to trust the new key (do this on the Mac’s network).', action: repair });
+  if (pcKey && !door.pcs.some((pc) => pc.key === pcKey)) return check({ level: 'fail', detail: 'the Mac no longer lets this PC in', fix: 'Repair it to add this PC again.', action: repair });
+  const status = door.status;
+  if (!door.loaded || !status || status.state === 'stopped') return check({ level: 'fail', detail: 'the service is not running on the Mac', fix: 'Repair it. It runs while you are logged in to the Mac.', action: repair });
+  if (status.state === 'error') return check({ level: 'fail', detail: status.error ?? 'the service stopped', fix: 'Repair it.', action: repair });
+  if (status.state !== 'online') {
+    return check({ level: 'warn', detail: `the Mac cannot reach the signaling server (${door.signalUrl})${status.error ? `: ${status.error}` : ''}`, fix: 'Check that the server is running and that the Mac is online.' });
+  }
+  if (!door.current) return check({ level: 'warn', detail: 'the service on the Mac is from an older CapMac', fix: 'Update it.', action: { ...repair, label: 'Update' } });
+  const pcs = door.pcs.length;
+  return check({
+    level: 'ok',
+    detail: [`online at ${status.server ?? door.signalUrl}`, `${pcs} PC${pcs === 1 ? '' : 's'}`, door.keepAwake ? 'keeps the Mac awake' : null, route ? `connected ${ROUTE_TEXT[route]}` : null].filter(Boolean).join(' · '),
+  });
+}
+
 /** Runs `sudo <command>` on the Mac with the password on stdin (never on the command line). */
 export async function sudo(session: MacSession, password: string, command: string): Promise<{ code: number | null; output: string }> {
   const channel = await session.conn.exec(`sudo -S -p '' ${command}`);
@@ -212,6 +248,9 @@ export async function applyFix(fix: FixId, session: MacSession, ctx: EngineConte
     }
     case 'unlock-keychain':
       await unlockKeychain(session, ctx, true);
+      return;
+    case 'remote-repair':
+      await enableRemote(session, { test: false }, ctx);
       return;
     case 'build-stream-helper': {
       const state = await withStep(ctx, 'Compiling the smooth stream helper on the Mac', 'other', () => session.call<StreamHelperState>('stream-helper', { build: true, force: true }));

@@ -1,0 +1,19 @@
+{
+  "name": "@capmac/signal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CapMac's signaling server: introduces a PC to the door on its Mac (WebRTC), relays when they can't connect directly, and answers STUN. Deploy it on your own server; see deploy/README.md.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "node dist/capmac-signal.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@capmac/core": "0.1.0",
+    "@types/ws": "^8.18.1"
+  }
+}
