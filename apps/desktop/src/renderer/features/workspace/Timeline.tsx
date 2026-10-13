@@ -1,27 +1,29 @@
 import { useEffect, useState } from 'react';
+import { t, tidy } from '../../../shared/i18n';
 import { formatDuration } from '../../lib/format';
+import { Rich } from '../../ui/Rich';
 import { IPA_PHASES, isBusy, PHASE_LABELS, RUN_PHASES, type PhaseState, type RunState, type TimelinePhase } from '../../state/runs';
 import { ProgressBar, Spinner } from '../../ui/Feedback';
 import { Icon } from '../../ui/Icon';
 
 const SHORT_DETAIL: Array<[RegExp, string]> = [
-  [/native code unchanged/i, 'unchanged'],
-  [/dependencies unchanged/i, 'unchanged'],
-  [/web assets unchanged/i, 'unchanged'],
-  [/nothing to copy/i, 'up to date'],
-  [/already booted/i, 'booted'],
-  [/served by your dev server/i, 'dev server'],
-  [/not needed on a device/i, 'device'],
-  [/turned off/i, 'off'],
-  [/not installed on this PC/i, 'prebuilt'],
-  [/no build script/i, 'no script'],
+  [/native code unchanged/i, t.timeline.short.unchanged],
+  [/dependencies unchanged/i, t.timeline.short.unchanged],
+  [/web assets unchanged/i, t.timeline.short.unchanged],
+  [/nothing to copy/i, t.timeline.short.upToDate],
+  [/already booted/i, t.timeline.short.alreadyOn],
+  [/served by your dev server/i, t.timeline.short.devServer],
+  [/not needed on a device/i, t.timeline.short.device],
+  [/turned off/i, t.timeline.short.off],
+  [/not installed on this PC/i, t.timeline.short.prebuilt],
+  [/no build script/i, t.timeline.short.noScript],
 ];
 
 function shortDetail(state: PhaseState): string | null {
   if (state.status === 'done') return state.ms !== undefined ? formatDuration(state.ms) : null;
-  if (state.status === 'skipped') return state.detail ? SHORT_DETAIL.find(([re]) => re.test(state.detail!))?.[1] ?? 'skipped' : 'skipped';
-  if (state.status === 'failed') return 'failed';
-  if (state.status === 'cancelled') return 'stopped';
+  if (state.status === 'skipped') return (state.detail && SHORT_DETAIL.find(([re]) => re.test(state.detail!))?.[1]) || t.timeline.short.skipped;
+  if (state.status === 'failed') return t.timeline.short.failed;
+  if (state.status === 'cancelled') return t.timeline.short.stopped;
   return null;
 }
 
@@ -46,8 +48,8 @@ function useNow(enabled: boolean): number {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     if (!enabled) return;
-    const t = window.setInterval(() => setNow(Date.now()), 250);
-    return () => window.clearInterval(t);
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
   }, [enabled]);
   return now;
 }
@@ -70,7 +72,7 @@ export function Timeline({ run }: { run: RunState | undefined }) {
   if (!run || (!hasCurrent && !showingPrevious)) {
     return (
       <div className="timeline timeline--empty">
-        <ol className="tl-steps" aria-label="Build steps">
+        <ol className="tl-steps" aria-label={t.timeline.steps}>
           {order.map((p) => (
             <li key={p} className="tl-step tl-step--idle">
               <span className="tl-step__node">
@@ -81,7 +83,7 @@ export function Timeline({ run }: { run: RunState | undefined }) {
           ))}
         </ol>
         <p className="timeline__hint">
-          Press <strong>Live</strong> (F5) or <strong>Run</strong> (Ctrl+F5): each step of the build shows up here.
+          <Rich text={t.timeline.hint} />
         </p>
       </div>
     );
@@ -91,22 +93,22 @@ export function Timeline({ run }: { run: RunState | undefined }) {
     <div className={`timeline${showingPrevious ? ' is-previous' : ''}`}>
       <div className="timeline__summary" aria-live="polite">
         <span className="timeline__run">
-          {showingPrevious ? `Last run #${run.previous!.runNumber}` : `Run #${run.runNumber}`}
-          {run.mode === 'live' && !showingPrevious && <span className="badge badge--success">Live</span>}
+          {showingPrevious ? t.timeline.lastRun(run.previous!.runNumber) : t.timeline.run(run.runNumber)}
+          {run.mode === 'live' && !showingPrevious && <span className="badge badge--success">{t.common.live}</span>}
         </span>
         {elapsed !== null && <span className="timeline__time tabular">{formatDuration(elapsed)}</span>}
         <span className="timeline__state">
-          {busy ? 'In progress' : failed ? `Failed at ${PHASE_LABELS[failed]}` : run.status === 'stopped' ? 'Stopped' : showingPrevious ? (run.previous!.ok ? 'Succeeded' : 'Failed') : run.app?.state === 'running' ? 'App running' : 'Done'}
+          {busy ? t.timeline.inProgress : failed ? t.timeline.failedAt(PHASE_LABELS[failed]) : run.status === 'stopped' ? t.timeline.stopped : showingPrevious ? (run.previous!.ok ? t.timeline.succeeded : t.timeline.failed) : run.app?.state === 'running' ? t.timeline.appRunning : t.timeline.done}
         </span>
       </div>
-      <ol className="tl-steps" aria-label="Build steps">
+      <ol className="tl-steps" aria-label={t.timeline.steps}>
         {order.map((p, i) => {
           const state = phases[p] ?? { status: 'pending' as const };
           const detail = shortDetail(state);
           const prev = phases[order[i - 1]!];
           const connected = i > 0 && prev && (prev.status === 'done' || prev.status === 'skipped');
           return (
-            <li key={p} className={`tl-step tl-step--${state.status}${connected ? ' is-connected' : ''}`} title={state.detail ?? state.title} aria-label={`${PHASE_LABELS[p]}: ${state.status}${state.detail ? `, ${state.detail}` : ''}${state.ms ? `, ${formatDuration(state.ms)}` : ''}`}>
+            <li key={p} className={`tl-step tl-step--${state.status}${connected ? ' is-connected' : ''}`} title={tidy(state.detail ?? state.title)} aria-label={`${PHASE_LABELS[p]}: ${t.timeline.status[state.status]}${state.detail ? `, ${tidy(state.detail)}` : ''}${state.ms ? `, ${formatDuration(state.ms)}` : ''}`}>
               <span className="tl-step__node">
                 <Node status={state.status} />
               </span>
@@ -118,7 +120,7 @@ export function Timeline({ run }: { run: RunState | undefined }) {
       </ol>
       {running && (
         <div className="tl-progress">
-          <ProgressBar value={running.fraction ?? null} label={`${PHASE_LABELS[runningPhase!]} progress`} />
+          <ProgressBar value={running.fraction ?? null} label={t.timeline.progress(PHASE_LABELS[runningPhase!])} />
           <span className="tl-progress__text mono truncate">{running.progress ?? running.title ?? ''}</span>
         </div>
       )}
@@ -130,7 +132,7 @@ export function Timeline({ run }: { run: RunState | undefined }) {
             .map((n) => (
               <li key={n.id}>
                 <Icon name="warning" size={14} filled />
-                <span className="truncate">{n.message}</span>
+                <span className="truncate">{tidy(n.message)}</span>
               </li>
             ))}
         </ul>

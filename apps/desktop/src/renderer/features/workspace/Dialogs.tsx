@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { macFor } from '../../state/actions';
+import { t, tidy } from '../../../shared/i18n';
+import { both, macFor } from '../../state/actions';
 import { toast } from '../../state/app';
 import { call, errorInfo } from '../../state/engine';
 import { Button } from '../../ui/Button';
@@ -9,12 +10,7 @@ import { Select, Switch, TextField } from '../../ui/Form';
 
 type ExportKind = 'development' | 'ad-hoc' | 'app-store' | 'enterprise';
 
-const EXPORTS: Array<{ value: ExportKind; label: string; hint: string }> = [
-  { value: 'development', label: 'Development', hint: 'your registered devices' },
-  { value: 'ad-hoc', label: 'Ad hoc', hint: 'testers’ registered devices' },
-  { value: 'app-store', label: 'App Store Connect', hint: 'TestFlight and the App Store' },
-  { value: 'enterprise', label: 'Enterprise', hint: 'in-house distribution' },
-];
+const EXPORTS: ExportKind[] = ['development', 'ad-hoc', 'app-store', 'enterprise'];
 
 export function BuildIpaDialog({ path, open, onClose }: { path: string; open: boolean; onClose: () => void }) {
   const [kind, setKind] = useState<ExportKind>('development');
@@ -22,7 +18,7 @@ export function BuildIpaDialog({ path, open, onClose }: { path: string; open: bo
   const [team, setTeam] = useState('');
   const [outDir, setOutDir] = useState(`${path}\\build\\ios`);
   const [busy, setBusy] = useState(false);
-  const teamError = team && !/^[A-Z0-9]{10}$/.test(team) ? 'A Team ID is 10 letters and digits, like ABCDE12345.' : undefined;
+  const teamError = team && !/^[A-Z0-9]{10}$/.test(team) ? t.ipa.teamError : undefined;
 
   const submit = async () => {
     if (teamError) return;
@@ -31,8 +27,7 @@ export function BuildIpaDialog({ path, open, onClose }: { path: string; open: bo
       await call('builds.ipa', { projectPath: path, mac: macFor(path) ?? undefined, exportKind: upload ? 'app-store' : kind, upload, outDir, team: team || undefined });
       onClose();
     } catch (err) {
-      const e = errorInfo(err);
-      toast({ tone: 'critical', title: 'Could not start the IPA build', body: e.hint ? `${e.message} ${e.hint}` : e.message });
+      toast({ tone: 'critical', title: t.ipa.startFailed, body: both(errorInfo(err)) });
     } finally {
       setBusy(false);
     }
@@ -42,35 +37,35 @@ export function BuildIpaDialog({ path, open, onClose }: { path: string; open: bo
     <Dialog
       open={open}
       onClose={onClose}
-      title="Build an .ipa"
+      title={t.ipa.title}
       icon="box"
       onSubmit={() => void submit()}
       footer={
         <>
           <Button type="submit" variant="accent" busy={busy} disabled={Boolean(teamError)}>
-            {upload ? 'Build and upload' : 'Build IPA'}
+            {upload ? t.ipa.buildAndUpload : t.ipa.build}
           </Button>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{t.common.cancel}</Button>
         </>
       }
     >
-      <p className="muted">Archives a Release build on the Mac, exports a signed .ipa and copies it to this PC.</p>
+      <p className="muted">{t.ipa.intro}</p>
       <div className="field">
-        <span className="field__label">Distribution</span>
-        <Select value={upload ? 'app-store' : kind} onChange={(v) => setKind(v)} label="Distribution" width={340} options={EXPORTS.map((e) => ({ value: e.value, label: e.label, hint: e.hint }))} />
+        <span className="field__label">{t.ipa.distribution}</span>
+        <Select value={upload ? 'app-store' : kind} onChange={(v) => setKind(v)} label={t.ipa.distribution} width={340} options={EXPORTS.map((value) => ({ value, ...t.ipa.kinds[value] }))} />
       </div>
-      <Switch checked={upload} onChange={setUpload} label="Upload to TestFlight" description="Sends the build to App Store Connect instead of copying it here." />
-      <TextField label="Team ID (optional)" placeholder="ABCDE12345" value={team} onChange={(e) => setTeam(e.target.value.toUpperCase().trim())} error={teamError} hint="Leave empty to use the team from the Xcode project or capmac.json." />
+      <Switch checked={upload} onChange={setUpload} label={t.ipa.upload} description={t.ipa.uploadDesc} />
+      <TextField label={t.ipa.team} placeholder="ABCDE12345" value={team} onChange={(e) => setTeam(e.target.value.toUpperCase().trim())} error={teamError} hint={t.ipa.teamHint} />
       {!upload && (
         <TextField
-          label="Save to"
+          label={t.ipa.saveTo}
           value={outDir}
           onChange={(e) => setOutDir(e.target.value)}
           trailing={
             <button
               type="button"
               className="input__action"
-              aria-label="Choose folder"
+              aria-label={t.ipa.chooseFolder}
               onClick={async () => {
                 const folder = await window.capmac.invoke('app:pick-folder');
                 if (folder) setOutDir(folder);
@@ -81,7 +76,7 @@ export function BuildIpaDialog({ path, open, onClose }: { path: string; open: bo
           }
         />
       )}
-      <InfoBar tone="info">Signing over SSH needs the Mac’s login keychain unlocked. CapMac asks for your Mac password if needed and never stores it.</InfoBar>
+      <InfoBar tone="info">{t.ipa.signing}</InfoBar>
     </Dialog>
   );
 }
@@ -97,13 +92,13 @@ export function BuildLogDialog({ path, logPath, open, onClose }: { path: string;
     setError(null);
     call('logs.buildLog', { projectPath: path, mac: macFor(path) ?? undefined, path: logPath }).then(
       (r) => setText(r.text),
-      (err) => setError(errorInfo(err).message),
+      (err) => setError(tidy(errorInfo(err).message)),
     );
   }, [open, logPath, path]);
   const shown = useMemo(() => {
     if (!text) return '';
     const lines = text.split('\n');
-    return lines.length > MAX_LINES ? `… ${lines.length - MAX_LINES} earlier lines not shown (save the log to see them all)\n${lines.slice(-MAX_LINES).join('\n')}` : text;
+    return lines.length > MAX_LINES ? `${t.buildLog.hidden(lines.length - MAX_LINES)}\n${lines.slice(-MAX_LINES).join('\n')}` : text;
   }, [text]);
   return (
     <Dialog
@@ -111,7 +106,7 @@ export function BuildLogDialog({ path, logPath, open, onClose }: { path: string;
       onClose={onClose}
       size="lg"
       className="log-dialog"
-      title="Build log"
+      title={t.buildLog.title}
       icon="document"
       footer={
         <>
@@ -120,28 +115,28 @@ export function BuildLogDialog({ path, logPath, open, onClose }: { path: string;
             disabled={!text}
             onClick={async () => {
               const saved = await window.capmac.invoke('app:save-text', { text: text ?? '', name: logPath?.split('/').pop() ?? 'build.log' });
-              if (saved) toast({ tone: 'success', title: 'Build log saved', body: saved });
+              if (saved) toast({ tone: 'success', title: t.buildLog.saved, body: saved });
             }}
           >
-            Save…
+            {t.common.saveMenu}
           </Button>
-          <Button icon="copy" disabled={!text} onClick={() => void navigator.clipboard.writeText(text ?? '').then(() => toast({ tone: 'success', title: 'Build log copied' }))}>
-            Copy
+          <Button icon="copy" disabled={!text} onClick={() => void navigator.clipboard.writeText(text ?? '').then(() => toast({ tone: 'success', title: t.buildLog.copied }))}>
+            {t.common.copy}
           </Button>
           <Button variant="accent" onClick={onClose}>
-            Close
+            {t.common.close}
           </Button>
         </>
       }
     >
       <p className="faint mono log-dialog__path selectable">{logPath}</p>
       {error ? (
-        <InfoBar tone="critical" title="Could not read the build log">
+        <InfoBar tone="critical" title={t.buildLog.readFailed}>
           {error}
         </InfoBar>
       ) : text === null ? (
         <div className="log-dialog__loading">
-          <Spinner size={20} /> Fetching the log from the Mac…
+          <Spinner size={20} /> {t.buildLog.loading}
         </div>
       ) : (
         <pre className="log-dialog__text selectable">{shown}</pre>

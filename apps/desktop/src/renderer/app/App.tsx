@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect } from 'react';
 import type { AppCommand } from '../../shared/contract';
+import { t } from '../../shared/i18n';
 import { useApp, usePrompts } from '../state/app';
 import { openProject, startSession, stopAll } from '../state/actions';
 import { setConsoleLimit } from '../state/console';
@@ -133,7 +134,7 @@ export function App() {
   return (
     <div className={`app${collapsed ? ' app--sidebar-collapsed' : ''}`}>
       <a className="skip-link" href="#main">
-        Skip to main content
+        {t.ui.skipToMain}
       </a>
       <TitleBar />
       <div className="app__body">
@@ -141,7 +142,7 @@ export function App() {
         <main id="main" className="layer" tabIndex={-1}>
           <EngineBanner />
           <UpdateBanner />
-          <ErrorBoundary label="This page">
+          <ErrorBoundary label={t.crash.parts.page}>
             <Suspense fallback={<div className="view-loading" />}>
               <View />
             </Suspense>

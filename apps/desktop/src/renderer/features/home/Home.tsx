@@ -6,7 +6,8 @@ import { call, errorInfo } from '../../state/engine';
 import { resolveMac, useMacs } from '../../state/macs';
 import { projectKey, useProjects } from '../../state/projects';
 import { isActive, isBusy, useRuns } from '../../state/runs';
-import { formatBytes, plural, timeAgo } from '../../lib/format';
+import { t } from '../../../shared/i18n';
+import { formatBytes, timeAgo } from '../../lib/format';
 import { AppIcon } from '../../ui/AppIcon';
 import { Button, IconButton } from '../../ui/Button';
 import { Badge, EmptyState, Skeleton, StatusDot } from '../../ui/Feedback';
@@ -38,21 +39,21 @@ function ProjectCard({ recent }: { recent: RecentProject }) {
     status = (
       <span className="project-card__status">
         <StatusDot tone={busy ? 'busy' : run?.mode === 'live' ? 'live' : 'ok'} pulse={busy || run?.mode === 'live'} />
-        {busy ? 'Building…' : run?.mode === 'live' ? 'Live' : 'Running'}
+        {busy ? t.home.building : run?.mode === 'live' ? t.common.live : t.home.running}
       </span>
     );
   } else if (run?.status === 'failed') {
     status = (
       <span className="project-card__status is-error">
         <StatusDot tone="error" />
-        Build failed
+        {t.home.buildFailed}
       </span>
     );
   }
 
   return (
     <article className={`project-card${missing ? ' is-missing' : ''}`} aria-label={name}>
-      <button type="button" className="project-card__open" onClick={() => (missing ? undefined : navigate({ name: 'project', path: recent.path }))} aria-label={`Open ${name}`} disabled={Boolean(missing)} />
+      <button type="button" className="project-card__open" onClick={() => (missing ? undefined : navigate({ name: 'project', path: recent.path }))} aria-label={t.home.openProject(name)} disabled={Boolean(missing)} />
       <div className="project-card__top">
         {summary || missing ? <AppIcon src={entry?.icon} name={name} seed={summary?.appId ?? recent.appId} size={44} /> : <Skeleton width={44} height={44} radius={10} />}
         <div className="project-card__ident">
@@ -63,14 +64,14 @@ function ProjectCard({ recent }: { recent: RecentProject }) {
       </div>
       {missing ? (
         <p className="project-card__missing">
-          <Icon name="warning" size={14} filled /> Folder not found or not a Capacitor app anymore.
+          <Icon name="warning" size={14} filled /> {t.home.missing}
         </p>
       ) : (
         <div className="project-card__meta">
-          {summary && <Badge>{summary.iosPackageManager === 'unknown' ? (summary.hasIos ? 'iOS' : 'No iOS platform') : summary.iosPackageManager}</Badge>}
+          {summary && <Badge>{summary.iosPackageManager === 'unknown' ? (summary.hasIos ? 'iOS' : t.home.noIos) : summary.iosPackageManager}</Badge>}
           {entry?.size ? (
             <span className="tabular">
-              {plural(entry.size.files, 'file')} · {formatBytes(entry.size.bytes)}
+              {t.count.files(entry.size.files)} · {formatBytes(entry.size.bytes)}
             </span>
           ) : (
             <Skeleton width={96} height={10} />
@@ -82,34 +83,34 @@ function ProjectCard({ recent }: { recent: RecentProject }) {
           {last ? (
             <>
               <Icon name={last.ok ? 'history' : 'errorCircle'} size={14} />
-              {last.ok ? `${last.mode === 'live' ? 'Live' : 'Ran'} ${timeAgo(last.at)}${last.target ? ` on ${last.target}` : ''}` : `Failed ${timeAgo(last.at)}`}
+              {last.ok ? t.home.lastRun(last.mode === 'live', timeAgo(last.at), last.target) : t.home.lastFailed(timeAgo(last.at))}
             </>
           ) : (
             <>
               <Icon name="clock" size={14} />
-              Not run yet
+              {t.home.notRun}
             </>
           )}
         </span>
         <div className="project-card__actions">
           {active ? (
-            <IconButton icon="stop" filled label="Stop" size="sm" onClick={() => void stopSession(recent.path)} />
+            <IconButton icon="stop" filled label={t.common.stop} size="sm" onClick={() => void stopSession(recent.path)} />
           ) : (
             <>
-              <IconButton icon="play" filled label="Run" size="sm" disabled={Boolean(missing)} onClick={() => void startSession(recent.path, 'run').then(() => navigate({ name: 'project', path: recent.path }))} />
-              <IconButton icon="flash" filled label="Live reload" size="sm" disabled={Boolean(missing)} onClick={() => void startSession(recent.path, 'live').then(() => navigate({ name: 'project', path: recent.path }))} />
+              <IconButton icon="play" filled label={t.common.run} size="sm" disabled={Boolean(missing)} onClick={() => void startSession(recent.path, 'run').then(() => navigate({ name: 'project', path: recent.path }))} />
+              <IconButton icon="flash" filled label={t.home.liveReload} size="sm" disabled={Boolean(missing)} onClick={() => void startSession(recent.path, 'live').then(() => navigate({ name: 'project', path: recent.path }))} />
             </>
           )}
-          <button type="button" className="icon-btn icon-btn--sm" aria-label={`More actions for ${name}`} aria-haspopup="menu" {...menu.triggerProps}>
+          <button type="button" className="icon-btn icon-btn--sm" aria-label={t.common.moreActionsFor(name)} aria-haspopup="menu" {...menu.triggerProps}>
             <Icon name="more" size={16} />
           </button>
           <Menu
             state={menu}
-            label={`${name} actions`}
+            label={t.common.actionsFor(name)}
             items={[
-              { id: 'folder', label: 'Open folder', icon: 'folderOpen', onSelect: () => void window.capmac.invoke('app:open-path', { path: recent.path }) },
-              { id: 'editor', label: 'Open in editor', icon: 'open', onSelect: () => void window.capmac.invoke('app:open-in-editor', { file: recent.path }) },
-              { id: 'forget', label: 'Remove from list', icon: 'delete', separatorBefore: true, onSelect: () => void forgetProject(recent.path) },
+              { id: 'folder', label: t.home.openFolder, icon: 'folderOpen', onSelect: () => void window.capmac.invoke('app:open-path', { path: recent.path }) },
+              { id: 'editor', label: t.home.openInEditor, icon: 'open', onSelect: () => void window.capmac.invoke('app:open-in-editor', { file: recent.path }) },
+              { id: 'forget', label: t.home.removeFromList, icon: 'delete', separatorBefore: true, onSelect: () => void forgetProject(recent.path) },
             ]}
           />
         </div>
@@ -147,13 +148,13 @@ function SampleButton({ variant = 'standard' }: { variant?: 'standard' | 'subtle
           // Without a Mac, open it: the workspace shows how to pair one.
           if ((await openProject(path)) && useMacs.getState().macs.length > 0) void startSession(path, 'run');
         } catch (err) {
-          toast({ tone: 'critical', title: 'Could not create the sample app', body: errorInfo(err).message });
+          toast({ tone: 'critical', title: t.home.sampleFailed, body: errorInfo(err).message });
         } finally {
           setBusy(false);
         }
       }}
     >
-      Try the sample app
+      {t.home.trySample}
     </Button>
   );
 }
@@ -167,14 +168,14 @@ export function Home() {
       <div className="page__inner">
         <header className="page__header">
           <div>
-            <h1 className="page__title">Projects</h1>
-            <p className="page__subtitle">{mac ? `Your Capacitor apps, built and run on ${mac.label}.` : 'Your Capacitor apps. Pair a Mac to build and run them.'}</p>
+            <h1 className="page__title">{t.home.title}</h1>
+            <p className="page__subtitle">{mac ? t.home.subtitle(mac.label) : t.home.subtitleNoMac}</p>
           </div>
           {recents.length > 0 && (
             <div className="page__actions">
               <SampleButton variant="subtle" />
               <Button variant="accent" icon="folderAdd" onClick={() => void pickProject()}>
-                Add project
+                {t.home.addProject}
               </Button>
             </div>
           )}
@@ -183,17 +184,17 @@ export function Home() {
           <div className="home-empty">
             <EmptyState
               art={<EmptyArt />}
-              title="Add your Capacitor app"
+              title={t.home.emptyTitle}
               actions={
                 <>
                   <Button variant="accent" icon="folderOpen" onClick={() => void pickProject()}>
-                    Choose a folder…
+                    {t.home.chooseFolder}
                   </Button>
                   <SampleButton />
                 </>
               }
             >
-              Pick the folder with your capacitor.config, or drop it anywhere on this window. CapMac syncs it to {mac?.label ?? 'your Mac'} and runs it on the iOS simulator.
+              {t.home.emptyBody}
             </EmptyState>
           </div>
         ) : (
@@ -203,8 +204,8 @@ export function Home() {
             ))}
             <button type="button" className="project-add" onClick={() => void pickProject()}>
               <Icon name="folderAdd" size={20} />
-              <span className="project-add__title">Add a Capacitor app</span>
-              <span className="project-add__hint">or drop its folder here</span>
+              <span className="project-add__title">{t.home.addCard}</span>
+              <span className="project-add__hint">{t.home.addCardHint}</span>
             </button>
           </div>
         )}

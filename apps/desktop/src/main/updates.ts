@@ -15,6 +15,7 @@ import path from 'node:path';
 import { app } from 'electron';
 import { autoUpdater, type ProgressInfo, type UpdateInfo as FeedUpdate } from 'electron-updater';
 import type { UpdateInfo, UpdateState } from '../shared/contract.js';
+import { t } from '../shared/i18n/index.js';
 import { describeUpdateError, feedUrl, notesUrl } from './update-text.js';
 
 declare const __RELEASE_NOTES_URL__: string;
@@ -55,7 +56,7 @@ export class Updates {
     const devConfig = process.env.CAPMAC_UPDATE_DEV_CONFIG;
     const config = app.isPackaged ? path.join(process.resourcesPath, 'app-update.yml') : devConfig ? path.resolve(devConfig) : null;
     if (!config || !existsSync(config)) {
-      this.set({ state: 'unavailable', reason: app.isPackaged ? 'This build of CapMac Studio has no update feed.' : 'Updates are off in development builds.' });
+      this.set({ state: 'unavailable', reason: app.isPackaged ? t.updates.noFeed : t.updates.devBuild });
       return;
     }
     this.feed = feedUrl(readFileSync(config, 'utf8'));

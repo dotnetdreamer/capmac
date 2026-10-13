@@ -1,3 +1,5 @@
+import { t } from '../../shared/i18n';
+
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
@@ -13,16 +15,12 @@ export function formatDuration(ms: number): string {
   return `${m} min ${String(s).padStart(2, '0')} s`;
 }
 
-export function plural(n: number, word: string, pluralWord = `${word}s`): string {
-  return `${n.toLocaleString('en-US')} ${n === 1 ? word : pluralWord}`;
-}
-
 const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
 
 export function timeAgo(ts: number, now = Date.now()): string {
   const s = Math.round((ts - now) / 1000);
   const abs = Math.abs(s);
-  if (abs < 45) return 'just now';
+  if (abs < 45) return t.time.justNow;
   if (abs < 45 * 60) return rtf.format(Math.round(s / 60), 'minute');
   if (abs < 22 * 3600) return rtf.format(Math.round(s / 3600), 'hour');
   if (abs < 6 * 86400) return rtf.format(Math.round(s / 86400), 'day');

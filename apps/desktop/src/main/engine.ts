@@ -2,6 +2,7 @@
 import { utilityProcess, type MessagePortMain, type UtilityProcess } from 'electron';
 import type { CallResult, EngineMethod, EngineStatus, Envelope, PromptRequest, PromptResponse } from '../shared/contract.js';
 import type { HostInit, HostSettings, HostToMain, MainToHost } from '../shared/host-protocol.js';
+import { t } from '../shared/i18n/index.js';
 
 export interface EngineHandlers {
   onEvents(batch: Envelope[]): void;
@@ -11,7 +12,7 @@ export interface EngineHandlers {
 
 const crashed = (message: string): CallResult<never> => ({
   ok: false,
-  error: { message, hint: 'CapMac Studio restarted its engine. Try again.', expected: true, code: 'ENGINE_CRASHED' },
+  error: { message, hint: t.engine.restartedHint, expected: true, code: 'ENGINE_CRASHED' },
 });
 
 export class EngineProcess {
@@ -64,12 +65,12 @@ export class EngineProcess {
     child.on('exit', (code) => {
       if (this.child !== child) return;
       this.child = null;
-      for (const resolve of this.pending.values()) resolve(crashed('The CapMac engine stopped unexpectedly.'));
+      for (const resolve of this.pending.values()) resolve(crashed(t.engine.stopped));
       this.pending.clear();
       this.shutdownResolve?.();
       if (this.stopping) return;
       const now = Date.now();
-      this.restarts = this.restarts.filter((t) => now - t < 60_000);
+      this.restarts = this.restarts.filter((at) => now - at < 60_000);
       const restarting = this.restarts.length < 5;
       console.error(`[engine] exited with code ${code}${restarting ? '; restarting' : ''}`);
       this.handlers.onStatus({ state: 'crashed', restarting });
@@ -87,7 +88,7 @@ export class EngineProcess {
 
   async call(method: EngineMethod, params: unknown): Promise<CallResult<unknown>> {
     await this.readyPromise;
-    if (!this.child) return crashed('The CapMac engine is not running.');
+    if (!this.child) return crashed(t.engine.notRunning);
     const id = this.nextId++;
     return new Promise((resolve) => {
       this.pending.set(id, resolve);

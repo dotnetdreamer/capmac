@@ -1,4 +1,5 @@
 import { forwardRef, useId, useState, type InputHTMLAttributes, type KeyboardEvent, type ReactNode } from 'react';
+import { t } from '../../shared/i18n';
 import { Icon, type IconName } from './Icon';
 import { Menu, usePopover } from './Popover';
 
@@ -44,7 +45,7 @@ export const PasswordField = forwardRef<HTMLInputElement, FieldProps>(function P
       autoComplete="off"
       {...props}
       trailing={
-        <button type="button" className="input__action" aria-label={reveal ? 'Hide password' : 'Show password'} aria-pressed={reveal} onClick={() => setReveal((r) => !r)}>
+        <button type="button" className="input__action" aria-label={reveal ? t.ui.hidePassword : t.ui.showPassword} aria-pressed={reveal} onClick={() => setReveal((r) => !r)}>
           <Icon name={reveal ? 'eyeOff' : 'eye'} size={16} />
         </button>
       }
@@ -62,17 +63,17 @@ export const SearchField = forwardRef<HTMLInputElement, InputHTMLAttributes<HTML
       <input ref={ref} type="search" value={value} spellCheck={false} {...rest} />
       {count !== undefined && value ? <span className="input__count tabular">{count}</span> : null}
       {onPrev && value ? (
-        <button type="button" className="input__action" aria-label="Previous match" onClick={onPrev}>
+        <button type="button" className="input__action" aria-label={t.ui.previousMatch} onClick={onPrev}>
           <Icon name="chevronUp" size={14} />
         </button>
       ) : null}
       {onNext && value ? (
-        <button type="button" className="input__action" aria-label="Next match" onClick={onNext}>
+        <button type="button" className="input__action" aria-label={t.ui.nextMatch} onClick={onNext}>
           <Icon name="chevronDown" size={14} />
         </button>
       ) : null}
       {onClear && value ? (
-        <button type="button" className="input__action" aria-label="Clear search" onClick={onClear}>
+        <button type="button" className="input__action" aria-label={t.ui.clearSearch} onClick={onClear}>
           <Icon name="dismiss" size={12} />
         </button>
       ) : null}
@@ -92,7 +93,7 @@ export function Switch({ checked, onChange, label, description, disabled }: { ch
         {description && <div className="switch-row__desc">{description}</div>}
       </div>
       <span className="switch-row__state" aria-hidden="true">
-        {checked ? 'On' : 'Off'}
+        {checked ? t.common.on : t.common.off}
       </span>
       <button id={id} type="button" role="switch" aria-checked={checked} disabled={disabled} className="switch" onClick={() => onChange(!checked)}>
         <span className="switch__thumb" />
@@ -106,7 +107,7 @@ export function Toggle({ checked, onChange, label, disabled, loading }: { checke
   return (
     <span className="toggle-control">
       <span className="toggle-control__state" aria-hidden="true">
-        {loading ? '…' : checked ? 'On' : 'Off'}
+        {loading ? '…' : checked ? t.common.on : t.common.off}
       </span>
       <button type="button" role="switch" aria-checked={checked} aria-label={label} className="switch" disabled={disabled} aria-busy={loading || undefined} onClick={() => onChange(!checked)}>
         <span className="switch__thumb" />

@@ -30,6 +30,7 @@ import { agentPath, cliDir, iconsDir, outDir, remoteModulesDir, sampleDir } from
 import { SettingsStore } from './settings.js';
 import { AppTray } from './tray.js';
 import { Updates } from './updates.js';
+import { t, tidy } from '../shared/i18n/index.js';
 import { sameOrigin } from '../shared/urls.js';
 import { APP_ORIGIN, createMainWindow, hardenSession, micaSupported, registerAppScheme, serveRenderer } from './window.js';
 
@@ -98,7 +99,7 @@ function command(cmd: AppCommand): void {
 }
 
 function projectName(projectPath: string | undefined): string {
-  if (!projectPath) return 'Your app';
+  if (!projectPath) return t.system.yourApp;
   const recent = settings.get().recentProjects.find((p) => p.path.toLowerCase() === projectPath.toLowerCase());
   return recent?.name ?? path.basename(projectPath);
 }
@@ -145,7 +146,7 @@ function onEngineEvents(batch: Envelope[]): void {
         if (!event.ok && event.error && scope.projectPath) {
           const name = projectName(scope.projectPath);
           settings.recordRun(scope.projectPath, { at: Date.now(), mode: event.mode === 'live' ? 'live' : 'run', ok: false, ms: event.ms });
-          notify(`${name}: ${event.mode === 'ipa' ? 'IPA export' : 'build'} failed`, event.error.message, () => command({ type: 'open-project', path: scope.projectPath! }));
+          notify(t.console.buildFailed(name, event.mode === 'ipa'), tidy(event.error.message), () => command({ type: 'open-project', path: scope.projectPath! }));
         }
         break;
       case 'app':
@@ -155,16 +156,16 @@ function onEngineEvents(batch: Envelope[]): void {
           if (scope.sessionId) launchedAt.delete(scope.sessionId);
           const mode = scope.sessionId ? running.get(scope.sessionId)?.mode : undefined;
           settings.recordRun(scope.projectPath, { at: Date.now(), mode: mode === 'live' ? 'live' : 'run', ok: true, target: event.target, ms });
-          notify(`${event.name ?? projectName(scope.projectPath)} is running`, `on ${event.target ?? 'the simulator'}${ms ? ` · ${(ms / 1000).toFixed(1)} s` : ''}`, () => command({ type: 'open-project', path: scope.projectPath! }));
+          notify(t.system.isRunning(event.name ?? projectName(scope.projectPath)), t.system.runningOn(event.target ?? t.common.theSimulator, ms ? (ms / 1000).toFixed(1) : undefined), () => command({ type: 'open-project', path: scope.projectPath! }));
         }
         break;
       case 'session':
         if (event.state === 'failed' && event.mode === 'live' && event.error && scope.projectPath) {
-          notify(`${projectName(scope.projectPath)}: rebuild failed`, event.error.message, () => command({ type: 'open-project', path: scope.projectPath! }));
+          notify(t.system.rebuildFailed(projectName(scope.projectPath)), tidy(event.error.message), () => command({ type: 'open-project', path: scope.projectPath! }));
         }
         break;
       case 'ipa-ready':
-        notify('IPA ready', path.basename(event.file), () => shell.showItemInFolder(event.file));
+        notify(t.ipa.ready, path.basename(event.file), () => shell.showItemInFolder(event.file));
         break;
       default:
         break;
@@ -230,7 +231,7 @@ function registerIpc(): void {
   handle('app:get-settings', () => settings.get());
   handle('app:set-settings', (patch) => settings.update(patch));
   handle('app:pick-folder', async () => {
-    const result = await dialog.showOpenDialog(win!, { title: 'Add a Capacitor app', properties: ['openDirectory'] });
+    const result = await dialog.showOpenDialog(win!, { title: t.system.pickFolder, properties: ['openDirectory'] });
     return result.canceled ? null : result.filePaths[0] ?? null;
   });
   handle('app:open-in-editor', ({ file, line, column }) => openInEditor(settings.get().editor, file, line, column));
@@ -247,7 +248,7 @@ function registerIpc(): void {
     return image.resize({ width: 128, height: 128, quality: 'best' }).toDataURL();
   });
   handle('app:save-image', async ({ data, name }) => {
-    const result = await dialog.showSaveDialog(win!, { title: 'Save screenshot', defaultPath: path.join(app.getPath('pictures'), name), filters: [{ name: 'PNG image', extensions: ['png'] }] });
+    const result = await dialog.showSaveDialog(win!, { title: t.system.saveScreenshot, defaultPath: path.join(app.getPath('pictures'), name), filters: [{ name: t.system.pngImage, extensions: ['png'] }] });
     if (result.canceled || !result.filePath) return null;
     await fs.writeFile(result.filePath, Buffer.from(data instanceof ArrayBuffer ? new Uint8Array(data) : data));
     return result.filePath;
@@ -257,7 +258,7 @@ function registerIpc(): void {
     await clipboard.write([new ClipboardItem({ 'image/png': new Blob([bytes], { type: 'image/png' }) })]);
   });
   handle('app:save-text', async ({ text, name }) => {
-    const result = await dialog.showSaveDialog(win!, { title: 'Export', defaultPath: path.join(app.getPath('documents'), name), filters: [{ name: 'Log file', extensions: ['log', 'txt'] }] });
+    const result = await dialog.showSaveDialog(win!, { title: t.system.saveLog, defaultPath: path.join(app.getPath('documents'), name), filters: [{ name: t.system.logFile, extensions: ['log', 'txt'] }] });
     if (result.canceled || !result.filePath) return null;
     await fs.writeFile(result.filePath, text);
     return result.filePath;
@@ -279,11 +280,11 @@ function registerIpc(): void {
   });
   handle('app:engine-call', async ({ method, params }) => {
     if (!Object.hasOwn(engineMethods, method) || (method === 'debug.dropConnection' && app.isPackaged)) {
-      return { ok: false, error: { message: `CapMac Studio does not know "${method}".`, expected: false } };
+      return { ok: false, error: { message: t.system.unknownRequest(method), expected: false } };
     }
     const parsed = engineMethods[method as EngineMethod].safeParse(params ?? {});
     if (!parsed.success) {
-      return { ok: false, error: { message: 'CapMac Studio sent an invalid request.', details: z.prettifyError(parsed.error).split('\n'), expected: false } };
+      return { ok: false, error: { message: t.system.badRequest, details: z.prettifyError(parsed.error).split('\n'), expected: false } };
     }
     return engine.call(method as EngineMethod, parsed.data);
   });
@@ -330,12 +331,12 @@ async function restartToUpdate(): Promise<void> {
     const names = [...running.values()].map((r) => projectName(r.projectPath)).join(', ');
     const options: Electron.MessageBoxOptions = {
       type: 'question',
-      buttons: ['Restart and update', 'Cancel'],
+      buttons: [t.updates.dialogRestart, t.common.cancel],
       defaultId: 1,
       cancelId: 1,
-      title: 'Update CapMac Studio',
-      message: `Restart into CapMac Studio ${version} now?`,
-      detail: `${names} stops. Otherwise the update installs when you quit CapMac Studio.`,
+      title: t.updates.dialogTitle,
+      message: t.updates.dialogMessage(version),
+      detail: t.updates.dialogDetail(names),
     };
     const { response } = await (win && !win.isDestroyed() ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options));
     if (response !== 0) return;
@@ -364,7 +365,7 @@ function openWindow(): BrowserWindow {
     w.hide();
     if (!settings.get().trayHintShown) {
       settings.update({ trayHintShown: true });
-      new Notification({ title: 'CapMac Studio is still running', body: 'Your app keeps running. Find CapMac Studio in the notification area to stop it or quit.', icon: path.join(iconsDir(), 'icon.png') }).show();
+      new Notification({ title: t.system.stillRunning, body: t.system.stillRunningBody, icon: path.join(iconsDir(), 'icon.png') }).show();
     }
   });
   w.on('closed', () => {

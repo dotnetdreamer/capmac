@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ErrorInfo, MacSummary } from '../../../shared/contract';
+import { t, tidy } from '../../../shared/i18n';
 import { emitWorkspace } from '../../app/commands';
 import { rebuild, relaunch, startSession } from '../../state/actions';
 import { isActive, isBusy, type RunState } from '../../state/runs';
@@ -33,47 +34,46 @@ function LiveCard({ path, run, mac }: { path: string; run: RunState; mac: MacSum
   const live = run.live!;
   const now = useTick(15_000, Boolean(live.hmrUpdatedAt));
   const busy = isBusy(run);
-  const hmrText = live.hmr === 'connected' ? (live.hmrUpdatedAt ? `updated ${clockTime(live.hmrUpdatedAt)}` : 'connected') : live.hmr === 'disconnected' ? 'not connected' : 'waiting for the app';
+  const hmrText = live.hmr === 'connected' ? (live.hmrUpdatedAt ? t.session.updatedAt(clockTime(live.hmrUpdatedAt)) : t.session.updatesReady) : live.hmr === 'disconnected' ? t.session.appNotConnected : t.session.waitingForApp;
   return (
-    <div className="session-bar session-bar--live" role="status" aria-label="Live reload">
+    <div className="session-bar session-bar--live" role="status" aria-label={t.session.liveLabel}>
       <span className="session-bar__mode">
         <Icon name="flash" size={14} filled />
-        Live
+        {t.common.live}
       </span>
       <span className="session-bar__route">
-        <Tooltip content={live.command ? `Dev server (${live.command})` : 'Your dev server'}>
+        <Tooltip content={t.session.devServer(live.command)}>
           <span className="session-bar__chip mono" tabIndex={0}>
             {live.devServerUrl ? hostOf(live.devServerUrl) : <Spinner size={12} />}
           </span>
         </Tooltip>
-        <span className={`session-bar__link${live.tunnel === 'up' ? ' is-up' : ''}`} aria-label={live.tunnel === 'up' ? 'tunnel up' : 'tunnel down'}>
+        <span className={`session-bar__link${live.tunnel === 'up' ? ' is-up' : ''}`} aria-label={live.tunnel === 'up' ? t.session.linkUp : t.session.linkDown}>
           <span className="session-bar__line" />
-          <span className="session-bar__tunnel">tunnel</span>
+          <span className="session-bar__tunnel">{t.session.link}</span>
           <span className="session-bar__line" />
         </span>
         <span className="session-bar__chip">
           <Icon name="mac" size={14} />
-          {mac?.label ?? 'Mac'}
+          {mac?.label ?? t.session.mac}
         </span>
       </span>
       <span className="session-bar__sep" />
-      <span className="session-bar__hmr" title={live.hmrUpdatedAt ? `Last update ${timeAgo(live.hmrUpdatedAt, now)}` : undefined}>
+      <span className="session-bar__hmr" title={live.hmrUpdatedAt ? t.session.lastUpdate(timeAgo(live.hmrUpdatedAt, now)) : undefined}>
         <StatusDot tone={live.hmr === 'connected' ? 'live' : live.hmr === 'disconnected' ? 'warn' : 'idle'} pulse={live.hmr === 'connected'} />
-        HMR {hmrText}
+        {hmrText}
       </span>
       {live.lastNativeChange && busy && (
         <span className="session-bar__native truncate">
           <Icon name="wrench" size={14} />
-          Native change: {live.lastNativeChange.paths[0]?.split('/').pop()}
-          {live.lastNativeChange.paths.length > 1 ? ` +${live.lastNativeChange.paths.length - 1}` : ''}
+          {t.session.nativeChange(live.lastNativeChange.paths[0]?.split('/').pop() ?? '', live.lastNativeChange.paths.length - 1)}
         </span>
       )}
       <span className="session-bar__spacer" />
       <Button size="sm" variant="subtle" icon="refresh" onClick={() => void relaunch(path)} disabled={busy}>
-        Relaunch
+        {t.session.restartApp}
       </Button>
       <Button size="sm" variant="subtle" icon="sync" onClick={() => void rebuild(path)} disabled={busy}>
-        Rebuild
+        {t.session.rebuild}
       </Button>
     </div>
   );
@@ -87,22 +87,22 @@ function RunCard({ run }: { run: RunState }) {
     <div className="session-bar" role="status">
       <span className="session-bar__mode session-bar__mode--run">
         <Icon name="play" size={14} filled />
-        Run
+        {t.common.run}
       </span>
       {busy ? (
         <span className="session-bar__text">
-          <Spinner size={14} /> Building and launching{run.target ? ` on ${run.target.name}` : ''}…
+          <Spinner size={14} /> {t.session.building(run.target?.name)}
         </span>
       ) : app?.state === 'running' ? (
         <span className="session-bar__text">
           <StatusDot tone="ok" />
-          {app.name} is running on {app.target} <span className="faint tabular">· {formatDuration(now - app.at)}</span>
+          {t.session.running(app.name ?? t.common.theApp, app.target ?? t.common.theSimulator)} <span className="faint tabular">· {formatDuration(now - app.at)}</span>
         </span>
       ) : (
-        <span className="session-bar__text muted">Starting…</span>
+        <span className="session-bar__text muted">{t.session.starting}</span>
       )}
       <span className="session-bar__spacer" />
-      <span className="faint">Logs stream into the console below</span>
+      <span className="faint">{t.session.logsBelow}</span>
     </div>
   );
 }
@@ -112,9 +112,9 @@ function RunCard({ run }: { run: RunState }) {
  * --verbose"); here the problems, the output and the build log are one click away.
  */
 function hintFor(error: ErrorInfo, run: RunState, errors: number): string | undefined {
-  if (error.code !== 'BUILD_FAILED') return error.hint;
-  if (errors > 0) return run.mode === 'live' ? 'Fix it and save: CapMac rebuilds as soon as the file changes.' : 'Fix it, then run again.';
-  return run.buildLogPath ? 'The output and the full build log show what went wrong.' : error.hint;
+  if (error.code !== 'BUILD_FAILED') return tidy(error.hint);
+  if (errors > 0) return run.mode === 'live' ? t.session.fixAndSave : t.session.fixAndRun;
+  return run.buildLogPath ? t.session.seeLog : tidy(error.hint);
 }
 
 function FailureCard({ path, run }: { path: string; run: RunState }) {
@@ -125,27 +125,27 @@ function FailureCard({ path, run }: { path: string; run: RunState }) {
     <div className="session-error">
       <InfoBar
         tone="critical"
-        title={error.message}
+        title={tidy(error.message)}
         live
         actions={
           <>
             {errors > 0 && (
               <Button size="sm" onClick={() => emitWorkspace('show-problems')}>
-                Show {errors === 1 ? 'problem' : `${errors} problems`}
+                {t.session.showProblems(errors)}
               </Button>
             )}
             {error.details?.length ? (
               <Button size="sm" variant="subtle" iconRight={details ? 'chevronUp' : 'chevronDown'} onClick={() => setDetails((d) => !d)} aria-expanded={details}>
-                Output
+                {t.session.output}
               </Button>
             ) : null}
             {run.buildLogPath && (
               <Button size="sm" variant="subtle" onClick={() => emitWorkspace('show-build-log')}>
-                Build log
+                {t.session.buildLog}
               </Button>
             )}
             <Button size="sm" variant="subtle" icon="refresh" onClick={() => void startSession(path, run.mode === 'live' ? 'live' : 'run')}>
-              Try again
+              {t.common.tryAgain}
             </Button>
           </>
         }
@@ -162,8 +162,8 @@ export function SessionBar({ path, run, mac }: { path: string; run: RunState | u
   if (mac && active && (mac.state === 'lost' || mac.state === 'reconnecting')) {
     return (
       <div className="session-banner">
-        <InfoBar tone="caution" title={`${mac.label} isn’t answering. It may be asleep.`} live actions={<Spinner size={16} label="Reconnecting" />}>
-          Reconnecting… CapMac restores the tunnel and relaunches the app when it’s back.{mac.error ? ` (${mac.error})` : ''}
+        <InfoBar tone="caution" title={t.session.notResponding(mac.label)} live actions={<Spinner size={16} label={t.common.reconnecting} />}>
+          {t.session.notRespondingBody}{mac.error ? ` (${tidy(mac.error)})` : ''}
         </InfoBar>
       </div>
     );
@@ -175,7 +175,7 @@ export function SessionBar({ path, run, mac }: { path: string; run: RunState | u
   if (mac && mac.state === 'restored' && active) {
     return (
       <div className="session-banner">
-        <InfoBar tone="success" title={`Reconnected to ${mac.label}`} live />
+        <InfoBar tone="success" title={t.session.reconnected(mac.label)} live />
       </div>
     );
   }

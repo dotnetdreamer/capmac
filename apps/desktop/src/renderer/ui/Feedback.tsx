@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { t } from '../../shared/i18n';
 import { Icon, type IconName } from './Icon';
 
 /** Fluent ProgressRing. */
@@ -57,7 +58,7 @@ export function InfoBar({ tone = 'info', title, children, actions, onDismiss, cl
       </div>
       {actions && <div className="infobar__actions">{actions}</div>}
       {onDismiss && (
-        <button type="button" className="icon-btn icon-btn--sm icon-btn--subtle" aria-label="Dismiss" onClick={onDismiss}>
+        <button type="button" className="icon-btn icon-btn--sm icon-btn--subtle" aria-label={t.common.dismiss} onClick={onDismiss}>
           <Icon name="dismiss" size={12} />
         </button>
       )}

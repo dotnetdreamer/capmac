@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { t } from '../../shared/i18n';
 import { isActive, useRuns } from '../state/runs';
 import { useUpdates } from '../state/updates';
 import { Button } from '../ui/Button';
@@ -18,23 +19,23 @@ export function UpdateBanner() {
     <div className="engine-banner">
       <InfoBar
         tone="info"
-        title={`CapMac Studio ${version} is ready`}
+        title={t.updateBanner.title(version)}
         live
         onDismiss={() => dismiss(version)}
         actions={
           <>
             {info.notesUrl && (
               <Button size="sm" variant="ghost" onClick={() => void window.capmac.invoke('app:open-external', { url: info.notesUrl! })}>
-                What’s new
+                {t.updateBanner.whatsNew}
               </Button>
             )}
             <Button size="sm" variant={busy ? 'standard' : 'accent'} icon="refresh" onClick={() => void install()}>
-              Restart to update
+              {t.updateBanner.restart}
             </Button>
           </>
         }
       >
-        {busy ? 'It installs when you quit CapMac Studio, so your running app keeps going.' : 'Restarting takes a few seconds.'}
+        {busy ? t.updateBanner.busy : t.updateBanner.idle}
       </InfoBar>
     </div>
   );

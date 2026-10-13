@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { Settings as SettingsShape, TakeoverInfo } from '../../../shared/contract';
+import { t, tidy } from '../../../shared/i18n';
 import { toast, useApp } from '../../state/app';
 import { signalUrlProblem } from '@capmac/core/shared/remote';
 import { errorInfo } from '../../state/engine';
@@ -9,6 +10,7 @@ import { AgentSkillsButton } from './AgentSkills';
 import { Button } from '../../ui/Button';
 import { Segmented, Select, TextField, Toggle } from '../../ui/Form';
 import { Icon, type IconName } from '../../ui/Icon';
+import { Rich } from '../../ui/Rich';
 import { UpdatesPanel } from './Updates';
 import './settings.css';
 
@@ -41,10 +43,10 @@ function TerminalCommands() {
     try {
       setInfo(await window.capmac.invoke('app:takeover-set', { on }));
       toast(on
-        ? { tone: 'success', title: 'Open a new terminal to use it', body: 'Restart VS Code too, so its terminals pick it up.' }
-        : { tone: 'info', title: 'Capacitor runs on this PC again', body: 'In every terminal, starting now.' });
+        ? { tone: 'success', title: t.settings.takeoverOn, body: t.settings.takeoverOnBody }
+        : { tone: 'info', title: t.settings.takeoverOff, body: t.settings.takeoverOffBody });
     } catch (err) {
-      toast({ tone: 'critical', title: on ? 'Could not turn it on' : 'Could not turn it off', body: errorInfo(err).message });
+      toast({ tone: 'critical', title: on ? t.settings.turnOnFailed : t.settings.turnOffFailed, body: tidy(errorInfo(err).message) });
     } finally {
       setBusy(false);
     }
@@ -52,22 +54,21 @@ function TerminalCommands() {
 
   return (
     <>
-      <h2 className="section-title">Terminal commands</h2>
+      <h2 className="section-title">{t.settings.terminal}</h2>
       <Row
         icon="console"
-        title={<>Run <code>npx cap run ios</code> on the Mac</>}
+        title={<Rich text={t.settings.takeover} />}
         description={
           <>
-            <code>npx cap run ios</code>, <code>ionic capacitor run ios -l</code>, <code>cap open ios</code> and <code>cap build ios</code> typed in any terminal build and
-            run on your Mac. Sync and Android stay on this PC. Set <code>CAPMAC_TAKEOVER=0</code> to skip it for one command.
-            {info?.on && !info.bundled && info.cli && <span className="settings-takeover__note">Runs the CapMac CLI at {info.cli}.</span>}
-            {info?.cliMissing && <span className="settings-takeover__note settings-takeover__note--warn">The CapMac CLI it used is gone: turn this off and on again.</span>}
+            <Rich text={t.settings.takeoverDesc} />
+            {info?.on && !info.bundled && info.cli && <span className="settings-takeover__note">{t.settings.takeoverCli(info.cli)}</span>}
+            {info?.cliMissing && <span className="settings-takeover__note settings-takeover__note--warn">{t.settings.takeoverCliMissing}</span>}
           </>
         }
       >
-        <Toggle label="Run Capacitor iOS commands on the Mac" checked={info?.on ?? false} loading={!info} disabled={!info || busy} onChange={(v) => void change(v)} />
+        <Toggle label={t.settings.takeoverLabel} checked={info?.on ?? false} loading={!info} disabled={!info || busy} onChange={(v) => void change(v)} />
       </Row>
-      <Row icon="sparkle" title="AI coding agents" description="Let Claude Code, Codex, Copilot, Cursor and other agents build, run and check your iOS app with CapMac, in all your projects or one.">
+      <Row icon="sparkle" title={t.settings.agents} description={t.settings.agentsDesc}>
         <AgentSkillsButton />
       </Row>
     </>
@@ -90,35 +91,37 @@ function RemoteAccessSettings() {
     const url = value.trim();
     const problem = url ? signalUrlProblem(url) : null;
     if (problem) {
-      setError(problem);
+      setError(tidy(problem));
       return;
     }
     setBusy(true);
     try {
       const next = await useRemote.getState().setServer(url || null);
       setValue(next.url ?? '');
-      toast(next.url ? { tone: 'success', title: 'Signaling server saved', body: 'Turn remote access on for a Mac in Macs.' } : { tone: 'info', title: 'Signaling server cleared' });
+      toast(next.url ? { tone: 'success', title: t.settings.serverSaved, body: t.settings.serverSavedBody } : { tone: 'info', title: t.settings.serverCleared });
     } catch (err) {
-      setError(errorInfo(err).message);
+      setError(tidy(errorInfo(err).message));
     } finally {
       setBusy(false);
     }
   };
   return (
     <>
-      <h2 className="section-title">Remote access</h2>
+      <h2 className="section-title">{t.settings.remote}</h2>
       <Row
         icon="globe"
-        title="Signaling server"
+        title={t.settings.server}
         description={
           <>
-            Your own server, which lets CapMac reach your Macs over the internet: peer to peer when the networks allow it, else through its relay. It never sees inside a connection.{' '}
-            <a href={DEPLOY_GUIDE_URL} onClick={(e) => {
-              e.preventDefault();
-              void window.capmac.invoke('app:open-external', { url: DEPLOY_GUIDE_URL });
-            }}>How to deploy it</a>
-            {fromEnvironment && <span className="settings-takeover__note">Set by the CAPMAC_SIGNAL_URL environment variable.</span>}
-            {server?.source === 'built-in' && <span className="settings-takeover__note">The server this build of CapMac Studio came with.</span>}
+            {t.settings.serverDesc}
+            <span className="settings-takeover__note">
+              <a href={DEPLOY_GUIDE_URL} onClick={(e) => {
+                e.preventDefault();
+                void window.capmac.invoke('app:open-external', { url: DEPLOY_GUIDE_URL });
+              }}>{t.remote.server.howTo}</a>
+            </span>
+            {fromEnvironment && <span className="settings-takeover__note"><Rich text={t.settings.serverFromEnv} /></span>}
+            {server?.source === 'built-in' && <span className="settings-takeover__note">{t.settings.serverBuiltIn}</span>}
           </>
         }
       >
@@ -130,8 +133,8 @@ function RemoteAccessSettings() {
           }}
         >
           <TextField
-            aria-label="Signaling server"
-            placeholder="wss://signal.example.com"
+            aria-label={t.settings.server}
+            placeholder={t.remote.server.placeholder}
             value={value}
             disabled={fromEnvironment || busy}
             error={error}
@@ -141,7 +144,7 @@ function RemoteAccessSettings() {
             }}
           />
           <Button type="submit" disabled={!dirty || fromEnvironment} busy={busy}>
-            Save
+            {t.common.save}
           </Button>
         </form>
       </Row>
@@ -161,53 +164,49 @@ export function Settings() {
       <div className="page__inner settings">
         <header className="page__header">
           <div>
-            <h1 className="page__title">Settings</h1>
+            <h1 className="page__title">{t.settings.title}</h1>
           </div>
         </header>
 
-        <h2 className="section-title">Appearance</h2>
-        <Row icon="theme" title="Theme" description="Follow Windows, or always light or dark.">
+        <h2 className="section-title">{t.settings.appearance}</h2>
+        <Row icon="theme" title={t.settings.theme} description={t.settings.themeDesc}>
           <Segmented
-            label="Theme"
+            label={t.settings.theme}
             value={settings.theme}
             onChange={set('theme')}
             options={[
-              { value: 'system', label: 'System', icon: 'desktop' },
-              { value: 'light', label: 'Light', icon: 'sun' },
-              { value: 'dark', label: 'Dark', icon: 'moon' },
+              { value: 'system', label: t.settings.themes.system, icon: 'desktop' },
+              { value: 'light', label: t.settings.themes.light, icon: 'sun' },
+              { value: 'dark', label: t.settings.themes.dark, icon: 'moon' },
             ]}
           />
         </Row>
-        <Row icon="phone" title="Device frame" description="Draw a phone bezel around the simulator screen.">
-          <Toggle label="Device frame" checked={settings.deviceFrame} onChange={set('deviceFrame')} />
+        <Row icon="phone" title={t.settings.frame} description={t.settings.frameDesc}>
+          <Toggle label={t.settings.frame} checked={settings.deviceFrame} onChange={set('deviceFrame')} />
         </Row>
-        <Row
-          icon="flash"
-          title="Simulator stream"
-          description="Smooth streams the screen as video, up to 60 frames a second. Compatible sends a few screenshots a second; CapMac switches to it by itself when the smooth stream can’t run."
-        >
+        <Row icon="flash" title={t.settings.stream} description={t.settings.streamDesc}>
           <Segmented
-            label="Simulator stream"
+            label={t.settings.stream}
             value={settings.simulatorStream}
             onChange={set('simulatorStream')}
             options={[
-              { value: 'smooth', label: 'Smooth' },
-              { value: 'compatible', label: 'Compatible' },
+              { value: 'smooth', label: t.settings.streams.smooth },
+              { value: 'compatible', label: t.settings.streams.compatible },
             ]}
           />
         </Row>
 
-        <h2 className="section-title">Editor</h2>
-        <Row icon="code" title="Open problems in" description="Clicking a build error opens the file at the right line.">
+        <h2 className="section-title">{t.settings.editorSection}</h2>
+        <Row icon="code" title={t.settings.editor} description={t.settings.editorDesc}>
           <Select
-            label="Editor"
+            label={t.settings.editorLabel}
             value={settings.editor}
             onChange={set('editor')}
             width={200}
             options={[
-              { value: 'vscode', label: 'Visual Studio Code' },
-              { value: 'cursor', label: 'Cursor' },
-              { value: 'system', label: 'Default app' },
+              { value: 'vscode', label: t.settings.editors.vscode },
+              { value: 'cursor', label: t.settings.editors.cursor },
+              { value: 'system', label: t.settings.editors.system },
             ]}
           />
         </Row>
@@ -216,69 +215,64 @@ export function Settings() {
 
         <RemoteAccessSettings />
 
-        <h2 className="section-title">Console</h2>
-        <Row icon="console" title="Line limit" description="Older lines are dropped beyond this; memory stays bounded.">
+        <h2 className="section-title">{t.settings.consoleSection}</h2>
+        <Row icon="console" title={t.settings.lineLimit} description={t.settings.lineLimitDesc}>
           <Select
-            label="Line limit"
+            label={t.settings.lineLimit}
             value={String(settings.consoleLimit)}
             onChange={(v) => set('consoleLimit')(Number(v))}
             width={160}
-            options={[
-              { value: '50000', label: '50,000 lines' },
-              { value: '100000', label: '100,000 lines' },
-              { value: '200000', label: '200,000 lines' },
-              { value: '500000', label: '500,000 lines' },
-            ]}
+            options={[50_000, 100_000, 200_000, 500_000].map((n) => ({ value: String(n), label: t.settings.lineCount(n) }))}
           />
         </Row>
-        <Row icon="clock" title="Timestamps" description="Show when each line arrived.">
-          <Toggle label="Timestamps" checked={settings.consoleTimestamps} onChange={set('consoleTimestamps')} />
+        <Row icon="clock" title={t.settings.timestamps} description={t.settings.timestampsDesc}>
+          <Toggle label={t.settings.timestamps} checked={settings.consoleTimestamps} onChange={set('consoleTimestamps')} />
         </Row>
-        <Row icon="text" title="Wrap long lines">
-          <Toggle label="Wrap long lines" checked={settings.consoleWrap} onChange={set('consoleWrap')} />
+        <Row icon="text" title={t.settings.wrap}>
+          <Toggle label={t.settings.wrap} checked={settings.consoleWrap} onChange={set('consoleWrap')} />
         </Row>
-        <Row icon="document" title="System logs" description="Also show NSLog and os_log output, like Xcode’s console. Applies to the next run.">
-          <Toggle label="System logs" checked={settings.osLogs} onChange={set('osLogs')} />
-        </Row>
-
-        <h2 className="section-title">Builds</h2>
-        <Row icon="warning" title="Warnings from dependencies" description="Show warnings from Pods, Swift packages and node_modules in Problems.">
-          <Toggle label="Warnings from dependencies" checked={settings.dependencyWarnings} onChange={set('dependencyWarnings')} />
-        </Row>
-        <Row icon="braces" title="Full tool output" description="Stream raw xcodebuild and npm output into the console (verbose).">
-          <Toggle label="Full tool output" checked={settings.verbose} onChange={set('verbose')} />
+        <Row icon="document" title={t.settings.systemLogs} description={t.settings.systemLogsDesc}>
+          <Toggle label={t.settings.systemLogs} checked={settings.osLogs} onChange={set('osLogs')} />
         </Row>
 
-        <h2 className="section-title">Behaviour</h2>
-        <Row icon="info" title="Notifications" description="Tell me when a build finishes or fails while CapMac Studio is in the background.">
-          <Toggle label="Notifications" checked={settings.notifications} onChange={set('notifications')} />
+        <h2 className="section-title">{t.settings.builds}</h2>
+        <Row icon="warning" title={t.settings.depWarnings} description={t.settings.depWarningsDesc}>
+          <Toggle label={t.settings.depWarnings} checked={settings.dependencyWarnings} onChange={set('dependencyWarnings')} />
         </Row>
-        <Row icon="pin" title="Keep running in the tray" description="Closing the window during a session keeps your app running; quit from the tray icon.">
-          <Toggle label="Keep running in the tray" checked={settings.keepInTray} onChange={set('keepInTray')} />
+        <Row icon="braces" title={t.settings.verbose} description={t.settings.verboseDesc}>
+          <Toggle label={t.settings.verbose} checked={settings.verbose} onChange={set('verbose')} />
         </Row>
 
-        <h2 className="section-title">About</h2>
+        <h2 className="section-title">{t.settings.general}</h2>
+        <Row icon="info" title={t.settings.notifications} description={t.settings.notificationsDesc}>
+          <Toggle label={t.settings.notifications} checked={settings.notifications} onChange={set('notifications')} />
+        </Row>
+        <Row icon="pin" title={t.settings.tray} description={t.settings.trayDesc}>
+          <Toggle label={t.settings.tray} checked={settings.keepInTray} onChange={set('keepInTray')} />
+        </Row>
+
+        <h2 className="section-title">{t.settings.about}</h2>
         <div className="settings-card settings-about">
           <div className="settings-about__grid">
-            <span>CapMac Studio</span>
+            <span>{t.settings.aboutRows.studio}</span>
             <strong className="tabular">{info?.version}</strong>
-            <span>Mac agent</span>
+            <span>{t.settings.aboutRows.agent}</span>
             <strong className="tabular">{info?.agent}</strong>
-            <span>Electron</span>
+            <span>{t.settings.aboutRows.electron}</span>
             <strong className="tabular">{info?.electron}</strong>
-            <span>Chromium</span>
+            <span>{t.settings.aboutRows.chromium}</span>
             <strong className="tabular">{info?.chrome}</strong>
-            <span>Node.js</span>
+            <span>{t.settings.aboutRows.node}</span>
             <strong className="tabular">{info?.node}</strong>
-            <span>Windows</span>
+            <span>{t.settings.aboutRows.windows}</span>
             <strong className="tabular">{info?.osRelease}</strong>
           </div>
           <UpdatesPanel />
           <div className="settings-about__actions">
             <Button icon="folderOpen" onClick={() => info && void window.capmac.invoke('app:open-path', { path: info.configDir })}>
-              Open CapMac folder
+              {t.settings.openFolder}
             </Button>
-            <span className="faint">Paired Macs and CapMac’s SSH key are shared with the CapMac CLI.</span>
+            <span className="faint">{t.settings.sharedNote}</span>
           </div>
         </div>
       </div>

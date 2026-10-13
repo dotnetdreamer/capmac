@@ -1,5 +1,6 @@
 /** What the UI (buttons, palette, tray, shortcuts) can do. */
 import type { ErrorInfo } from '../../shared/contract';
+import { t, tidy } from '../../shared/i18n';
 import { toast, useApp, useToasts } from './app';
 import { call, errorInfo } from './engine';
 import { resolveMac, useMacs } from './macs';
@@ -23,6 +24,11 @@ export function macFor(path: string): string | null {
   return resolveMac(useMacs.getState().macs, projectPrefs(path).mac ?? summary?.host)?.name ?? null;
 }
 
+/** An error's message and hint, as one line for a toast. */
+export function both(e: { message: string; hint?: string }): string {
+  return e.hint ? `${tidy(e.message)}. ${tidy(e.hint)}` : tidy(e.message);
+}
+
 function failStart(path: string, error: ErrorInfo): void {
   const key = projectKey(path);
   const run = useRuns.getState().byKey[key] ?? emptyRun(path);
@@ -34,7 +40,7 @@ export async function openProject(path: string): Promise<boolean> {
   const summary = await useProjects.getState().inspect(path, true);
   if (!summary) {
     const error = useProjects.getState().byKey[projectKey(path)]?.error;
-    toast({ tone: 'critical', title: 'That folder is not a Capacitor app', body: error?.hint ? `${error.message} ${error.hint}` : error?.message ?? 'No capacitor.config.* found in it or its parents.' });
+    toast({ tone: 'critical', title: t.actions.notCapacitor, body: error ? both(error) : t.actions.notCapacitorBody });
     return false;
   }
   await window.capmac.invoke('app:project-opened', { path: summary.path, name: summary.appName, appId: summary.appId });
@@ -53,10 +59,10 @@ export async function startSession(path: string, mode: 'run' | 'live', options: 
   if (!mac) {
     if (useMacs.getState().macs.length === 0) {
       // Nothing failed: there is just no Mac yet. The workspace already says so.
-      toast({ tone: 'info', title: 'Pair a Mac first', body: 'CapMac Studio builds and runs your app with Xcode on a Mac.', action: { label: 'Pair a Mac', run: () => useApp.getState().navigate({ name: 'onboarding' }) } });
+      toast({ tone: 'info', title: t.actions.pairFirst, body: t.actions.pairFirstBody, action: { label: t.common.pairMac, run: () => useApp.getState().navigate({ name: 'onboarding' }) } });
       return;
     }
-    failStart(path, { message: 'No Mac is selected for this project.', hint: 'Pick a Mac in the toolbar.', expected: true });
+    failStart(path, { message: t.actions.noMacSelected, hint: t.actions.noMacSelectedHint, expected: true });
     return;
   }
   const settings = useApp.getState().settings;
@@ -80,7 +86,7 @@ export async function stopAll(): Promise<void> {
 export async function rebuild(path: string, clean = false): Promise<void> {
   const run = useRuns.getState().byKey[projectKey(path)];
   if (run?.sessionId && run.mode === 'live') {
-    await call('sessions.rebuild', { sessionId: run.sessionId, clean }).catch((err) => toast({ tone: 'critical', title: 'Could not rebuild', body: errorInfo(err).message }));
+    await call('sessions.rebuild', { sessionId: run.sessionId, clean }).catch((err) => toast({ tone: 'critical', title: t.actions.rebuildFailed, body: tidy(errorInfo(err).message) }));
   } else {
     await startSession(path, run?.mode === 'live' ? 'live' : 'run', { clean });
   }
@@ -93,13 +99,12 @@ export async function relaunch(path: string): Promise<void> {
 }
 
 export async function openInXcode(path: string): Promise<void> {
-  const id = toast({ tone: 'info', title: 'Opening in Xcode on the Mac…', timeout: 0 });
+  const id = toast({ tone: 'info', title: t.actions.openingXcode, timeout: 0 });
   try {
     await call('xcode.open', { projectPath: path, mac: macFor(path) ?? undefined });
-    toast({ tone: 'success', title: 'Opened in Xcode', body: 'It’s on the Mac’s screen.' });
+    toast({ tone: 'success', title: t.actions.xcodeOpened, body: t.actions.xcodeOpenedBody });
   } catch (err) {
-    const e = errorInfo(err);
-    toast({ tone: 'critical', title: 'Could not open Xcode', body: e.hint ? `${e.message} ${e.hint}` : e.message });
+    toast({ tone: 'critical', title: t.actions.xcodeFailed, body: both(errorInfo(err)) });
   } finally {
     useToasts.getState().dismiss(id);
   }
@@ -109,7 +114,7 @@ export async function openInEditor(file: string, line?: number, column?: number)
   try {
     await window.capmac.invoke('app:open-in-editor', { file, line, column });
   } catch (err) {
-    toast({ tone: 'critical', title: 'Could not open the file', body: errorInfo(err).message });
+    toast({ tone: 'critical', title: t.actions.fileFailed, body: tidy(errorInfo(err).message) });
   }
 }
 

@@ -77,6 +77,7 @@ import {
   type ScreenPortMessage,
 } from '../shared/contract.js';
 import type { HostInit, HostSettings, HostToMain, MainToHost } from '../shared/host-protocol.js';
+import { t } from '../shared/i18n/index.js';
 
 const parent = process.parentPort;
 let init: HostInit | null = null;
@@ -165,7 +166,7 @@ function link(name: string): MacLink {
 
 async function hostConfig(name: string): Promise<HostConfig> {
   const host = resolveHost(await loadGlobalConfig(), name);
-  if (!host) throw new UserError(`No paired Mac called "${name}".`, 'Pair it again from Macs › Pair a Mac.');
+  if (!host) throw new UserError(t.host.noSuchMac(name), t.host.pairAgain);
   return host;
 }
 
@@ -173,8 +174,8 @@ async function defaultMacName(): Promise<string> {
   const config = await loadGlobalConfig();
   const host = resolveHost(config);
   if (!host) {
-    if (Object.keys(config.hosts).length === 0) throw new UserError('No Mac is paired yet.', 'Pair your Mac first: Macs › Pair a Mac.');
-    throw new UserError('Several Macs are paired and none is the default.', 'Pick one in the toolbar, or make one the default in Macs.');
+    if (Object.keys(config.hosts).length === 0) throw new UserError(t.host.noMacYet, t.host.pairOneInMacs);
+    throw new UserError(t.host.noDefault, t.host.noDefaultHint);
   }
   return host.name;
 }
@@ -202,7 +203,7 @@ function summarize(host: HostConfig, defaultHost: string | undefined): MacSummar
 async function summaryOf(name: string): Promise<MacSummary> {
   const config = await loadGlobalConfig();
   const host = resolveHost(config, name);
-  if (!host) throw new UserError(`No paired Mac called "${name}".`);
+  if (!host) throw new UserError(t.host.noSuchMac(name));
   return summarize(host, config.defaultHost);
 }
 
@@ -229,7 +230,7 @@ async function health(name: string, projectPath?: string): Promise<HealthReport>
   const project = projectPath ? await loadProject(projectPath).catch(() => null) : null;
   const nodeVersion = await pcNodeVersion();
   const pc: Check[] = localChecks(project, host, nodeVersion ?? 'v0.0.0').map((c) =>
-    c.id === 'pc-node' && !nodeVersion ? { ...c, level: 'warn', label: 'Node.js on this PC', detail: 'not found', fix: 'Install Node.js 20+ (https://nodejs.org): building your web app and live reload need it.' } : c);
+    c.id === 'pc-node' && !nodeVersion ? { ...c, level: 'warn', label: t.host.pcNode, detail: t.host.notFound, fix: t.host.pcNodeFix } : c);
   for (const check of pc) emit(scope, { type: 'check', check });
   const l = link(name);
   const started = Date.now();
@@ -238,7 +239,7 @@ async function health(name: string, projectPath?: string): Promise<HealthReport>
     session = await l.session();
   } catch (err) {
     const info = toErrorInfo(err);
-    const check: Check = { id: 'connect', group: 'mac', level: 'fail', label: `Connect to ${host.macName ?? host.host}`, detail: info.message, fix: info.hint ?? 'Check that the Mac is awake and Remote Login is on.' };
+    const check: Check = { id: 'connect', group: 'mac', level: 'fail', label: t.host.connectTo(host.macName ?? host.host), detail: info.message, fix: info.hint ?? t.host.connectFix };
     emit(scope, { type: 'check', check });
     return { mac: name, checks: [...pc, check], probe: null, latencyMs: null };
   }
@@ -285,8 +286,8 @@ function unwatchTargets(watchId: string): void {
 async function findTarget(mac: string, udid: string): Promise<Target> {
   const known = watches.get(mac)?.watch.latest;
   const all = known ?? (await (await link(mac).session()).call<TargetsResult>('targets'));
-  const target = [...all.simulators, ...all.devices].find((t) => t.udid === udid);
-  if (!target) throw new UserError('That simulator or device is no longer available on the Mac.', 'Pick another one in the target list.');
+  const target = [...all.simulators, ...all.devices].find((item) => item.udid === udid);
+  if (!target) throw new UserError(t.host.targetGone, t.host.targetGoneHint);
   return target;
 }
 
@@ -513,7 +514,7 @@ function closeScreen(streamId: string): void {
 const SAMPLE_SKIP = new Set(['node_modules', '.git', 'build', 'DerivedData', 'Pods', 'xcuserdata']);
 
 async function createSample(): Promise<{ path: string }> {
-  if (!init?.sampleDir || !existsSync(init.sampleDir)) throw new UserError('The sample app is not included in this build of CapMac Studio.');
+  if (!init?.sampleDir || !existsSync(init.sampleDir)) throw new UserError(t.host.noSample);
   const target = path.join(init.samplesHome, 'Hello CapMac');
   if (!existsSync(path.join(target, 'capacitor.config.json'))) {
     await fs.mkdir(init.samplesHome, { recursive: true });
@@ -601,12 +602,12 @@ const handlers: Handlers = {
   'sessions.stop': ({ sessionId }) => stopSession(sessionId),
   'sessions.rebuild': async ({ sessionId, clean }) => {
     const live = sessions.get(sessionId)?.live;
-    if (!live) throw new UserError('Live mode is not running for this project.');
+    if (!live) throw new UserError(t.host.liveNotRunning);
     live.rebuild({ clean });
   },
   'sessions.relaunch': async ({ sessionId }) => {
     const live = sessions.get(sessionId)?.live;
-    if (!live) throw new UserError('Live mode is not running for this project.');
+    if (!live) throw new UserError(t.host.liveNotRunning);
     live.relaunch();
   },
   'builds.ipa': (params) => startSession({ ...params, mode: 'ipa' }),

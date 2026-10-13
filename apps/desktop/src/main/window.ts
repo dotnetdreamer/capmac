@@ -3,6 +3,7 @@ import { promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, nativeTheme, protocol, screen, session } from 'electron';
+import { t } from '../shared/i18n/index.js';
 import { sameOrigin } from '../shared/urls.js';
 import { rendererDir } from './paths.js';
 
@@ -153,7 +154,7 @@ export function createMainWindow(options: { preload: string; url: string; icon: 
     minWidth: 900,
     minHeight: 600,
     show: false,
-    title: 'CapMac Studio',
+    title: t.titleBar.app,
     icon: options.icon,
     titleBarStyle: 'hidden',
     titleBarOverlay: titleBarOverlay(),

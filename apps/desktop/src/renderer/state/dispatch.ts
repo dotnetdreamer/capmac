@@ -1,5 +1,6 @@
 /** Routes engine event batches to the stores that show them. */
 import type { Envelope } from '../../shared/contract';
+import { t, tidy } from '../../shared/i18n';
 import { toast, useApp } from './app';
 import { consoleFor, type ConsoleLevel } from './console';
 import { useMacs, useTargets } from './macs';
@@ -49,27 +50,27 @@ export function handleBatch(batch: Envelope[]): void {
           if (!event.error.cancelled) buffer.pushText('capmac', event.error.hint ? `${event.error.message} → ${event.error.hint}` : event.error.message, 'error');
           break;
         case 'native-change':
-          buffer.pushText('capmac', `Native change (${event.paths.slice(0, 3).join(', ')}${event.paths.length > 3 ? ` +${event.paths.length - 3}` : ''}): rebuilding`, 'info');
+          buffer.pushText('capmac', t.console.nativeChange(event.paths.slice(0, 3).join(', '), Math.max(0, event.paths.length - 3)), 'info');
           break;
         case 'session-started':
-          buffer.pushText('capmac', event.mode === 'live' ? 'Live reload started' : event.mode === 'ipa' ? 'Building an .ipa' : 'Run started', 'info');
+          buffer.pushText('capmac', event.mode === 'live' ? t.console.liveStarted : event.mode === 'ipa' ? t.console.ipaStarted : t.console.runStarted, 'info');
           break;
         case 'app':
-          if (event.state === 'running') buffer.pushText('capmac', `${event.name ?? 'The app'} is running on ${event.target ?? 'the simulator'}`, 'info');
-          if (event.state === 'exited') buffer.pushText('capmac', `The app exited${event.exitCode !== null && event.exitCode !== undefined ? ` (code ${event.exitCode})` : ''}`, 'info');
+          if (event.state === 'running') buffer.pushText('capmac', t.console.appRunning(event.name ?? t.common.theApp, event.target ?? t.common.theSimulator), 'info');
+          if (event.state === 'exited') buffer.pushText('capmac', t.console.appExited(event.exitCode), 'info');
           break;
         case 'session-ended':
           if (!event.ok && event.error) {
             buffer.pushText('capmac', event.error.hint ? `${event.error.message} → ${event.error.hint}` : event.error.message, 'error');
             if (!showsProject(scope.projectPath)) {
               const path = scope.projectPath;
-              toast({ tone: 'critical', title: `${projectName(path)}: ${event.mode === 'ipa' ? 'export' : 'build'} failed`, body: event.error.message, action: { label: 'Open', run: () => useApp.getState().navigate({ name: 'project', path }) } });
+              toast({ tone: 'critical', title: t.console.buildFailed(projectName(path), event.mode === 'ipa'), body: tidy(event.error.message), action: { label: t.common.open, run: () => useApp.getState().navigate({ name: 'project', path }) } });
             }
           }
           break;
         case 'ipa-ready': {
           const file = event.file;
-          toast({ tone: 'success', title: 'IPA ready', body: file.split(/[\\/]/).pop(), action: { label: 'Show in folder', run: () => void window.capmac.invoke('app:show-in-folder', { path: file }) }, timeout: 0 });
+          toast({ tone: 'success', title: t.ipa.ready, body: file.split(/[\\/]/).pop(), action: { label: t.common.showInFolder, run: () => void window.capmac.invoke('app:show-in-folder', { path: file }) }, timeout: 0 });
           break;
         }
         default:

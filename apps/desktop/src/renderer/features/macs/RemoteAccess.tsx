@@ -1,8 +1,9 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { shortKey, signalUrlProblem } from '@capmac/core/shared/remote';
 import type { MacSummary, RelayChoice, RouteChoice } from '../../../shared/contract';
+import { t, tidy } from '../../../shared/i18n';
 import { timeAgo } from '../../lib/format';
-import { RELAY_HINT, RELAY_LABEL, revokePc, ROUTE_HINT, ROUTE_LABEL, routeText, setOptions, testConnection, turnOff, turnOn, useRemote } from '../../state/remote';
+import { revokePc, setOptions, testConnection, turnOff, turnOn, useRemote } from '../../state/remote';
 import { Button } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { Badge, Spinner } from '../../ui/Feedback';
@@ -28,7 +29,7 @@ export function ServerDialog({ open, onClose, onSaved }: { open: boolean; onClos
   const save = async () => {
     const problem = signalUrlProblem(value);
     if (problem) {
-      setError(problem);
+      setError(tidy(problem));
       return;
     }
     setBusy(true);
@@ -36,7 +37,7 @@ export function ServerDialog({ open, onClose, onSaved }: { open: boolean; onClos
       const saved = await useRemote.getState().setServer(value.trim());
       if (saved.url) onSaved(saved.url);
     } catch (err) {
-      setError((err as Error).message);
+      setError(tidy((err as Error).message));
     } finally {
       setBusy(false);
     }
@@ -46,29 +47,29 @@ export function ServerDialog({ open, onClose, onSaved }: { open: boolean; onClos
       open={open}
       size="sm"
       icon="globe"
-      title="Your signaling server"
+      title={t.remote.server.title}
       onClose={onClose}
       onSubmit={() => void save()}
       footer={
         <>
           <Button type="submit" variant="accent" busy={busy}>
-            Continue
+            {t.common.continue}
           </Button>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={onClose}>{t.common.cancel}</Button>
         </>
       }
     >
+      <p>{t.remote.server.body}</p>
       <p>
-        Remote access goes through a small server of your own: it introduces this PC to the Mac, and relays the connection when the two networks can’t connect directly. It never sees inside the connection.{' '}
         <a href={DEPLOY_GUIDE_URL} onClick={(e) => {
           e.preventDefault();
           void window.capmac.invoke('app:open-external', { url: DEPLOY_GUIDE_URL });
-        }}>How to deploy it</a>
+        }}>{t.remote.server.howTo}</a>
       </p>
-      <TextField label="Server address" placeholder="wss://signal.example.com" value={value} onChange={(e) => {
+      <TextField label={t.remote.server.address} placeholder={t.remote.server.placeholder} value={value} onChange={(e) => {
         setValue(e.target.value);
         setError(null);
-      }} error={error} hint="CapMac remembers it (Settings › Remote access)." data-autofocus />
+      }} error={error} hint={t.remote.server.hint} data-autofocus />
     </Dialog>
   );
 }
@@ -81,14 +82,14 @@ function PcsDialog({ mac, open, onClose }: { mac: MacSummary; open: boolean; onC
   }, [open, mac.name]);
   const pcs = entry?.report?.pcs ?? [];
   return (
-    <Dialog open={open} size="md" icon="key" title={`PCs that can reach ${mac.label}`} onClose={onClose} footer={<Button onClick={onClose} data-autofocus>Close</Button>}>
-      <p className="faint">Each PC has its own key. Remove one you no longer use: it can no longer reach the Mac over the internet (on the Mac’s network, SSH still works).</p>
+    <Dialog open={open} size="md" icon="key" title={t.remote.pcsTitle(mac.label)} onClose={onClose} footer={<Button onClick={onClose} data-autofocus>{t.common.close}</Button>}>
+      <p className="faint">{t.remote.pcsBody}</p>
       {entry?.status === 'loading' && !entry.report ? (
         <div className="mac-remote__loading">
-          <Spinner size={16} /> Asking the Mac…
+          <Spinner size={16} /> {t.common.askingMac}
         </div>
       ) : entry?.status === 'error' ? (
-        <p className="mac-remote__warn">{entry.error?.message}</p>
+        <p className="mac-remote__warn">{tidy(entry.error?.message)}</p>
       ) : (
         <ul className="mac-remote__pcs">
           {pcs.map((pc) => (
@@ -97,10 +98,10 @@ function PcsDialog({ mac, open, onClose }: { mac: MacSummary; open: boolean; onC
               <div className="mac-remote__pc">
                 <div className="mac-remote__pc-name">
                   <span className="truncate">{pc.name}</span>
-                  {pc.current && <Badge tone="accent">This PC</Badge>}
+                  {pc.current && <Badge tone="accent">{t.remote.thisPc}</Badge>}
                 </div>
                 <div className="mac-remote__pc-meta">
-                  <span className="mono">{shortKey(pc.key)}</span> · added {timeAgo(Date.parse(pc.addedAt))}
+                  <span className="mono">{shortKey(pc.key)}</span> · {t.remote.added(timeAgo(Date.parse(pc.addedAt)))}
                 </div>
               </div>
               {!pc.current && (
@@ -108,7 +109,7 @@ function PcsDialog({ mac, open, onClose }: { mac: MacSummary; open: boolean; onC
                   setRemoving(pc.key);
                   void revokePc(mac, pc.key, pc.name).finally(() => setRemoving(null));
                 }}>
-                  Remove
+                  {t.common.remove}
                 </Button>
               )}
             </li>
@@ -160,52 +161,48 @@ export function RemoteAccess({ mac }: { mac: MacSummary }) {
 
   const door = entry?.report?.door;
   const doorState = door?.status?.state;
-  let status: ReactNode;
+  let status: string;
   let tone: 'ok' | 'warn' | 'idle' = 'idle';
   if (!remote.enabled) {
-    status = 'Off. Turn it on to build and run on this Mac when you are away from its network.';
+    status = t.remote.statusOff;
   } else if (isConnected && mac.route) {
     tone = doorState && doorState !== 'online' ? 'warn' : 'ok';
-    const rtt = mac.route !== 'lan' && mac.rttMs !== null ? ` · ${mac.rttMs} ms` : '';
-    const online = doorState === 'online'
-      ? ` The Mac is online at ${door?.status?.server ?? remote.signalUrl}.`
-      : doorState
-        ? ` The Mac cannot reach the signaling server right now${door?.status?.error ? ` (${door.status.error})` : ''}.`
-        : '';
-    status = <>Connected {routeText(mac.route)}{rtt}.{online}</>;
+    const connected = t.remote.statusConnected(mac.route, mac.route !== 'lan' ? mac.rttMs : null);
+    const reach = doorState === 'online' ? t.remote.macOnline : doorState ? t.remote.macOffline(tidy(door?.status?.error)) : null;
+    status = reach ? `${connected}. ${reach}` : connected;
   } else {
-    status = 'On. When the Mac is not on this network, CapMac connects over the internet.';
+    status = t.remote.statusOn;
   }
   const movable = remote.enabled && server?.url && remote.signalUrl && server.url !== remote.signalUrl;
 
   return (
-    <section className="mac-remote" aria-label="Remote access">
+    <section className="mac-remote" aria-label={t.remote.label}>
       <div className="mac-remote__row">
         <span className={`mac-remote__icon mac-remote__icon--${tone}`}>
           <Icon name="globe" size={18} />
         </span>
         <div className="mac-remote__text">
-          <div className="mac-remote__title">Reach this Mac from anywhere</div>
+          <div className="mac-remote__title">{t.remote.title}</div>
           <div className={`mac-remote__desc${tone === 'warn' ? ' mac-remote__warn' : ''}`}>{status}</div>
         </div>
-        <Toggle label={`Reach ${mac.label} from anywhere`} checked={remote.enabled} loading={busy === 'toggle'} disabled={busy !== null} onChange={toggle} />
+        <Toggle label={t.remote.toggle(mac.label)} checked={remote.enabled} loading={busy === 'toggle'} disabled={busy !== null} onChange={toggle} />
       </div>
       {remote.enabled && (
         <div className="mac-remote__options">
           <div className="mac-remote__option">
-            <span className="mac-remote__label">Connection</span>
+            <span className="mac-remote__label">{t.remote.connection}</span>
             <Select<RouteChoice>
-              label="Connection"
+              label={t.remote.connection}
               value={remote.route}
               width={230}
               onChange={(route) => void setOptions(mac, { route })}
-              options={(['auto', 'lan', 'internet'] as const).map((value) => ({ value, label: ROUTE_LABEL[value], hint: ROUTE_HINT[value] }))}
+              options={(['auto', 'lan', 'internet'] as const).map((value) => ({ value, label: t.route.choice[value], hint: t.route.choiceHint[value] }))}
             />
           </div>
           <div className="mac-remote__option">
-            <span className="mac-remote__label">Keep this Mac awake</span>
+            <span className="mac-remote__label">{t.remote.keepAwake}</span>
             <Toggle
-              label="Keep this Mac awake"
+              label={t.remote.keepAwake}
               checked={remote.keepAwake}
               loading={busy === 'awake'}
               disabled={busy !== null}
@@ -216,13 +213,13 @@ export function RemoteAccess({ mac }: { mac: MacSummary }) {
             />
           </div>
           <div className="mac-remote__option">
-            <span className="mac-remote__label">Relay</span>
+            <span className="mac-remote__label">{t.remote.relay}</span>
             <Select<RelayChoice>
-              label="Relay"
+              label={t.remote.relay}
               value={remote.relay}
               width={230}
               onChange={(relay) => void setOptions(mac, { relay })}
-              options={(['allow', 'never', 'always'] as const).map((value) => ({ value, label: RELAY_LABEL[value], hint: RELAY_HINT[value] }))}
+              options={(['allow', 'never', 'always'] as const).map((value) => ({ value, label: t.route.relay[value], hint: t.route.relayHint[value] }))}
             />
           </div>
           <div className="mac-remote__actions">
@@ -230,20 +227,20 @@ export function RemoteAccess({ mac }: { mac: MacSummary }) {
               setBusy('test');
               void testConnection(mac).finally(() => setBusy(null));
             }}>
-              Test over the internet
+              {t.remote.test}
             </Button>
             <Button size="sm" icon="key" onClick={() => setShowPcs(true)}>
-              PCs{entry?.report ? ` (${entry.report.pcs.length})` : ''}
+              {t.remote.pcs(entry?.report?.pcs.length)}
             </Button>
             {movable && (
               <Button size="sm" icon="sync" busy={busy === 'move'} disabled={busy !== null} onClick={() => {
                 setBusy('move');
                 void setOptions(mac, { signalUrl: server!.url! }).finally(() => setBusy(null));
               }}>
-                Move to {new URL(server!.url!.replace(/^ws/, 'http')).host}
+                {t.remote.moveTo(new URL(server!.url!.replace(/^ws/, 'http')).host)}
               </Button>
             )}
-            <span className="mac-remote__fine faint">{remote.keepAwake ? 'A MacBook with its lid closed and no display sleeps anyway.' : 'It runs while you are logged in on the Mac.'}</span>
+            <span className="mac-remote__fine faint">{remote.keepAwake ? t.remote.awakeNote : t.remote.loggedInNote}</span>
           </div>
         </div>
       )}
@@ -261,34 +258,34 @@ export function RemoteAccess({ mac }: { mac: MacSummary }) {
           open
           size="sm"
           icon={confirmOff === 'unreachable' ? 'wifiOff' : 'globe'}
-          title={confirmOff === 'unreachable' ? `${mac.label} can’t be reached` : `Turn off remote access for ${mac.label}?`}
+          title={confirmOff === 'unreachable' ? t.remote.unreachableTitle(mac.label) : t.remote.offTitle(mac.label)}
           onClose={() => setConfirmOff(null)}
           footer={
             confirmOff === 'unreachable' ? (
               <>
                 <Button variant="danger" onClick={() => void disable(true)}>
-                  Turn off on this PC
+                  {t.remote.turnOffHere}
                 </Button>
                 <Button onClick={() => setConfirmOff(null)} data-autofocus>
-                  Cancel
+                  {t.common.cancel}
                 </Button>
               </>
             ) : (
               <>
                 <Button variant="accent" onClick={() => void disable(false)}>
-                  Turn off
+                  {t.remote.turnOff}
                 </Button>
                 <Button onClick={() => setConfirmOff(null)} data-autofocus>
-                  Cancel
+                  {t.common.cancel}
                 </Button>
               </>
             )
           }
         >
           {confirmOff === 'unreachable' ? (
-            <p>CapMac could not tell the Mac. Turn remote access off on this PC only? The Mac still lists this PC until you turn it off from its network.</p>
+            <p>{t.remote.unreachableBody}</p>
           ) : (
-            <p>This PC will reach {mac.label} only on its network. The Mac stops letting this PC in over the internet{remote.keepAwake ? ', and can sleep again' : ''}.</p>
+            <p>{t.remote.offBody(mac.label, remote.keepAwake)}</p>
           )}
         </Dialog>
       )}

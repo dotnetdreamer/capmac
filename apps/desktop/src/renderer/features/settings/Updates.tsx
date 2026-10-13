@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { UpdateInfo } from '../../../shared/contract';
+import { t, tidy } from '../../../shared/i18n';
 import { toast } from '../../state/app';
 import { useUpdates } from '../../state/updates';
 import { Button } from '../../ui/Button';
@@ -13,21 +14,21 @@ function describe(info: UpdateInfo): { icon: IconName | 'spinner'; title: string
   const s = info.state;
   switch (s.state) {
     case 'unavailable':
-      return { icon: 'info', title: 'Updates are off', detail: s.reason };
+      return { icon: 'info', title: t.updates.off, detail: tidy(s.reason) };
     case 'idle':
-      return { icon: 'checkCircle', title: `CapMac Studio ${info.current}`, detail: 'CapMac Studio checks for updates every few hours.' };
+      return { icon: 'checkCircle', title: t.updates.current(info.current), detail: t.updates.autoCheck };
     case 'checking':
-      return { icon: 'spinner', title: 'Checking for updates…' };
+      return { icon: 'spinner', title: t.updates.checking };
     case 'up-to-date':
-      return { icon: 'checkCircle', title: 'CapMac Studio is up to date', detail: `Checked at ${time(s.checkedAt)}.` };
+      return { icon: 'checkCircle', title: t.updates.upToDate, detail: t.updates.checkedAt(time(s.checkedAt)) };
     case 'available':
-      return { icon: 'download', title: `CapMac Studio ${s.version} is available`, detail: 'The portable app can’t update itself: download the new version and replace this one.' };
+      return { icon: 'download', title: t.updates.available(s.version), detail: t.updates.portable };
     case 'downloading':
-      return { icon: 'download', title: `Downloading CapMac Studio ${s.version}…`, detail: `${s.percent}%` };
+      return { icon: 'download', title: t.updates.downloading(s.version), detail: `${s.percent}%` };
     case 'ready':
-      return { icon: 'checkCircle', title: `CapMac Studio ${s.version} is ready`, detail: 'It installs when you restart or quit CapMac Studio.' };
+      return { icon: 'checkCircle', title: t.updates.ready(s.version), detail: t.updates.readyDetail };
     case 'error':
-      return { icon: 'warning', title: 'Couldn’t check for updates', detail: `${s.message} (${time(s.checkedAt)})`, tone: 'caution' };
+      return { icon: 'warning', title: t.updates.failed, detail: t.updates.failedAt(tidy(s.message), time(s.checkedAt)), tone: 'caution' };
   }
 }
 
@@ -46,40 +47,40 @@ export function UpdatesPanel() {
     try {
       await check();
     } catch (err) {
-      toast({ tone: 'critical', title: 'Couldn’t check for updates', body: String((err as Error)?.message ?? err) });
+      toast({ tone: 'critical', title: t.updates.failed, body: tidy(String((err as Error)?.message ?? err)) });
     } finally {
       setBusy(false);
     }
   };
-  const open = (url: string) => void window.capmac.invoke('app:open-external', { url }).catch(() => toast({ tone: 'critical', title: 'Couldn’t open the link', body: url }));
+  const open = (url: string) => void window.capmac.invoke('app:open-external', { url }).catch(() => toast({ tone: 'critical', title: t.updates.linkFailed, body: url }));
   return (
-    <div className="settings-updates" role="group" aria-label="Updates">
+    <div className="settings-updates" role="group" aria-label={t.updates.label}>
       <div className="settings-updates__status">
         <span className={`settings-updates__icon${d.tone ? ` is-${d.tone}` : ''}`}>{d.icon === 'spinner' ? <Spinner size={16} /> : <Icon name={d.icon} size={16} filled={d.icon === 'checkCircle'} />}</span>
         <div className="settings-updates__text" aria-live="polite">
           <strong>{d.title}</strong>
           {d.detail && <span>{d.detail}</span>}
-          {s.state === 'downloading' && <ProgressBar value={s.percent / 100} label={`Downloading CapMac Studio ${s.version}`} className="settings-updates__progress" />}
-          {info.feed && <span className="settings-updates__feed">Updates from {new URL(info.feed).host}</span>}
+          {s.state === 'downloading' && <ProgressBar value={s.percent / 100} label={t.updates.downloadingLabel(s.version)} className="settings-updates__progress" />}
+          {info.feed && <span className="settings-updates__feed">{t.updates.feed(new URL(info.feed).host)}</span>}
         </div>
       </div>
       <div className="settings-updates__actions">
         {s.state === 'ready' ? (
           <Button variant="accent" icon="refresh" onClick={() => void install()}>
-            Restart to update
+            {t.updates.restart}
           </Button>
         ) : s.state === 'available' && s.download ? (
           <Button variant="accent" icon="download" onClick={() => open(s.download!)}>
-            Download {s.version}
+            {t.updates.download(s.version)}
           </Button>
         ) : (
           <Button icon="refresh" busy={busy || s.state === 'checking'} disabled={!canCheck} onClick={() => void onCheck()}>
-            Check for updates
+            {t.updates.check}
           </Button>
         )}
         {info.notesUrl && (
           <Button variant="ghost" iconRight="open" onClick={() => open(info.notesUrl!)}>
-            Release notes
+            {t.updates.notes}
           </Button>
         )}
       </div>

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react';
 import { keystrokeForChar, keystrokeForKey } from '@capmac/core/shared/hid';
 import type { ErrorInfo, InputEvent, MacSummary, ScreenInfo, StreamFallback, Target } from '../../../shared/contract';
+import { t, tidy } from '../../../shared/i18n';
 import { workspaceBus, type WorkspaceAction } from '../../app/commands';
 import { toast, useApp } from '../../state/app';
 import { call, errorInfo } from '../../state/engine';
 import { useMacs } from '../../state/macs';
 import { claimScreenPort } from '../../lib/screen-ports';
+import { both } from '../../state/actions';
 import { Button, IconButton } from '../../ui/Button';
 import { EmptyState, Spinner, StatusDot } from '../../ui/Feedback';
 import { Icon } from '../../ui/Icon';
@@ -31,14 +33,14 @@ async function screenshot(mac: string, udid: string, action: 'save' | 'copy') {
     const shot = await call('screen.screenshot', { mac, udid });
     if (action === 'copy') {
       await window.capmac.invoke('app:copy-image', { data: shot.png });
-      toast({ tone: 'success', title: 'Screenshot copied', body: shot.width ? `${shot.width} × ${shot.height}` : undefined });
+      toast({ tone: 'success', title: t.simulator.shotCopied, body: shot.width ? `${shot.width} × ${shot.height}` : undefined });
     } else {
-      const name = `Simulator ${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.png`;
+      const name = t.simulator.shotName(new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-'));
       const saved = await window.capmac.invoke('app:save-image', { data: shot.png, name });
-      if (saved) toast({ tone: 'success', title: 'Screenshot saved', body: saved, action: { label: 'Show in folder', run: () => void window.capmac.invoke('app:show-in-folder', { path: saved }) } });
+      if (saved) toast({ tone: 'success', title: t.simulator.shotSaved, body: saved, action: { label: t.common.showInFolder, run: () => void window.capmac.invoke('app:show-in-folder', { path: saved }) } });
     }
   } catch (err) {
-    toast({ tone: 'critical', title: 'Could not take a screenshot', body: errorInfo(err).message });
+    toast({ tone: 'critical', title: t.simulator.shotFailed, body: tidy(errorInfo(err).message) });
   }
 }
 
@@ -57,27 +59,27 @@ function CompatibleNote({ fallback, onRetry, onRestart }: { fallback: StreamFall
     <>
       <button type="button" className="sim__compat" {...pop.triggerProps}>
         <Icon name="info" size={14} />
-        Compatible stream
+        {t.simulator.compatible}
       </button>
-      <Popover state={pop} placement="top-end" label="Compatible stream" className="sim__compat-pop">
+      <Popover state={pop} placement="top-end" label={t.simulator.compatible} className="sim__compat-pop">
         <div className="sim__compat-body">
-          <strong>Showing the compatible stream</strong>
-          <p>{fallback.message}</p>
-          {fallback.hint && <p className="faint">{fallback.hint}</p>}
+          <strong>{t.simulator.usingCompatible}</strong>
+          <p>{tidy(fallback.message)}</p>
+          {fallback.hint && <p className="faint">{tidy(fallback.hint)}</p>}
           {fallback.details && fallback.details.length > 0 && (
             <details>
-              <summary>Details</summary>
+              <summary>{t.simulator.details}</summary>
               <pre>{fallback.details.join('\n')}</pre>
             </details>
           )}
           <div className="sim__compat-actions">
             {fallback.restartSimulator && (
               <Button size="sm" icon="power" onClick={() => { pop.close(); onRestart(); }}>
-                Restart simulator
+                {t.simulator.restart}
               </Button>
             )}
             <Button size="sm" variant="accent" icon="refresh" onClick={() => { pop.close(); onRetry(); }}>
-              Try the smooth stream
+              {t.simulator.trySmooth}
             </Button>
           </div>
         </div>
@@ -114,11 +116,11 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
   const fixAxe = useCallback(async () => {
     try {
       await call('macs.fix', { name: mac, fix: 'install-axe' });
-      toast({ tone: 'success', title: 'AXe installed', body: 'Taps, swipes and typing work now.' });
+      toast({ tone: 'success', title: t.simulator.axeInstalled, body: t.simulator.axeInstalledBody });
       setEpoch((e) => e + 1);
     } catch (err) {
       const e = errorInfo(err);
-      if (!e.cancelled) toast({ tone: 'critical', title: 'Could not install AXe', body: e.hint ? `${e.message} ${e.hint}` : e.message });
+      if (!e.cancelled) toast({ tone: 'critical', title: t.simulator.axeFailed, body: both(e) });
     }
   }, [mac]);
 
@@ -150,7 +152,7 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
       else if (m.type === 'codec') {
         setCodec(m.codec);
         setFallback(m.fallback);
-        if (m.fallback) setAnnounce(`Switched to the compatible stream. ${m.fallback.message}`);
+        if (m.fallback) setAnnounce(t.simulator.switched(tidy(m.fallback.message)));
       } else if (m.type === 'state') setState(m.state === 'ended' ? { kind: 'ended', error: m.error } : { kind: m.state });
     };
     setState({ kind: 'connecting' });
@@ -417,12 +419,12 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
   }, []);
   const restartSimulator = useCallback(async () => {
     try {
-      toast({ tone: 'info', title: `Restarting ${target.name}…`, body: 'Your app stops; run it again when the simulator is back.' });
+      toast({ tone: 'info', title: t.simulator.restarting(target.name), body: t.simulator.restartingBody });
       await call('simulators.shutdown', { mac, udid: target.udid });
       await call('simulators.boot', { mac, udid: target.udid });
       setEpoch((n) => n + 1);
     } catch (err) {
-      toast({ tone: 'critical', title: `Could not restart ${target.name}`, body: errorInfo(err).hint ?? errorInfo(err).message });
+      toast({ tone: 'critical', title: t.simulator.restartFailed(target.name), body: tidy(errorInfo(err).hint ?? errorInfo(err).message) });
     }
   }, [mac, target.udid, target.name]);
 
@@ -440,23 +442,23 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
   const reconnecting = state.kind === 'reconnecting';
   const connectingText =
     preparing?.stage === 'building'
-      ? `Setting up the smooth stream for Xcode ${preparing.xcode ?? ''}…`.replace(' …', '…')
+      ? t.simulator.settingUp(preparing.xcode)
       : preparing?.stage === 'starting'
-        ? `Starting the smooth stream…`
-        : `Connecting to ${target.name}…`;
-  const streamName = codec === 'h264' ? 'Smooth stream (H.264)' : codec === 'jpeg' ? 'Compatible stream (screenshots)' : 'Stream';
+        ? t.simulator.startingSmooth
+        : t.simulator.connectingTo(target.name);
+  const streamName = codec === 'h264' ? t.simulator.streamSmooth : codec === 'jpeg' ? t.simulator.streamCompatible : t.simulator.stream;
   const overInternet = macRoute === 'direct' || macRoute === 'relay';
   const statsTip = [
     streamName,
-    overInternet ? `Over the internet, ${macRoute === 'direct' ? 'peer to peer' : 'through the relay'}${macRtt !== null ? ` (round trip ${macRtt} ms)` : ''}` : null,
-    codec === 'h264' && targetBitrate ? `Up to ${formatRate(Math.round(targetBitrate / 1000))}, adapting to the connection` : null,
-    stats && codec === 'h264' && stats.latencyMs !== null ? `Latency ${Math.round(stats.latencyMs)} ms (p95 ${Math.round(stats.latencyP95Ms ?? stats.latencyMs)} ms)` : null,
-    stats && stats.fps > 0 ? `Decoding ${stats.decodeMs.toFixed(1)} ms a frame` : null,
-    stats?.inputMs != null ? `Touch to picture ${Math.round(stats.inputMs)} ms` : null,
-    codec === 'h264' && stats?.fps === 0 ? 'Nothing is sent while the screen does not change' : null,
+    overInternet ? t.simulator.overInternetRoute(macRoute, macRtt) : null,
+    codec === 'h264' && targetBitrate ? t.simulator.upTo(formatRate(Math.round(targetBitrate / 1000))) : null,
+    stats && codec === 'h264' && stats.latencyMs !== null ? t.simulator.delay(Math.round(stats.latencyMs), Math.round(stats.latencyP95Ms ?? stats.latencyMs)) : null,
+    stats && stats.fps > 0 ? t.simulator.decode(stats.decodeMs.toFixed(1)) : null,
+    stats?.inputMs != null ? t.simulator.touch(Math.round(stats.inputMs)) : null,
+    codec === 'h264' && stats?.fps === 0 ? t.simulator.still : null,
   ].filter(Boolean).join(' · ');
-  const viewOnlyReason = info?.inputReason ?? 'Touch and typing are not available for this simulator.';
-  const inputHelp = mode === 'touch' ? 'Click and drag to touch, scroll to scroll, type to type. Alt+drag pinches.' : 'Click to tap, drag to swipe, type to enter text.';
+  const viewOnlyReason = tidy(info?.inputReason) ?? t.simulator.viewOnlyWhy;
+  const inputHelp = mode === 'touch' ? t.simulator.helpTouch : t.simulator.helpBasic;
   return (
     <div className="sim">
       <div ref={stageRef} className="sim__stage">
@@ -468,7 +470,7 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
               style={{ width: screenW, height: screenH }}
               tabIndex={0}
               role="img"
-              aria-label={`${target.name} screen${canInput ? `. ${inputHelp}` : ' (view only)'}`}
+              aria-label={t.simulator.screen(target.name, canInput ? inputHelp : null)}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
@@ -489,17 +491,17 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
                 {ended ? (
                   <>
                     <Icon name="plugDisconnected" size={20} />
-                    <span>{state.error?.message ?? 'The screen stream stopped.'}</span>
-                    {state.error?.hint && <span className="faint">{state.error.hint}</span>}
+                    <span>{tidy(state.error?.message) ?? t.simulator.stopped}</span>
+                    {state.error?.hint && <span className="faint">{tidy(state.error.hint)}</span>}
                     <Button size="sm" onClick={() => setEpoch((e) => e + 1)}>
-                      Reconnect
+                      {t.simulator.reconnect}
                     </Button>
                   </>
                 ) : (
                   <>
                     <Spinner size={20} />
-                    <span>{reconnecting ? 'Reconnecting to the Mac…' : connectingText}</span>
-                    {!reconnecting && preparing?.stage === 'building' && <span className="faint">First time on this Mac: compiling CapMac’s screen helper. It takes a few seconds.</span>}
+                    <span>{reconnecting ? t.simulator.reconnectingMac : connectingText}</span>
+                    {!reconnecting && preparing?.stage === 'building' && <span className="faint">{t.simulator.firstTime}</span>}
                   </>
                 )}
               </div>
@@ -507,29 +509,29 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
           </div>
         </div>
       </div>
-      <div className="sim__toolbar" role="toolbar" aria-label="Simulator controls">
+      <div className="sim__toolbar" role="toolbar" aria-label={t.simulator.controls}>
         {info && !info.input ? (
           <span className="sim__viewonly">
             <Tooltip content={viewOnlyReason}>
               <span className="sim__viewonly-label" tabIndex={0}>
                 <Icon name="eye" size={14} />
-                View only
+                {t.simulator.viewOnly}
               </span>
             </Tooltip>
             <Button size="sm" variant="ghost" onClick={() => void fixAxe()}>
-              Install AXe…
+              {t.simulator.installAxe}
             </Button>
           </span>
         ) : (
           <>
-            <IconButton icon="home" size="sm" label="Home" shortcut="Ctrl+Shift+H" disabled={!canInput} onClick={() => send({ kind: 'button', button: 'home' })} />
-            <IconButton icon="lock" size="sm" label="Lock" shortcut="Ctrl+Shift+L" disabled={!canInput} onClick={() => send({ kind: 'button', button: 'lock' })} />
-            <button type="button" className="icon-btn icon-btn--sm" aria-label="Type text" disabled={!canInput} {...typePopover.triggerProps}>
+            <IconButton icon="home" size="sm" label={t.simulator.home} shortcut="Ctrl+Shift+H" disabled={!canInput} onClick={() => send({ kind: 'button', button: 'home' })} />
+            <IconButton icon="lock" size="sm" label={t.simulator.lock} shortcut="Ctrl+Shift+L" disabled={!canInput} onClick={() => send({ kind: 'button', button: 'lock' })} />
+            <button type="button" className="icon-btn icon-btn--sm" aria-label={t.simulator.typeText} disabled={!canInput} {...typePopover.triggerProps}>
               <Icon name="keyboard" size={16} />
             </button>
           </>
         )}
-        <Popover state={typePopover} placement="top-start" label="Type text on the simulator">
+        <Popover state={typePopover} placement="top-start" label={t.simulator.typeTitle}>
           <form
             className="sim__type"
             onSubmit={(e) => {
@@ -540,23 +542,23 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
             }}
           >
             <div className="input">
-              <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Text to type on the simulator" aria-label="Text to type" />
+              <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={t.simulator.typePlaceholder} aria-label={t.simulator.textToType} />
             </div>
             <Button type="submit" size="sm" variant="accent" icon="send">
-              Send
+              {t.simulator.send}
             </Button>
           </form>
         </Popover>
-        <button type="button" className="icon-btn icon-btn--sm" aria-label="Screenshot" aria-haspopup="menu" {...shotMenu.triggerProps}>
+        <button type="button" className="icon-btn icon-btn--sm" aria-label={t.simulator.screenshot} aria-haspopup="menu" {...shotMenu.triggerProps}>
           <Icon name="camera" size={16} />
         </button>
         <Menu
           state={shotMenu}
-          label="Screenshot"
+          label={t.simulator.screenshot}
           placement="top-start"
           items={[
-            { id: 'save', label: 'Save screenshot…', icon: 'download', shortcut: 'Ctrl+Shift+S', onSelect: () => void screenshot(mac, target.udid, 'save') },
-            { id: 'copy', label: 'Copy screenshot', icon: 'copy', onSelect: () => void screenshot(mac, target.udid, 'copy') },
+            { id: 'save', label: t.simulator.saveShot, icon: 'download', shortcut: 'Ctrl+Shift+S', onSelect: () => void screenshot(mac, target.udid, 'save') },
+            { id: 'copy', label: t.simulator.copyShot, icon: 'copy', onSelect: () => void screenshot(mac, target.udid, 'copy') },
           ]}
         />
         <span className="sim__spacer" />
@@ -566,16 +568,16 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
             {state.kind === 'streaming' && hasFrame ? (
               <>
                 <StatusDot tone="live" />
-                {overInternet && <Icon name="globe" size={12} className="sim__route" label="Over the internet" />}
+                {overInternet && <Icon name="globe" size={12} className="sim__route" label={t.simulator.overInternet} />}
                 {/* Next to the compatible-stream note, the frame rate says enough. */}
-                {stats && stats.fps > 0 ? (fallback && codec === 'jpeg' ? `${stats.fps} fps` : `${stats.fps} fps · ${formatRate(stats.kbps)}`) : 'Live'}
+                {stats && stats.fps > 0 ? (fallback && codec === 'jpeg' ? t.simulator.fps(stats.fps) : `${t.simulator.fps(stats.fps)} · ${formatRate(stats.kbps)}`) : t.simulator.live}
               </>
             ) : state.kind === 'ended' ? (
-              'Disconnected'
+              t.simulator.disconnected
             ) : reconnecting ? (
-              'Reconnecting…'
+              t.common.reconnecting
             ) : (
-              'Connecting…'
+              t.common.connecting
             )}
           </span>
         </Tooltip>
@@ -595,29 +597,29 @@ export function SimulatorPane({ mac, target, onBooted }: { mac: MacSummary | nul
 
   if (!mac) {
     return (
-      <EmptyState compact icon="mac" title="No Mac" actions={<Button onClick={() => navigate({ name: 'onboarding' })}>Pair a Mac</Button>}>
-        The simulator runs on your Mac.
+      <EmptyState compact icon="mac" title={t.simulator.noMac} actions={<Button onClick={() => navigate({ name: 'onboarding' })}>{t.common.pairMac}</Button>}>
+        {t.simulator.noMacBody}
       </EmptyState>
     );
   }
   if (!target) {
     return (
-      <EmptyState compact icon="phone" title="No simulator selected">
-        Pick a simulator in the toolbar.
+      <EmptyState compact icon="phone" title={t.simulator.noSimulator}>
+        {t.simulator.noSimulatorBody}
       </EmptyState>
     );
   }
   if (target.kind === 'device') {
     return (
-      <EmptyState compact icon="phone" title={`${target.name} is a device`}>
-        The live screen is available for simulators. Your app runs on the iPhone itself; its logs stream into the console.
+      <EmptyState compact icon="phone" title={t.simulator.isDevice(target.name)}>
+        {t.simulator.isDeviceBody}
       </EmptyState>
     );
   }
   if (connected === 'offline') {
     return (
-      <EmptyState compact icon="plugDisconnected" title={`Can’t reach ${mac.label}`}>
-        {mac.error ?? 'Make sure the Mac is awake and on the same network.'}
+      <EmptyState compact icon="plugDisconnected" title={t.simulator.cantReach(mac.label)}>
+        {tidy(mac.error) ?? t.simulator.cantReachBody}
       </EmptyState>
     );
   }
@@ -628,7 +630,7 @@ export function SimulatorPane({ mac, target, onBooted }: { mac: MacSummary | nul
         await call('simulators.boot', { mac: mac.name, udid: target.udid });
         onBooted?.();
       } catch (err) {
-        toast({ tone: 'critical', title: `Could not boot ${target.name}`, body: errorInfo(err).hint ?? errorInfo(err).message });
+        toast({ tone: 'critical', title: t.simulator.startFailed(target.name), body: tidy(errorInfo(err).hint ?? errorInfo(err).message) });
       } finally {
         setBooting(false);
       }
@@ -637,14 +639,14 @@ export function SimulatorPane({ mac, target, onBooted }: { mac: MacSummary | nul
       <EmptyState
         compact
         icon="power"
-        title={booting || target.state === 'Booting' ? `Booting ${target.name}…` : `${target.name} is shut down`}
+        title={booting || target.state === 'Booting' ? t.simulator.starting(target.name) : t.simulator.off(target.name)}
         actions={
           <Button variant="accent" icon="power" busy={booting || target.state === 'Booting'} onClick={() => void boot()}>
-            Boot
+            {t.simulator.start}
           </Button>
         }
       >
-        {target.os}. Run or Live boots it automatically.
+        {t.simulator.startBody}
       </EmptyState>
     );
   }

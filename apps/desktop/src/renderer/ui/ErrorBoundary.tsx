@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo as ReactErrorInfo, type ReactNode } from 'react';
+import { t } from '../../shared/i18n';
 import { Button } from './Button';
 import { EmptyState } from './Feedback';
 
@@ -25,17 +26,17 @@ export class ErrorBoundary extends Component<{ children: ReactNode; label: strin
       <EmptyState
         compact={this.props.compact}
         icon="bug"
-        title={`${this.props.label} hit a problem`}
+        title={t.crash.title(this.props.label)}
         actions={
           <>
-            <Button onClick={() => this.setState({ error: null })}>Reload</Button>
+            <Button onClick={() => this.setState({ error: null })}>{t.crash.reload}</Button>
             <Button variant="subtle" onClick={() => void navigator.clipboard.writeText(`${error.message}\n${error.stack ?? ''}`)}>
-              Copy details
+              {t.crash.copyDetails}
             </Button>
           </>
         }
       >
-        This is a bug in CapMac Studio, not in your app. Reloading usually helps; the details help us fix it.
+        {t.crash.body}
       </EmptyState>
     );
   }

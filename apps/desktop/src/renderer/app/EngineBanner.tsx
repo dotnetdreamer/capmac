@@ -1,3 +1,4 @@
+import { t } from '../../shared/i18n';
 import { useApp } from '../state/app';
 import { InfoBar } from '../ui/Feedback';
 
@@ -7,8 +8,8 @@ export function EngineBanner() {
   if (engine.state !== 'crashed') return null;
   return (
     <div className="engine-banner">
-      <InfoBar tone={engine.restarting ? 'caution' : 'critical'} title={engine.restarting ? 'CapMac’s engine stopped. Restarting it…' : 'CapMac’s engine keeps stopping.'} live>
-        {engine.restarting ? 'Running sessions were stopped; start them again once it is back.' : 'Restart CapMac Studio. If it keeps happening, run capmac doctor in a terminal.'}
+      <InfoBar tone={engine.restarting ? 'caution' : 'critical'} title={engine.restarting ? t.engine.restartingTitle : t.engine.crashedTitle} live>
+        {engine.restarting ? t.engine.restartingBody : t.engine.crashedBody}
       </InfoBar>
     </div>
   );

@@ -6,28 +6,30 @@ import { call, errorInfo } from '../../state/engine';
 import { useMacs } from '../../state/macs';
 import { useRemote } from '../../state/remote';
 import { signalUrlProblem } from '@capmac/core/shared/remote';
+import { t, tidy } from '../../../shared/i18n';
 import { Logo } from '../../ui/AppIcon';
 import { Button } from '../../ui/Button';
 import { Badge, InfoBar, Spinner } from '../../ui/Feedback';
 import { PasswordField, Switch, TextField } from '../../ui/Form';
 import { Icon } from '../../ui/Icon';
 import { CheckList } from '../macs/CheckList';
+import { Rich } from '../../ui/Rich';
 import './onboarding.css';
 
 type Step = 'welcome' | 'prepare' | 'find' | 'signin' | 'health' | 'done';
 const STEPS: Array<{ id: Step; label: string }> = [
-  { id: 'prepare', label: 'Prepare' },
-  { id: 'find', label: 'Find' },
-  { id: 'signin', label: 'Sign in' },
-  { id: 'health', label: 'Check' },
-  { id: 'done', label: 'Run' },
+  { id: 'prepare', label: t.onboarding.steps.prepare },
+  { id: 'find', label: t.onboarding.steps.find },
+  { id: 'signin', label: t.onboarding.steps.signin },
+  { id: 'health', label: t.onboarding.steps.health },
+  { id: 'done', label: t.onboarding.steps.done },
 ];
 
 function Stepper({ step }: { step: Step }) {
   const index = STEPS.findIndex((s) => s.id === step);
   if (index < 0) return <span />;
   return (
-    <ol className="ob-stepper" aria-label="Setup steps">
+    <ol className="ob-stepper" aria-label={t.onboarding.stepsLabel}>
       {STEPS.map((s, i) => (
         <li key={s.id} className={i < index ? 'is-done' : i === index ? 'is-current' : ''} aria-current={i === index ? 'step' : undefined}>
           <span className="ob-stepper__dot">{i < index ? <Icon name="check" size={12} /> : i + 1}</span>
@@ -69,14 +71,14 @@ function Welcome({ next }: { next: () => void }) {
   return (
     <div className="ob-page ob-page--welcome">
       <HeroArt />
-      <h1 className="ob-title ob-title--display">Build and run your iOS&nbsp;app from Windows</h1>
-      <p className="ob-lead">CapMac Studio pairs this PC with a Mac on your network. Your Capacitor app is built there with Xcode and shows up here, live, on the iOS simulator.</p>
+      <h1 className="ob-title ob-title--display">{t.onboarding.welcome.title}</h1>
+      <p className="ob-lead">{t.onboarding.welcome.lead}</p>
       <div className="ob-actions ob-actions--center">
         <Button size="lg" variant="accent" onClick={next} data-autofocus>
-          Get started
+          {t.onboarding.welcome.start}
         </Button>
       </div>
-      <p className="ob-fine">Takes about two minutes. You need a Mac with Xcode on the same network.</p>
+      <p className="ob-fine">{t.onboarding.welcome.fine}</p>
     </div>
   );
 }
@@ -84,17 +86,17 @@ function Welcome({ next }: { next: () => void }) {
 function Prepare({ next, back }: { next: () => void; back: () => void }) {
   return (
     <div className="ob-page">
-      <h1 className="ob-title">Prepare your Mac</h1>
-      <p className="ob-lead">Two settings on the Mac, once.</p>
+      <h1 className="ob-title">{t.onboarding.prepare.title}</h1>
+      <p className="ob-lead">{t.onboarding.prepare.lead}</p>
       <div className="ob-cards">
         <div className="ob-card">
           <span className="ob-card__icon">
             <Icon name="plugConnected" size={20} />
           </span>
           <div>
-            <div className="ob-card__title">Turn on Remote Login</div>
+            <div className="ob-card__title">{t.onboarding.prepare.remoteLoginTitle}</div>
             <div className="ob-card__text">
-              System Settings › General › Sharing › <strong>Remote Login</strong>. CapMac talks to the Mac over SSH; nothing else is installed.
+              <Rich text={t.onboarding.prepare.remoteLoginText} />
             </div>
           </div>
         </div>
@@ -103,20 +105,20 @@ function Prepare({ next, back }: { next: () => void; back: () => void }) {
             <Icon name="mac" size={20} />
           </span>
           <div>
-            <div className="ob-card__title">Stay signed in to the Mac</div>
-            <div className="ob-card__text">iOS simulators only run inside a desktop session. On a Mac without a screen, turn on automatic login.</div>
+            <div className="ob-card__title">{t.onboarding.prepare.stayTitle}</div>
+            <div className="ob-card__text">{t.onboarding.prepare.stayText}</div>
           </div>
         </div>
       </div>
-      <InfoBar tone="info" title="Windows may ask about network access">
-        To find Macs, CapMac Studio listens for them on your local network. If Windows asks, allow it on <strong>private networks</strong>.
+      <InfoBar tone="info" title={t.onboarding.prepare.networkTitle}>
+        <Rich text={t.onboarding.prepare.networkText} />
       </InfoBar>
       <div className="ob-actions">
         <Button variant="subtle" onClick={back}>
-          Back
+          {t.common.back}
         </Button>
         <Button variant="accent" onClick={next} iconRight="arrowRight">
-          Find my Mac
+          {t.onboarding.prepare.findMac}
         </Button>
       </div>
     </div>
@@ -151,9 +153,9 @@ function Find({ next, back }: { next: (mac: { host: string; port: number; label?
   const canContinue = showManual ? Boolean(manualValue) : Boolean(chosen);
   return (
     <div className="ob-page">
-      <h1 className="ob-title">Find your Mac</h1>
-      <p className="ob-lead">Macs with Remote Login on your network.</p>
-      <div className="ob-list" role="radiogroup" aria-label="Macs found" aria-busy={state === 'scanning'}>
+      <h1 className="ob-title">{t.onboarding.find.title}</h1>
+      <p className="ob-lead">{t.onboarding.find.lead}</p>
+      <div className="ob-list" role="radiogroup" aria-label={t.onboarding.find.listLabel} aria-busy={state === 'scanning'}>
         {found.map((m) => (
           <button
             key={`${m.host}:${m.port}`}
@@ -173,7 +175,7 @@ function Find({ next, back }: { next: (mac: { host: string; port: number; label?
             <span className="ob-mac__text">
               <span className="ob-mac__name">
                 {m.name}
-                {m.via === 'tailscale' && <Badge tone="outline">Tailscale</Badge>}
+                {m.via === 'tailscale' && <Badge tone="outline">{t.onboarding.find.tailscale}</Badge>}
               </span>
               <span className="ob-mac__host mono">
                 {m.host}
@@ -186,29 +188,29 @@ function Find({ next, back }: { next: (mac: { host: string; port: number; label?
         {state === 'scanning' && (
           <div className="ob-scanning">
             <span className="ob-radar" aria-hidden="true" />
-            Looking for Macs…
+            {t.onboarding.find.scanning}
           </div>
         )}
         {state === 'done' && found.length === 0 && (
           <div className="ob-empty">
-            <strong>No Macs found.</strong> Check that Remote Login is on and that both computers are on the same network (a VPN can hide the Mac). You can also type its address, or its Tailscale name.
+            <strong>{t.onboarding.find.noneTitle}</strong> {t.onboarding.find.noneBody}
           </div>
         )}
       </div>
       {showManual ? (
-        <TextField label="Mac address" placeholder="ik-macbook.local or 192.168.1.20" value={manual} onChange={(e) => setManual(e.target.value)} hint="The Mac’s name from System Settings › General › Sharing, or its IP address." data-autofocus />
+        <TextField label={t.onboarding.find.addressLabel} placeholder={t.onboarding.find.addressPlaceholder} value={manual} onChange={(e) => setManual(e.target.value)} hint={t.onboarding.find.addressHint} data-autofocus />
       ) : (
         <button type="button" className="btn btn--ghost btn--sm ob-manual" onClick={() => setShowManual(true)}>
-          Enter an address instead
+          {t.onboarding.find.typeAddress}
         </button>
       )}
       <div className="ob-actions">
         <Button variant="subtle" onClick={back}>
-          Back
+          {t.common.back}
         </Button>
         <span className="ob-actions__spacer" />
         <Button icon="refresh" onClick={() => void scan()} disabled={state === 'scanning'}>
-          Scan again
+          {t.onboarding.find.searchAgain}
         </Button>
         <Button
           variant="accent"
@@ -221,7 +223,7 @@ function Find({ next, back }: { next: (mac: { host: string; port: number; label?
             } else if (chosen) next({ host: chosen.host, port: chosen.port, label: chosen.name });
           }}
         >
-          Continue
+          {t.common.continue}
         </Button>
       </div>
     </div>
@@ -251,7 +253,7 @@ function SignIn({ mac, back, paired }: { mac: { host: string; port: number; labe
     if (needsServer) {
       const problem = signalUrlProblem(serverUrl);
       if (problem) {
-        setServerError(problem);
+        setServerError(tidy(problem));
         return;
       }
     }
@@ -263,10 +265,10 @@ function SignIn({ mac, back, paired }: { mac: { host: string; port: number; labe
       const result = await call('macs.pair', { host: mac.host, port: mac.port, username: user, password: password || undefined, label: mac.label, remote: remote || undefined });
       setPassword('');
       if (result.remote?.ok === false) {
-        toast({ tone: 'caution', title: 'Paired, but remote access is not on yet', body: `${result.remote.error?.message ?? ''} Turn it on later in Macs.`.trim(), timeout: 0 });
+        toast({ tone: 'caution', title: t.onboarding.signIn.pairedNoRemote, body: t.onboarding.signIn.pairedNoRemoteBody(tidy(result.remote.error?.message) ?? ''), timeout: 0 });
       } else if (result.remote?.ok) {
         const test = result.remote.test;
-        toast({ tone: 'success', title: 'Remote access is on', body: test?.ok && test.route ? `Tested: ${test.route === 'relay' ? 'through the relay' : 'peer to peer over the internet'}, ${test.ms} ms.` : undefined });
+        toast({ tone: 'success', title: t.onboarding.signIn.remoteOn, body: test?.ok && test.route ? t.remote.toast.testPassed(test.route, test.ms) : undefined });
       }
       paired(result.mac.name);
     } catch (err) {
@@ -283,26 +285,26 @@ function SignIn({ mac, back, paired }: { mac: { host: string; port: number; labe
         void submit();
       }}
     >
-      <h1 className="ob-title">Sign in to {mac.label ?? mac.host}</h1>
-      <p className="ob-lead">Your Mac password is used once, to install CapMac’s own SSH key. It is never stored.</p>
+      <h1 className="ob-title">{t.onboarding.signIn.title(mac.label ?? mac.host)}</h1>
+      <p className="ob-lead">{t.onboarding.signIn.lead}</p>
       <div className="ob-form">
-        <TextField label="Mac user name" value={user} onChange={(e) => setUser(e.target.value.trim())} hint={<>The short name, as shown by <code>whoami</code> in Terminal on the Mac.</>} autoComplete="off" data-autofocus disabled={busy} />
-        <PasswordField label="Password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} />
+        <TextField label={t.onboarding.signIn.user} value={user} onChange={(e) => setUser(e.target.value.trim())} hint={<Rich text={t.onboarding.signIn.userHint} />} autoComplete="off" data-autofocus disabled={busy} />
+        <PasswordField label={t.onboarding.signIn.password} value={password} onChange={(e) => setPassword(e.target.value)} disabled={busy} />
         <Switch
           checked={remote}
           onChange={setRemote}
           disabled={busy}
-          label="Reach this Mac from anywhere"
-          description="Also build and run on it when you’re away from its network, over the internet. You can turn this on later in Macs."
+          label={t.onboarding.signIn.remote}
+          description={t.onboarding.signIn.remoteDesc}
         />
         {needsServer && (
           <TextField
-            label="Your signaling server"
-            placeholder="wss://signal.example.com"
+            label={t.onboarding.signIn.server}
+            placeholder={t.remote.server.placeholder}
             value={serverUrl}
             disabled={busy}
             error={serverError}
-            hint="Remote access goes through a small server of your own (see services/signal). CapMac remembers it."
+            hint={t.onboarding.signIn.serverHint}
             onChange={(e) => {
               setServerUrl(e.target.value);
               setServerError(null);
@@ -315,29 +317,29 @@ function SignIn({ mac, back, paired }: { mac: { host: string; port: number; labe
           {steps.map((s) => (
             <li key={s.id} className={`is-${s.status}`}>
               {s.status === 'running' ? <Spinner size={16} /> : s.status === 'ok' ? <Icon name="checkCircle" size={16} filled /> : <Icon name="errorCircle" size={16} filled />}
-              <span>{s.title}</span>
-              {s.detail && <span className="faint">{s.detail}</span>}
+              <span>{tidy(s.title)}</span>
+              {s.detail && <span className="faint">{tidy(s.detail)}</span>}
             </li>
           ))}
           {busy && steps.length === 0 && (
             <li className="is-running">
               <Spinner size={16} />
-              <span>Connecting…</span>
+              <span>{t.common.connecting}</span>
             </li>
           )}
         </ul>
       ) : null}
       {error && (
-        <InfoBar tone="critical" title={error.message} live>
-          {error.hint}
+        <InfoBar tone="critical" title={tidy(error.message)} live>
+          {tidy(error.hint)}
         </InfoBar>
       )}
       <div className="ob-actions">
         <Button variant="subtle" onClick={back} disabled={busy}>
-          Back
+          {t.common.back}
         </Button>
         <Button type="submit" variant="accent" busy={busy} disabled={!user}>
-          Pair
+          {t.onboarding.signIn.pair}
         </Button>
       </div>
     </form>
@@ -358,21 +360,21 @@ function Health({ name, next }: { name: string; next: () => void }) {
   const failing = checks.filter((c) => c.level === 'fail');
   return (
     <div className="ob-page ob-page--wide">
-      <h1 className="ob-title">Checking {mac?.label ?? 'your Mac'}</h1>
-      <p className="ob-lead">Xcode, simulators and tools. CapMac fixes what it can with one click.</p>
+      <h1 className="ob-title">{t.onboarding.health.title(mac?.label ?? t.common.yourMac)}</h1>
+      <p className="ob-lead">{t.onboarding.health.lead}</p>
       <CheckList mac={name} checks={checks} checking={health?.status === 'checking'} />
       {health?.status === 'error' && health.error && (
-        <InfoBar tone="critical" title={health.error.message}>
-          {health.error.hint}
+        <InfoBar tone="critical" title={tidy(health.error.message)}>
+          {tidy(health.error.hint)}
         </InfoBar>
       )}
       <div className="ob-actions">
         <Button icon="refresh" onClick={() => void runHealth(name)} disabled={health?.status === 'checking'}>
-          Check again
+          {t.onboarding.health.checkAgain}
         </Button>
         <span className="ob-actions__spacer" />
         <Button variant="accent" iconRight="arrowRight" onClick={next} disabled={health?.status === 'checking'}>
-          {failing.length ? 'Continue anyway' : 'Continue'}
+          {failing.length ? t.onboarding.health.continueAnyway : t.common.continue}
         </Button>
       </div>
     </div>
@@ -390,7 +392,7 @@ function Done({ name }: { name: string }) {
       finish();
       if (await openProject(path)) void startSession(path, 'run');
     } catch (err) {
-      toast({ tone: 'critical', title: 'Could not create the sample app', body: errorInfo(err).message });
+      toast({ tone: 'critical', title: t.home.sampleFailed, body: errorInfo(err).message });
       setBusy(false);
     }
   };
@@ -399,13 +401,11 @@ function Done({ name }: { name: string }) {
       <div className="ob-success" aria-hidden="true">
         <Icon name="checkCircle" size={48} filled />
       </div>
-      <h1 className="ob-title ob-title--display">You’re set</h1>
-      <p className="ob-lead">
-        {mac?.label ?? 'Your Mac'} is paired{mac?.xcode ? ` (Xcode ${mac.xcode})` : ''}. See it work: run the sample app on the iOS simulator.
-      </p>
+      <h1 className="ob-title ob-title--display">{t.onboarding.done.title}</h1>
+      <p className="ob-lead">{t.onboarding.done.lead(mac?.label ?? t.common.yourMacTitle, mac?.xcode)}</p>
       <div className="ob-actions ob-actions--center">
         <Button size="lg" variant="accent" icon="play" iconFilled busy={busy} onClick={() => void runSample()} data-autofocus>
-          Run the sample app
+          {t.onboarding.done.runSample}
         </Button>
         <Button
           size="lg"
@@ -416,10 +416,10 @@ function Done({ name }: { name: string }) {
             void pickProject();
           }}
         >
-          Open my app
+          {t.onboarding.done.openApp}
         </Button>
       </div>
-      <p className="ob-fine">The first run installs packages and builds on the Mac: about a minute. After that, changes take seconds.</p>
+      <p className="ob-fine">{t.onboarding.done.fine}</p>
     </div>
   );
 }
@@ -440,7 +440,7 @@ export function Onboarding() {
         <Logo size={20} />
         <Stepper step={step} />
         <button type="button" className="btn btn--subtle btn--sm ob-skip" onClick={skip}>
-          {macs.length ? 'Close' : 'Skip for now'}
+          {macs.length ? t.common.close : t.onboarding.skip}
         </button>
       </div>
       <main className="ob-main" key={step}>

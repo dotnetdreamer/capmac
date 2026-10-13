@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react';
 import type { Target } from '../../../shared/contract';
+import { t, tidy } from '../../../shared/i18n';
 import { toast, useApp } from '../../state/app';
+import { both } from '../../state/actions';
 import { call, errorInfo } from '../../state/engine';
 import { resolveMac, useMacs, useTargets, useWatchTargets } from '../../state/macs';
 import { Button } from '../../ui/Button';
@@ -14,17 +16,17 @@ import './devices.css';
 /** "iPad (A16)" and "iPad A16" are the same thing. */
 const simplify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-function SimulatorRow({ mac, t }: { mac: string; t: Target }) {
+function SimulatorRow({ mac, target }: { mac: string; target: Target }) {
   const [busy, setBusy] = useState<'boot' | 'shutdown' | null>(null);
   const menu = usePopover();
-  const booted = t.state === 'Booted';
+  const booted = target.state === 'Booted';
   const act = async (what: 'boot' | 'shutdown') => {
     setBusy(what);
     try {
-      await call(what === 'boot' ? 'simulators.boot' : 'simulators.shutdown', { mac, udid: t.udid });
+      await call(what === 'boot' ? 'simulators.boot' : 'simulators.shutdown', { mac, udid: target.udid });
     } catch (err) {
       const e = errorInfo(err);
-      toast({ tone: 'critical', title: e.message, body: e.hint });
+      toast({ tone: 'critical', title: tidy(e.message), body: tidy(e.hint) });
     } finally {
       setBusy(null);
     }
@@ -32,81 +34,81 @@ function SimulatorRow({ mac, t }: { mac: string; t: Target }) {
   return (
     <li className="device-row">
       <span className="device-row__glyph">
-        <Icon name={targetGlyph(t)} size={20} />
+        <Icon name={targetGlyph(target)} size={20} />
       </span>
       <span className="device-row__name">
-        <span className="truncate">{t.name}</span>
-        {t.model && simplify(t.model) !== simplify(t.name) && <span className="device-row__model truncate">{t.model}</span>}
+        <span className="truncate">{target.name}</span>
+        {target.model && simplify(target.model) !== simplify(target.name) && <span className="device-row__model truncate">{target.model}</span>}
       </span>
-      <span className="device-row__os">{t.os}</span>
+      <span className="device-row__os">{target.os}</span>
       <span className={`device-row__state${booted ? ' is-on' : ''}`}>
-        <StatusDot tone={busy ? 'busy' : targetTone(t)} pulse={Boolean(busy)} />
-        {busy === 'boot' ? 'Booting…' : busy === 'shutdown' ? 'Shutting down…' : targetState(t)}
+        <StatusDot tone={busy ? 'busy' : targetTone(target)} pulse={Boolean(busy)} />
+        {busy === 'boot' ? t.devices.starting : busy === 'shutdown' ? t.devices.stopping : targetState(target)}
       </span>
       <span className="device-row__actions">
         {booted ? (
           <Button size="sm" icon="power" busy={busy === 'shutdown'} disabled={Boolean(busy)} onClick={() => void act('shutdown')}>
-            Shut down
+            {t.devices.shutDown}
           </Button>
         ) : (
           <Button size="sm" icon="play" busy={busy === 'boot'} disabled={Boolean(busy)} onClick={() => void act('boot')}>
-            Boot
+            {t.devices.start}
           </Button>
         )}
-        <button type="button" className="icon-btn icon-btn--sm" aria-label={`More for ${t.name}`} aria-haspopup="menu" {...menu.triggerProps}>
+        <button type="button" className="icon-btn icon-btn--sm" aria-label={t.common.moreActionsFor(target.name)} aria-haspopup="menu" {...menu.triggerProps}>
           <Icon name="more" size={16} />
         </button>
         <Menu
           state={menu}
-          label={`${t.name} actions`}
-          items={[{ id: 'udid', label: 'Copy UDID', icon: 'copy', hint: t.udid.slice(0, 8), onSelect: () => void navigator.clipboard.writeText(t.udid).then(() => toast({ tone: 'success', title: 'UDID copied' })) }]}
+          label={t.common.actionsFor(target.name)}
+          items={[{ id: 'udid', label: t.devices.copyUdid, icon: 'copy', hint: target.udid.slice(0, 8), onSelect: () => void navigator.clipboard.writeText(target.udid).then(() => toast({ tone: 'success', title: t.devices.udidCopied })) }]}
         />
       </span>
     </li>
   );
 }
 
-function DeviceRow({ t }: { t: Target }) {
+function DeviceRow({ target }: { target: Target }) {
   const menu = usePopover();
-  const connected = t.state === 'connected';
-  const devOff = t.developerMode === 'disabled';
+  const connected = target.state === 'connected';
+  const devOff = target.developerMode === 'disabled';
   // Only say something when there is something to do.
   const hint = devOff
-    ? 'Turn on Developer Mode on the iPhone: Settings › Privacy & Security › Developer Mode.'
-    : t.paired === false
-      ? 'Connect it to the Mac, unlock it and tap Trust.'
+    ? t.devices.devModeHint
+    : target.paired === false
+      ? t.devices.trustHint
       : !connected
-        ? 'Plug it into the Mac, or keep it unlocked on the same Wi-Fi.'
+        ? t.devices.connectHint
         : null;
   return (
     <li className={`device-row${hint ? ' has-hint' : ''}`}>
       <span className="device-row__glyph">
-        <Icon name={targetGlyph(t)} size={20} />
+        <Icon name={targetGlyph(target)} size={20} />
       </span>
       <span className="device-row__name">
-        <span className="truncate">{t.name}</span>
-        {t.model && simplify(t.model) !== simplify(t.name) && <span className="device-row__model truncate">{t.model}</span>}
+        <span className="truncate">{target.name}</span>
+        {target.model && simplify(target.model) !== simplify(target.name) && <span className="device-row__model truncate">{target.model}</span>}
       </span>
-      <span className="device-row__os">{t.os}</span>
+      <span className="device-row__os">{target.os}</span>
       <span className={`device-row__state${connected ? ' is-on' : ''}`}>
         {connected ? <StatusDot tone="ok" /> : <Icon name="plugDisconnected" size={14} className="faint" />}
-        {connected ? (t.connection === 'network' ? 'Connected over Wi-Fi' : 'Connected by USB') : 'Not connected'}
+        {connected ? (target.connection === 'network' ? t.devices.connectedWifi : t.devices.connectedUsb) : t.devices.notConnected}
       </span>
       <span className="device-row__actions">
         {devOff ? (
-          <Badge tone="caution">Developer Mode off</Badge>
-        ) : t.paired === false ? (
-          <Badge tone="caution">Not trusted</Badge>
+          <Badge tone="caution">{t.devices.devModeOff}</Badge>
+        ) : target.paired === false ? (
+          <Badge tone="caution">{t.devices.notTrusted}</Badge>
         ) : (
-          t.developerMode === 'enabled' && <Badge tone="success">Developer Mode on</Badge>
+          target.developerMode === 'enabled' && <Badge tone="success">{t.devices.devModeOn}</Badge>
         )}
-        <button type="button" className="icon-btn icon-btn--sm" aria-label={`More for ${t.name}`} aria-haspopup="menu" {...menu.triggerProps}>
+        <button type="button" className="icon-btn icon-btn--sm" aria-label={t.common.moreActionsFor(target.name)} aria-haspopup="menu" {...menu.triggerProps}>
           <Icon name="more" size={16} />
         </button>
         <Menu
           state={menu}
-          label={`${t.name} actions`}
-          items={[{ id: 'udid', label: 'Copy UDID', icon: 'copy', hint: t.udid.slice(0, 8), onSelect: () => void navigator.clipboard.writeText(t.udid).then(() => toast({ tone: 'success', title: 'UDID copied' })) }]}
+          label={t.common.actionsFor(target.name)}
+          items={[{ id: 'udid', label: t.devices.copyUdid, icon: 'copy', hint: target.udid.slice(0, 8), onSelect: () => void navigator.clipboard.writeText(target.udid).then(() => toast({ tone: 'success', title: t.devices.udidCopied })) }]}
         />
       </span>
       {hint && <span className="device-row__hint">{hint}</span>}
@@ -138,10 +140,10 @@ export function Devices() {
 
   const { devices, groups, total } = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const match = (t: Target) => !q || `${t.name} ${t.os} ${t.model ?? ''} ${t.udid}`.toLowerCase().includes(q);
+    const match = (target: Target) => !q || `${target.name} ${target.os} ${target.model ?? ''} ${target.udid}`.toLowerCase().includes(q);
     const sims = (targets?.simulators ?? []).filter(match);
     const map = new Map<string, Target[]>();
-    for (const t of sims) map.set(t.os, [...(map.get(t.os) ?? []), t]);
+    for (const target of sims) map.set(target.os, [...(map.get(target.os) ?? []), target]);
     const sorted = [...map.entries()].map(([os, list]) => [os, [...list].sort((a, b) => Number(b.state === 'Booted') - Number(a.state === 'Booted'))] as const);
     return { devices: (targets?.devices ?? []).filter(match), groups: sorted, total: sims.length };
   }, [targets, query]);
@@ -152,12 +154,12 @@ export function Devices() {
         <div className="page__inner">
           <header className="page__header">
             <div>
-              <h1 className="page__title">Devices</h1>
-              <p className="page__subtitle">Simulators and iPhones on your Mac, live.</p>
+              <h1 className="page__title">{t.devices.title}</h1>
+              <p className="page__subtitle">{t.devices.subtitle(t.common.yourMac)}</p>
             </div>
           </header>
-          <EmptyState icon="phone" title="Pair a Mac to see its simulators" actions={<Button variant="accent" icon="add" onClick={() => navigate({ name: 'onboarding' })}>Pair a Mac</Button>}>
-            Simulators and iPhones are attached to your Mac; CapMac lists them here with their live state.
+          <EmptyState icon="phone" title={t.devices.emptyTitle} actions={<Button variant="accent" icon="add" onClick={() => navigate({ name: 'onboarding' })}>{t.common.pairMac}</Button>}>
+            {t.devices.emptyBody}
           </EmptyState>
         </div>
       </div>
@@ -169,17 +171,17 @@ export function Devices() {
       <div className="page__inner">
         <header className="page__header">
           <div>
-            <h1 className="page__title">Devices</h1>
-            <p className="page__subtitle">Simulators and iPhones on {mac?.label ?? 'your Mac'}, live.</p>
+            <h1 className="page__title">{t.devices.title}</h1>
+            <p className="page__subtitle">{t.devices.subtitle(mac?.label ?? t.common.yourMac)}</p>
           </div>
           <div className="page__actions">
-            {macs.length > 1 && <Select value={mac?.name ?? ''} onChange={(v) => setPicked(v)} label="Mac" width={200} options={macs.map((m) => ({ value: m.name, label: m.label }))} />}
-            <SearchField placeholder="Search" aria-label="Search devices" value={query} onChange={(e) => setQuery(e.target.value)} onClear={() => setQuery('')} className="devices-search" />
+            {macs.length > 1 && <Select value={mac?.name ?? ''} onChange={(v) => setPicked(v)} label={t.devices.mac} width={200} options={macs.map((m) => ({ value: m.name, label: m.label }))} />}
+            <SearchField placeholder={t.devices.search} aria-label={t.devices.searchLabel} value={query} onChange={(e) => setQuery(e.target.value)} onClear={() => setQuery('')} className="devices-search" />
           </div>
         </header>
         {entry?.error && !targets ? (
-          <InfoBar tone="critical" title={`Can’t list devices on ${mac?.label}`} actions={<Button size="sm" onClick={() => mac && void call('macs.connect', { name: mac.name }).catch(() => undefined)}>Retry</Button>}>
-            {entry.error.message} {entry.error.hint}
+          <InfoBar tone="critical" title={t.devices.listFailed(mac?.label ?? t.common.theMac)} actions={<Button size="sm" onClick={() => mac && void call('macs.connect', { name: mac.name }).catch(() => undefined)}>{t.common.tryAgain}</Button>}>
+            {both(entry.error)}
           </InfoBar>
         ) : !targets ? (
           <ul className="device-list" aria-busy="true">
@@ -192,30 +194,30 @@ export function Devices() {
           </ul>
         ) : (
           <>
-            <Section title="Devices" count={devices.length}>
+            <Section title={t.devices.devices} count={devices.length}>
               {devices.length ? (
                 <ul className="device-list">
-                  {devices.map((t) => (
-                    <DeviceRow key={t.udid} t={t} />
+                  {devices.map((target) => (
+                    <DeviceRow key={target.udid} target={target} />
                   ))}
                 </ul>
               ) : (
                 <div className="device-empty">
                   <Icon name="phone" size={20} />
                   <div>
-                    <strong>{targets.deviceSupport ? 'No iPhone or iPad connected' : 'This Xcode can’t list devices'}</strong>
-                    <p className="muted">{targets.deviceSupport ? 'Plug it into the Mac (or pair it over Wi-Fi in Xcode › Window › Devices), unlock it and tap Trust. It shows up here by itself.' : 'Device runs need Xcode 15 or newer on the Mac.'}</p>
+                    <strong>{targets.deviceSupport ? t.devices.noDevice : t.devices.oldXcode}</strong>
+                    <p className="muted">{targets.deviceSupport ? t.devices.noDeviceBody : t.devices.oldXcodeBody}</p>
                   </div>
                 </div>
               )}
             </Section>
-            <Section title="Simulators" count={total}>
+            <Section title={t.devices.simulators} count={total}>
               {groups.length === 0 ? (
                 <div className="device-empty">
                   <Icon name="phone" size={20} />
                   <div>
-                    <strong>{query ? 'Nothing matches' : 'No simulators installed'}</strong>
-                    {!query && <p className="muted">Install the iOS platform on the Mac: Xcode › Settings › Components (or Macs › Check health).</p>}
+                    <strong>{query ? t.common.nothingMatches : t.devices.noSimulators}</strong>
+                    {!query && <p className="muted">{t.devices.noSimulatorsBody}</p>}
                   </div>
                 </div>
               ) : (
@@ -223,8 +225,8 @@ export function Devices() {
                   <div key={os} className="device-group">
                     <h3 className="device-group__title">{os}</h3>
                     <ul className="device-list">
-                      {list.map((t) => (
-                        <SimulatorRow key={t.udid} mac={mac!.name} t={t} />
+                      {list.map((target) => (
+                        <SimulatorRow key={target.udid} mac={mac!.name} target={target} />
                       ))}
                     </ul>
                   </div>

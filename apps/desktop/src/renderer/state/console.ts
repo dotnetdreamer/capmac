@@ -4,6 +4,7 @@
  * subscribe to a version number and render through a virtualized list.
  */
 import type { AppLogEntry } from '../../shared/contract';
+import { t } from '../../shared/i18n';
 import { projectKey } from './projects';
 
 export type ConsoleSource = 'js' | 'cap' | 'native' | 'bridge' | 'web' | 'capmac';
@@ -19,8 +20,8 @@ export interface ConsoleLine {
   err?: boolean;
 }
 
-export const SOURCE_LABELS: Record<ConsoleSource, string> = { js: 'JS', cap: 'Capacitor', native: 'Native', bridge: 'Bridge', web: 'Dev server', capmac: 'CapMac' };
-export const SOURCE_TAGS: Record<ConsoleSource, string> = { js: 'JS', cap: 'CAP', native: 'iOS', bridge: '⇄', web: 'WEB', capmac: 'CM' };
+export const SOURCE_LABELS: Record<ConsoleSource, string> = t.console.sources;
+export const SOURCE_TAGS: Record<ConsoleSource, string> = t.console.tags;
 
 const KIND_TO_SOURCE: Record<AppLogEntry['kind'], ConsoleSource> = { console: 'js', capacitor: 'cap', native: 'native', bridge: 'bridge' };
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;

@@ -3,6 +3,8 @@
  * can arrive before or after the `screen-open` request returns, so ports are
  * kept here until the simulator pane claims them by stream id.
  */
+import { t } from '../../shared/i18n';
+
 const ports = new Map<string, MessagePort>();
 const waiters = new Map<string, (port: MessagePort) => void>();
 let installed = false;
@@ -35,7 +37,7 @@ export function claimScreenPort(streamId: string, timeoutMs = 10_000): Promise<M
   return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => {
       waiters.delete(streamId);
-      reject(new Error('The screen stream did not start.'));
+      reject(new Error(t.simulator.didNotStart));
     }, timeoutMs);
     waiters.set(streamId, (port) => {
       window.clearTimeout(timer);

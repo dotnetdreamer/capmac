@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { Check, FixId } from '../../../shared/contract';
+import { t, tidy } from '../../../shared/i18n';
 import { toast } from '../../state/app';
 import { call, errorInfo } from '../../state/engine';
 import { useMacs } from '../../state/macs';
@@ -17,7 +18,7 @@ function fixText(check: Check): string | undefined {
   if (check.action && /capmac doctor --fix/.test(check.fix)) return undefined;
   // Remote access off: its switch is right above the checklist (the hint is for the CLI).
   if (check.id === 'remote' && check.level === 'info') return undefined;
-  return check.fix.replace(/`capmac doctor`/g, 'Check again');
+  return tidy(check.fix.replace(/`capmac doctor`/g, t.macs.checkAgain));
 }
 
 function CheckRow({ mac, check }: { mac: string; check: Check }) {
@@ -29,11 +30,11 @@ function CheckRow({ mac, check }: { mac: string; check: Check }) {
     setBusy(true);
     try {
       await call('macs.fix', { name: mac, fix: id });
-      toast({ tone: 'success', title: `${check.action?.label ?? 'Fix'}: done` });
+      toast({ tone: 'success', title: t.macs.fixDone(check.action?.label ?? t.macs.fix) });
       void runHealth(mac);
     } catch (err) {
       const e = errorInfo(err);
-      if (!e.cancelled) toast({ tone: 'critical', title: e.message, body: e.hint });
+      if (!e.cancelled) toast({ tone: 'critical', title: tidy(e.message), body: tidy(e.hint) });
     } finally {
       setBusy(false);
     }
@@ -44,8 +45,8 @@ function CheckRow({ mac, check }: { mac: string; check: Check }) {
       <Icon name={LEVEL_ICON[check.level]} size={16} filled={check.level !== 'info'} className="check__icon" />
       <div className="check__body">
         <div className="check__label">
-          {check.label}
-          {check.detail && <span className="check__detail"> · {check.detail}</span>}
+          {tidy(check.label)}
+          {check.detail && <span className="check__detail"> · {tidy(check.detail)}</span>}
         </div>
         {text && <div className="check__fix">{text}</div>}
       </div>
@@ -65,11 +66,11 @@ function CheckRow({ mac, check }: { mac: string; check: Check }) {
               <Button variant="accent" onClick={() => void fix(check.action!.id)} data-autofocus>
                 {check.action.label}
               </Button>
-              <Button onClick={() => setConfirming(false)}>Cancel</Button>
+              <Button onClick={() => setConfirming(false)}>{t.common.cancel}</Button>
             </>
           }
         >
-          <p>{check.action.confirm}</p>
+          <p>{tidy(check.action.confirm)}</p>
         </Dialog>
       )}
     </li>

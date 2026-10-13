@@ -2,6 +2,7 @@
 import path from 'node:path';
 import { Menu, nativeImage, Tray } from 'electron';
 import type { AppCommand } from '../shared/contract.js';
+import { t } from '../shared/i18n/index.js';
 
 export interface TrayState {
   lastProject: { path: string; name: string } | null;
@@ -16,7 +17,7 @@ export class AppTray {
 
   constructor(private readonly iconsDir: string, private readonly actions: { show(): void; quit(): void; command(command: AppCommand): void; update(): void }) {
     this.tray = new Tray(this.icon(false));
-    this.tray.setToolTip('CapMac Studio');
+    this.tray.setToolTip(t.tray.tooltip);
     this.tray.on('click', () => actions.show());
     this.render();
   }
@@ -34,22 +35,22 @@ export class AppTray {
     const { lastProject, running } = this.state;
     const items: Electron.MenuItemConstructorOptions[] = [];
     for (const session of running) {
-      items.push({ label: `${session.name} · ${session.mode === 'live' ? 'Live' : session.mode === 'ipa' ? 'Building IPA' : 'Running'}`, enabled: false });
+      items.push({ label: `${session.name} · ${session.mode === 'live' ? t.tray.live : session.mode === 'ipa' ? t.tray.buildingIpa : t.tray.running}`, enabled: false });
     }
-    if (running.length) items.push({ label: running.length > 1 ? 'Stop all' : `Stop ${running[0]!.name}`, click: () => this.actions.command({ type: 'stop' }) }, { type: 'separator' });
+    if (running.length) items.push({ label: running.length > 1 ? t.tray.stopAll : t.tray.stop(running[0]!.name), click: () => this.actions.command({ type: 'stop' }) }, { type: 'separator' });
     if (lastProject) {
       items.push(
-        { label: `Run ${lastProject.name}`, click: () => this.actions.command({ type: 'start', mode: 'run', projectPath: lastProject.path }) },
-        { label: `Live ${lastProject.name}`, click: () => this.actions.command({ type: 'start', mode: 'live', projectPath: lastProject.path }) },
+        { label: t.tray.run(lastProject.name), click: () => this.actions.command({ type: 'start', mode: 'run', projectPath: lastProject.path }) },
+        { label: t.tray.liveReload(lastProject.name), click: () => this.actions.command({ type: 'start', mode: 'live', projectPath: lastProject.path }) },
         { type: 'separator' },
       );
     }
-    items.push({ label: 'Open CapMac Studio', click: () => this.actions.show() });
-    if (this.state.updateReady) items.push({ label: `Restart to update to ${this.state.updateReady}`, click: () => this.actions.update() });
-    items.push({ type: 'separator' }, { label: 'Quit', click: () => this.actions.quit() });
+    items.push({ label: t.tray.open, click: () => this.actions.show() });
+    if (this.state.updateReady) items.push({ label: t.tray.update(this.state.updateReady), click: () => this.actions.update() });
+    items.push({ type: 'separator' }, { label: t.tray.quit, click: () => this.actions.quit() });
     this.tray.setContextMenu(Menu.buildFromTemplate(items));
     this.tray.setImage(this.icon(running.length > 0));
-    this.tray.setToolTip(running.length ? `CapMac Studio · ${running.map((r) => r.name).join(', ')}` : 'CapMac Studio');
+    this.tray.setToolTip(running.length ? t.tray.tooltipRunning(running.map((r) => r.name).join(', ')) : t.tray.tooltip);
   }
 
   destroy(): void {

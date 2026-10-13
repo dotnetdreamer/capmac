@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { t } from '../../shared/i18n';
 import { openProject } from '../state/actions';
 import { Icon } from '../ui/Icon';
 
@@ -49,8 +50,8 @@ export function DropOverlay() {
     <div className="drop-overlay" aria-hidden="true">
       <div className="drop-overlay__card">
         <Icon name="folderAdd" size={28} />
-        <div className="drop-overlay__title">Drop to open your Capacitor app</div>
-        <div className="drop-overlay__text">The folder with capacitor.config.* (or any folder inside it)</div>
+        <div className="drop-overlay__title">{t.drop.title}</div>
+        <div className="drop-overlay__text">{t.drop.text}</div>
       </div>
     </div>
   );

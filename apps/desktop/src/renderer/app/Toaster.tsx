@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { t } from '../../shared/i18n';
 import { useToasts, type Toast } from '../state/app';
 import { Icon, type IconName } from '../ui/Icon';
 
@@ -36,7 +37,7 @@ function ToastItem({ toast }: { toast: Toast }) {
           </button>
         )}
       </div>
-      <button type="button" className="icon-btn icon-btn--sm" aria-label="Dismiss notification" onClick={() => dismiss(toast.id)}>
+      <button type="button" className="icon-btn icon-btn--sm" aria-label={t.ui.dismissNotification} onClick={() => dismiss(toast.id)}>
         <Icon name="dismiss" size={12} />
       </button>
     </div>
@@ -46,9 +47,9 @@ function ToastItem({ toast }: { toast: Toast }) {
 export function Toaster() {
   const toasts = useToasts((s) => s.toasts);
   return (
-    <section className="toaster" aria-label="Notifications" aria-live="polite">
-      {toasts.map((t) => (
-        <ToastItem key={t.id} toast={t} />
+    <section className="toaster" aria-label={t.ui.notifications} aria-live="polite">
+      {toasts.map((item) => (
+        <ToastItem key={item.id} toast={item} />
       ))}
     </section>
   );

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { MacSummary } from '../../../shared/contract';
+import { t, tidy } from '../../../shared/i18n';
 import { macStatusText } from '../../app/Sidebar';
 import { toast, useApp } from '../../state/app';
 import { call, errorInfo } from '../../state/engine';
@@ -14,11 +15,11 @@ import { CheckList } from './CheckList';
 import { RemoteAccess } from './RemoteAccess';
 import './macs.css';
 
-/** "Connected", or how over the internet: "Connected peer to peer · 42 ms". */
+/** "Connected", or how over the internet: "Connected directly over the internet · 42 ms". */
 function connectedText(mac: MacSummary): string {
-  if (mac.route === 'direct') return `Connected peer to peer${mac.rttMs !== null ? ` · ${mac.rttMs} ms` : ''}`;
-  if (mac.route === 'relay') return 'Connected through the relay';
-  return 'Connected';
+  if (mac.route === 'direct') return `${t.macState.connectedRoute('direct')}${mac.rttMs !== null ? ` · ${mac.rttMs} ms` : ''}`;
+  if (mac.route === 'relay') return t.macState.connectedRoute('relay');
+  return t.macState.connected;
 }
 
 const TONE: Record<string, Tone> = { connected: 'ok', restored: 'ok', connecting: 'busy', reconnecting: 'warn', lost: 'warn', offline: 'error', idle: 'idle', closed: 'idle' };
@@ -39,7 +40,7 @@ function MacCard({ mac, expanded, onToggle }: { mac: MacSummary; expanded: boole
       if (done) toast({ tone: 'success', title: done });
     } catch (err) {
       const e = errorInfo(err);
-      if (!e.cancelled) toast({ tone: 'critical', title: e.message, body: e.hint });
+      if (!e.cancelled) toast({ tone: 'critical', title: tidy(e.message), body: tidy(e.hint) });
     }
     void refresh();
   };
@@ -54,7 +55,7 @@ function MacCard({ mac, expanded, onToggle }: { mac: MacSummary; expanded: boole
         <div className="mac-card__ident">
           <div className="mac-card__name">
             {mac.label}
-            {mac.isDefault && <Badge tone="accent">Default</Badge>}
+            {mac.isDefault && <Badge tone="accent">{t.common.default}</Badge>}
           </div>
           <div className="mac-card__host mono">
             {mac.username}@{mac.host}
@@ -63,56 +64,56 @@ function MacCard({ mac, expanded, onToggle }: { mac: MacSummary; expanded: boole
         </div>
         <div className="mac-card__status">
           <span className={`mac-card__state mac-card__state--${tone}`}>{mac.state === 'connected' || mac.state === 'restored' ? connectedText(mac) : macStatusText(mac)}</span>
-          {mac.state === 'offline' && mac.error && <span className="mac-card__error">{mac.error}</span>}
+          {mac.state === 'offline' && mac.error && <span className="mac-card__error">{tidy(mac.error)}</span>}
         </div>
         <div className="mac-card__actions">
           {(mac.state === 'offline' || mac.state === 'idle') && (
             <Button size="sm" icon="plugConnected" onClick={() => void act(() => call('macs.connect', { name: mac.name }))}>
-              Connect
+              {t.macs.connect}
             </Button>
           )}
           <Button size="sm" icon="health" onClick={() => {
             if (!expanded) onToggle();
             void runHealth(mac.name);
           }}>
-            Check health
+            {t.macs.checkHealth}
           </Button>
-          <button type="button" className="icon-btn icon-btn--sm" aria-label={`More actions for ${mac.label}`} aria-haspopup="menu" {...menu.triggerProps}>
+          <button type="button" className="icon-btn icon-btn--sm" aria-label={t.common.moreActionsFor(mac.label)} aria-haspopup="menu" {...menu.triggerProps}>
             <Icon name="more" size={16} />
           </button>
           <Menu
             state={menu}
-            label={`${mac.label} actions`}
+            label={t.common.actionsFor(mac.label)}
             width={240}
             items={[
-              { id: 'default', label: 'Make default', icon: 'check', disabled: mac.isDefault, onSelect: () => void act(() => call('macs.setDefault', { name: mac.name }), `${mac.label} is now the default Mac`) },
-              { id: 'keychain', label: 'Unlock keychain…', icon: 'key', onSelect: () => void act(() => call('macs.unlockKeychain', { name: mac.name }), 'Keychain unlocked') },
-              { id: 'reconnect', label: 'Reconnect', icon: 'refresh', onSelect: () => void act(() => call('macs.connect', { name: mac.name })) },
-              { id: 'unpair', label: 'Unpair…', icon: 'unlink', danger: true, separatorBefore: true, onSelect: () => setUnpairing(true) },
+              { id: 'default', label: t.macs.makeDefault, icon: 'check', disabled: mac.isDefault, onSelect: () => void act(() => call('macs.setDefault', { name: mac.name }), t.macs.nowDefault(mac.label)) },
+              { id: 'keychain', label: t.macs.unlockKeychain, icon: 'key', onSelect: () => void act(() => call('macs.unlockKeychain', { name: mac.name }), t.macs.keychainUnlocked) },
+              { id: 'reconnect', label: t.macs.reconnect, icon: 'refresh', onSelect: () => void act(() => call('macs.connect', { name: mac.name })) },
+              { id: 'unpair', label: t.macs.unpairMenu, icon: 'unlink', danger: true, separatorBefore: true, onSelect: () => setUnpairing(true) },
             ]}
           />
-          <IconButton icon={expanded ? 'chevronUp' : 'chevronDown'} size="sm" label={expanded ? 'Hide details' : 'Show details'} onClick={onToggle} />
+          <IconButton icon={expanded ? 'chevronUp' : 'chevronDown'} size="sm" label={expanded ? t.macs.hideDetails : t.macs.showDetails} onClick={onToggle} />
         </div>
       </div>
       <dl className="mac-card__facts">
         <div>
-          <dt>macOS</dt>
+          <dt>{t.macs.facts.macos}</dt>
           <dd>{probe?.macos ?? '—'}</dd>
         </div>
         <div>
-          <dt>Xcode</dt>
+          <dt>{t.macs.facts.xcode}</dt>
           <dd>{probe?.xcode?.version ?? mac.xcode ?? '—'}</dd>
         </div>
         <div>
-          <dt>Chip</dt>
-          <dd>{probe ? (probe.arch === 'arm64' ? 'Apple silicon' : 'Intel') : '—'}</dd>
+          <dt>{t.macs.facts.chip}</dt>
+          <dd>{probe ? (probe.arch === 'arm64' ? t.macs.appleSilicon : t.macs.intel) : '—'}</dd>
         </div>
         <div>
-          <dt>Simulators</dt>
-          <dd>{probe ? `${probe.simulators.devices} · ${probe.simulators.runtimes.join(', ') || 'none'}` : '—'}</dd>
+          <dt>{t.macs.facts.simulators}</dt>
+          <dd>{probe ? `${probe.simulators.devices} · ${probe.simulators.runtimes.join(', ') || t.common.none}` : '—'}</dd>
         </div>
         <div>
-          <dt>Paired</dt>
+          <dt>{t.macs.facts.paired}</dt>
           <dd>{timeAgo(Date.parse(mac.pairedAt))}</dd>
         </div>
       </dl>
@@ -122,9 +123,9 @@ function MacCard({ mac, expanded, onToggle }: { mac: MacSummary; expanded: boole
           {health ? (
             <>
               <div className="mac-card__health-head">
-                <h3>Health</h3>
+                <h3>{t.macs.health}</h3>
                 <span className="faint">
-                  {health.status === 'checking' ? 'Checking…' : failing ? `${failing} need${failing === 1 ? 's' : ''} attention` : 'All good'}
+                  {health.status === 'checking' ? t.macs.checking : failing ? t.macs.needAttention(failing) : t.macs.allGood}
                   {health.status !== 'checking' && ` · ${timeAgo(health.at)}`}
                 </span>
               </div>
@@ -133,9 +134,9 @@ function MacCard({ mac, expanded, onToggle }: { mac: MacSummary; expanded: boole
           ) : (
             <div className="mac-card__health-empty">
               <Button icon="health" onClick={() => void runHealth(mac.name)}>
-                Check {mac.label}
+                {t.macs.checkMac(mac.label)}
               </Button>
-              <span className="faint">Xcode, simulators, Node.js, CocoaPods, disk space and signing.</span>
+              <span className="faint">{t.macs.checkWhat}</span>
             </div>
           )}
         </div>
@@ -145,7 +146,7 @@ function MacCard({ mac, expanded, onToggle }: { mac: MacSummary; expanded: boole
           open
           size="sm"
           icon="warning"
-          title={`Unpair ${mac.label}?`}
+          title={t.macs.unpairTitle(mac.label)}
           onClose={() => setUnpairing(false)}
           footer={
             <>
@@ -153,18 +154,18 @@ function MacCard({ mac, expanded, onToggle }: { mac: MacSummary; expanded: boole
                 variant="danger"
                 onClick={() => {
                   setUnpairing(false);
-                  void act(() => call('macs.unpair', { name: mac.name }), `${mac.label} unpaired`);
+                  void act(() => call('macs.unpair', { name: mac.name }), t.macs.unpaired(mac.label));
                 }}
               >
-                Unpair
+                {t.macs.unpair}
               </Button>
               <Button onClick={() => setUnpairing(false)} data-autofocus>
-                Cancel
+                {t.common.cancel}
               </Button>
             </>
           }
         >
-          <p>CapMac forgets this Mac. Its key stays in ~/.ssh/authorized_keys on the Mac; remove the line ending in “capmac@” there to revoke it.</p>
+          <p>{t.macs.unpairBody}</p>
         </Dialog>
       )}
     </article>
@@ -194,20 +195,20 @@ export function Macs() {
       <div className="page__inner">
         <header className="page__header">
           <div>
-            <h1 className="page__title">Macs</h1>
-            <p className="page__subtitle">The Macs this PC builds on, over one SSH connection each: on your network, or from anywhere with remote access.</p>
+            <h1 className="page__title">{t.macs.title}</h1>
+            <p className="page__subtitle">{t.macs.subtitle}</p>
           </div>
           {macs.length > 0 && (
             <div className="page__actions">
               <Button variant="accent" icon="add" onClick={() => navigate({ name: 'onboarding' })}>
-                Pair a Mac
+                {t.common.pairMac}
               </Button>
             </div>
           )}
         </header>
         {loaded && macs.length === 0 ? (
-          <EmptyState icon="mac" title="No Mac paired yet" actions={<Button variant="accent" icon="add" onClick={() => navigate({ name: 'onboarding' })}>Pair a Mac</Button>}>
-            CapMac Studio builds your app with Xcode on a Mac on your network. Pairing takes a minute: turn on Remote Login on the Mac and sign in once.
+          <EmptyState icon="mac" title={t.macs.emptyTitle} actions={<Button variant="accent" icon="add" onClick={() => navigate({ name: 'onboarding' })}>{t.common.pairMac}</Button>}>
+            {t.macs.emptyBody}
           </EmptyState>
         ) : (
           <div className="mac-list">

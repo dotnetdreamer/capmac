@@ -1,9 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { t } from '../../../shared/i18n';
 import { workspaceBus, type WorkspaceAction } from '../../app/commands';
 import { toast, useApp } from '../../state/app';
 import { consoleFor, ConsoleView, DEFAULT_FILTER, jsonPayload, SOURCE_LABELS, SOURCE_TAGS, type ConsoleFilter, type ConsoleLevel, type ConsoleLine, type ConsoleSource } from '../../state/console';
-import { clockTime, plural } from '../../lib/format';
+import { clockTime } from '../../lib/format';
 import { IconButton } from '../../ui/Button';
 import { EmptyState } from '../../ui/Feedback';
 import { SearchField } from '../../ui/Form';
@@ -12,13 +13,7 @@ import { Menu, usePopover } from '../../ui/Popover';
 import { JsonTree } from './JsonTree';
 
 const SOURCES: ConsoleSource[] = ['js', 'cap', 'native', 'bridge', 'web', 'capmac'];
-const LEVELS: Array<{ level: ConsoleLevel; label: string }> = [
-  { level: 'error', label: 'Errors' },
-  { level: 'warn', label: 'Warnings' },
-  { level: 'info', label: 'Info' },
-  { level: 'log', label: 'Logs' },
-  { level: 'debug', label: 'Debug' },
-];
+const LEVELS: Array<{ level: ConsoleLevel; label: string }> = (['error', 'warn', 'info', 'log', 'debug'] as const).map((level) => ({ level, label: t.console.levels[level] }));
 const FILTER_KEY = 'capmac.consoleFilter';
 
 function loadFilter(): ConsoleFilter {
@@ -51,7 +46,7 @@ function lineText(line: ConsoleLine): string {
   return `${clockTime(line.ts, true)} ${SOURCE_TAGS[line.source].padEnd(3)} ${line.level === 'error' ? 'ERROR ' : line.level === 'warn' ? 'WARN ' : ''}${line.text}`;
 }
 
-const Row = memo(function Row({ line, timestamps, highlight, current }: { line: ConsoleLine; timestamps: boolean; highlight: (t: string) => ReactNode; current: boolean }) {
+const Row = memo(function Row({ line, timestamps, highlight, current }: { line: ConsoleLine; timestamps: boolean; highlight: (text: string) => ReactNode; current: boolean }) {
   const json = line.source === 'js' || line.source === 'cap' ? jsonPayload(line) : null;
   return (
     <div className={`cl-row cl-row--${line.level} cl-row--${line.source}${current ? ' is-current' : ''}`}>
@@ -60,7 +55,7 @@ const Row = memo(function Row({ line, timestamps, highlight, current }: { line: 
         {SOURCE_TAGS[line.source]}
       </span>
       <span className="cl-level">
-        {line.level === 'error' ? <Icon name="errorCircle" size={12} filled label="Error" /> : line.level === 'warn' ? <Icon name="warning" size={12} filled label="Warning" /> : null}
+        {line.level === 'error' ? <Icon name="errorCircle" size={12} filled label={t.console.error} /> : line.level === 'warn' ? <Icon name="warning" size={12} filled label={t.console.warning} /> : null}
       </span>
       <span className="cl-text">{json ? <JsonTree prefix={json.prefix} value={json.value} highlight={highlight} /> : highlight(line.text)}</span>
     </div>
@@ -177,18 +172,18 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
     if (!last || last.level !== 'error' || last.id === lastAnnounced.current.id) return;
     if (Date.now() - lastAnnounced.current.at < 4000) return;
     lastAnnounced.current = { id: last.id, at: Date.now() };
-    setAnnouncement(`Console error: ${last.text.slice(0, 140)}`);
+    setAnnouncement(t.console.errorAnnounce(last.text.slice(0, 140)));
   }, [version, buffer, visible]);
 
   const visibleLines = () => view.ids.slice(0, count).map((id) => buffer.byId(id)).filter((l): l is ConsoleLine => Boolean(l));
   const copyAll = () => {
     const text = visibleLines().map(lineText).join('\n');
-    void navigator.clipboard.writeText(text).then(() => toast({ tone: 'success', title: `Copied ${plural(count, 'line')}` }));
+    void navigator.clipboard.writeText(text).then(() => toast({ tone: 'success', title: t.console.copied(count) }));
   };
   const exportLog = async () => {
     const name = `${path.split(/[\\/]/).pop()}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.log`;
     const saved = await window.capmac.invoke('app:save-text', { text: visibleLines().map(lineText).join('\r\n'), name });
-    if (saved) toast({ tone: 'success', title: 'Console exported', body: saved, action: { label: 'Show in folder', run: () => void window.capmac.invoke('app:show-in-folder', { path: saved }) } });
+    if (saved) toast({ tone: 'success', title: t.console.saved, body: saved, action: { label: t.common.showInFolder, run: () => void window.capmac.invoke('app:show-in-folder', { path: saved }) } });
   };
 
   const hiddenLevels = LEVELS.filter((l) => !filter.levels[l.level]).length;
@@ -199,8 +194,8 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
 
   return (
     <div className="console">
-      <div className="console__bar" role="toolbar" aria-label="Console filters">
-        <div className="console__sources" role="group" aria-label="Sources">
+      <div className="console__bar" role="toolbar" aria-label={t.console.filters}>
+        <div className="console__sources" role="group" aria-label={t.console.sourcesLabel}>
           {SOURCES.map((s) => (
             <button
               key={s}
@@ -214,21 +209,21 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
           ))}
         </div>
         <button type="button" className={`chip chip--menu${hiddenLevels ? ' is-on' : ''}`} aria-haspopup="menu" {...levelMenu.triggerProps}>
-          {hiddenLevels ? `Levels (${LEVELS.length - hiddenLevels})` : 'All levels'}
+          {hiddenLevels ? t.console.levelsShown(LEVELS.length - hiddenLevels) : t.console.allLevels}
           <Icon name="chevronDown" size={12} />
         </button>
         <Menu
           state={levelMenu}
-          label="Levels"
+          label={t.console.levelsMenu}
           placement="bottom-start"
           items={[
             ...LEVELS.map((l) => ({ id: l.level, label: l.label, checked: filter.levels[l.level], onSelect: () => setFilter((f) => ({ ...f, levels: { ...f.levels, [l.level]: !f.levels[l.level] } })) })),
-            { id: 'errors-only', label: 'Only errors and warnings', separatorBefore: true, onSelect: () => setFilter((f) => ({ ...f, levels: { error: true, warn: true, info: false, log: false, debug: false } })) },
-            { id: 'all', label: 'Show all levels', onSelect: () => setFilter((f) => ({ ...f, levels: { ...DEFAULT_FILTER.levels } })) },
+            { id: 'errors-only', label: t.console.onlyProblems, separatorBefore: true, onSelect: () => setFilter((f) => ({ ...f, levels: { error: true, warn: true, info: false, log: false, debug: false } })) },
+            { id: 'all', label: t.console.showAllLevels, onSelect: () => setFilter((f) => ({ ...f, levels: { ...DEFAULT_FILTER.levels } })) },
           ]}
         />
         {errorCount > 0 && (
-          <span className="count count--error" title={`${plural(errorCount, 'error')} in the console`}>
+          <span className="count count--error" title={t.console.errorsHere(errorCount)}>
             {errorCount}
           </span>
         )}
@@ -237,12 +232,12 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
           ref={searchRef}
           compact
           className="console__search"
-          placeholder="Find"
-          aria-label="Find in console"
+          placeholder={t.console.find}
+          aria-label={t.console.findLabel}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onClear={() => setQuery('')}
-          count={matches.length ? `${current + 1} of ${matches.length}` : '0 results'}
+          count={matches.length ? t.console.match(current + 1, matches.length) : t.console.noResults}
           onPrev={() => goTo(current - 1)}
           onNext={() => goTo(current + 1)}
           onKeyDown={(e) => {
@@ -255,20 +250,20 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
             }
           }}
         />
-        <IconButton icon={paused ? 'play' : 'pause'} size="sm" label={paused ? 'Resume' : 'Pause'} pressed={paused} onClick={() => (paused ? jumpToEnd() : (setFrozen(view.ids.length), setPaused(true)))} />
-        <IconButton icon="eraser" size="sm" label="Clear" shortcut="Ctrl+L" onClick={() => buffer.clear()} disabled={buffer.lines.length === 0} />
-        <button type="button" className="icon-btn icon-btn--sm" aria-label="More console options" aria-haspopup="menu" {...moreMenu.triggerProps}>
+        <IconButton icon={paused ? 'play' : 'pause'} size="sm" label={paused ? t.console.resume : t.console.pause} pressed={paused} onClick={() => (paused ? jumpToEnd() : (setFrozen(view.ids.length), setPaused(true)))} />
+        <IconButton icon="eraser" size="sm" label={t.console.clear} shortcut="Ctrl+L" onClick={() => buffer.clear()} disabled={buffer.lines.length === 0} />
+        <button type="button" className="icon-btn icon-btn--sm" aria-label={t.console.moreOptions} aria-haspopup="menu" {...moreMenu.triggerProps}>
           <Icon name="more" size={16} />
         </button>
         <Menu
           state={moreMenu}
-          label="Console options"
+          label={t.console.options}
           width={220}
           items={[
-            { id: 'time', label: 'Timestamps', checked: timestamps, onSelect: () => void updateSettings({ consoleTimestamps: !timestamps }) },
-            { id: 'wrap', label: 'Wrap long lines', checked: wrap, onSelect: () => void updateSettings({ consoleWrap: !wrap }) },
-            { id: 'copy', label: 'Copy visible lines', icon: 'copy', separatorBefore: true, disabled: count === 0, onSelect: copyAll },
-            { id: 'export', label: 'Export to a file…', icon: 'download', disabled: count === 0, onSelect: () => void exportLog() },
+            { id: 'time', label: t.console.timestamps, checked: timestamps, onSelect: () => void updateSettings({ consoleTimestamps: !timestamps }) },
+            { id: 'wrap', label: t.console.wrap, checked: wrap, onSelect: () => void updateSettings({ consoleWrap: !wrap }) },
+            { id: 'copy', label: t.console.copyVisible, icon: 'copy', separatorBefore: true, disabled: count === 0, onSelect: copyAll },
+            { id: 'export', label: t.console.saveToFile, icon: 'download', disabled: count === 0, onSelect: () => void exportLog() },
           ]}
         />
         </div>
@@ -280,11 +275,11 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
         tabIndex={0}
         role="log"
         aria-live="off"
-        aria-label="Console output"
+        aria-label={t.console.output}
       >
         {count === 0 ? (
-          <EmptyState compact icon="console" title={buffer.lines.length ? 'No lines match the filters' : 'Console'}>
-            {buffer.lines.length ? 'Turn on more sources or levels above.' : 'console.log from your app, Capacitor and native output appear here while it runs.'}
+          <EmptyState compact icon="console" title={buffer.lines.length ? t.console.noMatchTitle : t.console.emptyTitle}>
+            {buffer.lines.length ? t.console.noMatchBody : t.console.emptyBody}
           </EmptyState>
         ) : (
           <div className="console__inner" style={{ height: virtualizer.getTotalSize() }}>
@@ -303,7 +298,7 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
       {(paused || (!atEnd && newLines > 0)) && count > 0 && (
         <button type="button" className="console__jump" onClick={jumpToEnd}>
           <Icon name="arrowDown" size={14} />
-          {paused ? `Paused${view.ids.length > frozen ? ` · ${plural(view.ids.length - frozen, 'new line')}` : ''}` : plural(newLines, 'new line')}
+          {paused ? t.console.paused(view.ids.length - frozen) : t.count.newLines(newLines)}
         </button>
       )}
       <div className="visually-hidden" aria-live="polite">

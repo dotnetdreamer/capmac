@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { Target } from '../../shared/contract';
+import { t } from '../../shared/i18n';
 import { macFor, openProject, setProjectPrefs } from '../state/actions';
 import { useApp } from '../state/app';
 import { call } from '../state/engine';
 import { useMacs, useTargets } from '../state/macs';
 import { buildCommands, type Command } from './commands';
+import { targetState } from '../features/workspace/TargetPicker';
 import { fuzzyScore } from '../lib/fuzzy';
 import { Kbd } from '../ui/Feedback';
 import { Icon, type IconName } from '../ui/Icon';
@@ -36,8 +38,8 @@ function rememberCommand(id: string): void {
   }
 }
 
-function targetLabel(t: Target): string {
-  return t.kind === 'simulator' ? `${t.name}` : `${t.name} (device)`;
+function targetLabel(target: Target): string {
+  return target.kind === 'simulator' ? target.name : t.targets.device(target.name);
 }
 
 function useItems(mode: string | null): { items: Item[]; placeholder: string } {
@@ -49,41 +51,41 @@ function useItems(mode: string | null): { items: Item[]; placeholder: string } {
   const targets = useTargets((s) => (mac ? s.byMac[mac]?.targets : null));
   useEffect(() => {
     if (mode === 'target' && mac && !targets) {
-      void call('targets.list', { mac }).then((t) => useTargets.getState().set(mac, t), () => undefined);
+      void call('targets.list', { mac }).then((list) => useTargets.getState().set(mac, list), () => undefined);
     }
   }, [mode, mac, targets]);
 
   return useMemo(() => {
     if (mode === 'project') {
       return {
-        placeholder: 'Switch to a project…',
-        items: (settings?.recentProjects ?? []).map((p) => ({ id: p.path, title: p.name, group: 'Recent projects', icon: 'grid' as IconName, hint: p.appId, run: () => void openProject(p.path) })),
+        placeholder: t.palette.switchProject,
+        items: (settings?.recentProjects ?? []).map((p) => ({ id: p.path, title: p.name, group: t.palette.recentProjects, icon: 'grid' as IconName, hint: p.appId, run: () => void openProject(p.path) })),
       };
     }
     if (mode === 'mac' && path) {
       return {
-        placeholder: 'Build on which Mac?',
-        items: macs.map((m) => ({ id: m.name, title: m.label, group: 'Paired Macs', icon: 'mac' as IconName, hint: `${m.username}@${m.host}`, run: () => setProjectPrefs(path, { mac: m.name }) })),
+        placeholder: t.palette.whichMac,
+        items: macs.map((m) => ({ id: m.name, title: m.label, group: t.palette.pairedMacs, icon: 'mac' as IconName, hint: `${m.username}@${m.host}`, run: () => setProjectPrefs(path, { mac: m.name }) })),
       };
     }
     if (mode === 'target' && path) {
       const list = targets ? [...targets.simulators, ...targets.devices] : [];
       return {
-        placeholder: targets ? 'Run on which simulator or device?' : 'Loading simulators and devices…',
-        items: list.map((t) => ({
-          id: t.udid,
-          title: targetLabel(t),
-          group: t.kind === 'device' ? 'Devices' : t.state === 'Booted' ? 'Booted' : t.os,
-          icon: (t.kind === 'device' ? 'phone' : /iPad/.test(t.name) ? 'tablet' : 'phone') as IconName,
-          hint: t.kind === 'device' ? `${t.os} · ${t.state}` : t.state === 'Booted' ? `${t.os} · booted` : t.os,
-          keywords: t.udid,
-          run: () => setProjectPrefs(path, { target: t.udid }),
+        placeholder: targets ? t.palette.whichTarget : t.palette.loadingTargets,
+        items: list.map((target) => ({
+          id: target.udid,
+          title: targetLabel(target),
+          group: target.kind === 'device' ? t.targets.devices : target.state === 'Booted' ? t.targets.running : target.os,
+          icon: (target.kind === 'device' ? 'phone' : /iPad/.test(target.name) ? 'tablet' : 'phone') as IconName,
+          hint: target.kind === 'device' ? `${target.os} · ${targetState(target)}` : target.state === 'Booted' ? t.palette.runningHint(target.os) : target.os,
+          keywords: target.udid,
+          run: () => setProjectPrefs(path, { target: target.udid }),
         })),
       };
     }
     return {
-      placeholder: 'Search or run a command…',
-      items: buildCommands().map((c: Command) => ({ id: c.id, title: c.title, group: c.group, icon: c.icon, shortcut: c.shortcut, keywords: c.keywords, hint: c.hint, run: c.run })),
+      placeholder: t.palette.search,
+      items: buildCommands().map((c: Command) => ({ id: c.id, title: c.title, group: t.palette.groups[c.group], icon: c.icon, shortcut: c.shortcut, keywords: c.keywords, hint: c.hint, run: c.run })),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, path, macs, targets, settings?.recentProjects, route]);
@@ -119,7 +121,7 @@ export function CommandPalette() {
     if (!query.trim()) {
       if (mode) return items;
       const recent = recentIds();
-      const recentItems = recent.map((id) => items.find((i) => i.id === id)).filter((i): i is Item => Boolean(i)).map((i) => ({ ...i, group: 'Recent' }));
+      const recentItems = recent.map((id) => items.find((i) => i.id === id)).filter((i): i is Item => Boolean(i)).map((i) => ({ ...i, group: t.palette.recent }));
       return [...recentItems, ...items.filter((i) => !recent.includes(i.id))];
     }
     return items
@@ -156,7 +158,7 @@ export function CommandPalette() {
     <dialog
       ref={dialog}
       className="palette"
-      aria-label="Command palette"
+      aria-label={t.palette.label}
       onCancel={(e) => {
         e.preventDefault();
         close();
@@ -184,12 +186,12 @@ export function CommandPalette() {
             />
             {mode && (
               <button type="button" className="btn btn--sm btn--subtle" onClick={() => useApp.getState().openPalette(null)}>
-                All commands
+                {t.palette.allCommands}
               </button>
             )}
           </div>
-          <div ref={list} id="palette-list" className="palette__list" role="listbox" aria-label="Commands">
-            {results.length === 0 && <div className="palette__empty">No matching commands</div>}
+          <div ref={list} id="palette-list" className="palette__list" role="listbox" aria-label={t.palette.list}>
+            {results.length === 0 && <div className="palette__empty">{t.palette.empty}</div>}
             {results.map((item, index) => {
               const header = item.group !== lastGroup ? item.group : null;
               lastGroup = item.group;
@@ -216,13 +218,13 @@ export function CommandPalette() {
           </div>
           <div className="palette__footer" aria-hidden="true">
             <span>
-              <Kbd keys="↑" /> <Kbd keys="↓" /> navigate
+              <Kbd keys="↑" /> <Kbd keys="↓" /> {t.palette.keys.navigate}
             </span>
             <span>
-              <Kbd keys="Enter" /> run
+              <Kbd keys="Enter" /> {t.palette.keys.run}
             </span>
             <span>
-              <Kbd keys="Esc" /> close
+              <Kbd keys="Esc" /> {t.palette.keys.close}
             </span>
           </div>
         </>

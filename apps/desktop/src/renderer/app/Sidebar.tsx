@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from 'react';
 import type { MacSummary } from '../../shared/contract';
+import { t } from '../../shared/i18n';
 import { useApp, type Route } from '../state/app';
 import { resolveMac, useMacs } from '../state/macs';
 import { projectKey, useProjects } from '../state/projects';
@@ -41,18 +42,17 @@ export function macStatusText(mac: MacSummary): string {
   switch (mac.state) {
     case 'connected':
     case 'restored':
-      if (mac.route === 'direct') return 'Connected · peer to peer';
-      if (mac.route === 'relay') return 'Connected · through the relay';
-      return mac.xcode ? `Connected · Xcode ${mac.xcode}` : 'Connected';
+      if (mac.route === 'direct' || mac.route === 'relay') return t.macState.connectedRoute(mac.route);
+      return mac.xcode ? t.macState.connectedWith(t.macState.xcode(mac.xcode)) : t.macState.connected;
     case 'connecting':
-      return 'Connecting…';
+      return t.macState.connecting;
     case 'lost':
     case 'reconnecting':
-      return 'Reconnecting…';
+      return t.macState.reconnecting;
     case 'offline':
-      return 'Offline';
+      return t.macState.offline;
     default:
-      return mac.xcode ? `Xcode ${mac.xcode}` : 'Paired';
+      return mac.xcode ? t.macState.xcode(mac.xcode) : t.macState.paired;
   }
 }
 
@@ -61,7 +61,7 @@ function MacChip({ collapsed }: { collapsed: boolean }) {
   const navigate = useApp((s) => s.navigate);
   const mac = resolveMac(macs);
   const tone = mac ? MAC_TONE[mac.state] ?? 'idle' : 'idle';
-  const label = mac ? `${mac.label}: ${macStatusText(mac)}` : 'No Mac paired';
+  const label = mac ? `${mac.label}: ${macStatusText(mac)}` : t.sidebar.noMac;
   const button = (
     <button type="button" className="mac-chip" onClick={() => navigate({ name: mac ? 'macs' : 'onboarding' })} aria-label={collapsed ? label : undefined}>
       <span className="mac-chip__icon">
@@ -70,8 +70,8 @@ function MacChip({ collapsed }: { collapsed: boolean }) {
       </span>
       {!collapsed && (
         <span className="mac-chip__text">
-          <span className="mac-chip__name truncate">{mac ? mac.label : 'Pair a Mac'}</span>
-          <span className="mac-chip__status truncate">{mac ? macStatusText(mac) : 'Needed to build for iOS'}</span>
+          <span className="mac-chip__name truncate">{mac ? mac.label : t.common.pairMac}</span>
+          <span className="mac-chip__status truncate">{mac ? macStatusText(mac) : t.sidebar.pairHint}</span>
         </span>
       )}
     </button>
@@ -95,7 +95,7 @@ function ProjectItem({ path, name, collapsed }: { path: string; name: string; co
   const active = isActive(run);
   const tone: Tone | null = run?.status === 'failed' ? 'error' : active ? (isBusy(run) ? 'busy' : run?.mode === 'live' ? 'live' : 'ok') : null;
   return (
-    <NavItem label={entry?.summary?.appName ?? name} route={{ name: 'project', path }} collapsed={collapsed} badge={tone ? <StatusDot tone={tone} pulse={tone === 'busy'} label={tone === 'error' ? 'Failed' : run?.mode === 'live' ? 'Live' : 'Running'} /> : undefined}>
+    <NavItem label={entry?.summary?.appName ?? name} route={{ name: 'project', path }} collapsed={collapsed} badge={tone ? <StatusDot tone={tone} pulse={tone === 'busy'} label={tone === 'error' ? t.sidebar.failed : run?.mode === 'live' ? t.common.live : t.sidebar.running} /> : undefined}>
       <span className="nav-item__app">
         <AppIcon src={entry?.icon} name={entry?.summary?.appName ?? name} seed={entry?.summary?.appId} size={16} />
         {collapsed && tone && <StatusDot tone={tone} />}
@@ -107,27 +107,27 @@ function ProjectItem({ path, name, collapsed }: { path: string; name: string; co
 export function Sidebar({ collapsed }: { collapsed: boolean }) {
   const recents = useApp((s) => s.settings?.recentProjects ?? []);
   return (
-    <nav className={`sidebar${collapsed ? ' is-collapsed' : ''}`} aria-label="Main">
+    <nav className={`sidebar${collapsed ? ' is-collapsed' : ''}`} aria-label={t.sidebar.label}>
       <div className="sidebar__group">
-        <NavItem icon="home" label="Home" route={{ name: 'home' }} collapsed={collapsed} />
+        <NavItem icon="home" label={t.sidebar.home} route={{ name: 'home' }} collapsed={collapsed} />
       </div>
       {recents.length > 0 && (
-        <div className="sidebar__group" role="group" aria-label="Recent projects">
-          {!collapsed && <div className="sidebar__heading">Projects</div>}
+        <div className="sidebar__group" role="group" aria-label={t.sidebar.recentProjects}>
+          {!collapsed && <div className="sidebar__heading">{t.sidebar.projects}</div>}
           {recents.slice(0, 6).map((p) => (
             <ProjectItem key={p.path} path={p.path} name={p.name} collapsed={collapsed} />
           ))}
         </div>
       )}
       <div className="sidebar__group">
-        {!collapsed && recents.length > 0 && <div className="sidebar__heading">Tools</div>}
-        <NavItem icon="phone" label="Devices" route={{ name: 'devices' }} collapsed={collapsed} />
-        <NavItem icon="mac" label="Macs" route={{ name: 'macs' }} collapsed={collapsed} />
+        {!collapsed && recents.length > 0 && <div className="sidebar__heading">{t.sidebar.tools}</div>}
+        <NavItem icon="phone" label={t.sidebar.devices} route={{ name: 'devices' }} collapsed={collapsed} />
+        <NavItem icon="mac" label={t.sidebar.macs} route={{ name: 'macs' }} collapsed={collapsed} />
       </div>
       <div className="sidebar__spacer" />
       <div className="sidebar__group sidebar__group--bottom">
         <MacChip collapsed={collapsed} />
-        <NavItem icon="settings" label="Settings" route={{ name: 'settings' }} collapsed={collapsed} />
+        <NavItem icon="settings" label={t.sidebar.settings} route={{ name: 'settings' }} collapsed={collapsed} />
       </div>
     </nav>
   );

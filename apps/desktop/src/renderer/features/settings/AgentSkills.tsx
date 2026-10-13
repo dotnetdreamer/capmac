@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AgentSkillStatus, SkillChange, SkillScope } from '@capmac/core/shared/skills';
 import type { SkillsInfo } from '../../../shared/contract';
+import { t, tidy } from '../../../shared/i18n';
 import { toast, useApp } from '../../state/app';
 import { errorInfo } from '../../state/engine';
 import { Button } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { Badge, InfoBar, Spinner } from '../../ui/Feedback';
 import { Segmented, Select } from '../../ui/Form';
+import { Rich } from '../../ui/Rich';
 import './agent-skills.css';
 
 /** Settings › Terminal commands: opens the dialog that adds the capmac skill to AI coding agents. */
@@ -15,7 +17,7 @@ export function AgentSkillsButton() {
   return (
     <>
       <Button icon="sparkle" onClick={() => setOpen(true)}>
-        Set up…
+        {t.skills.setUp}
       </Button>
       {open && <AgentSkillsDialog onClose={() => setOpen(false)} />}
     </>
@@ -26,15 +28,15 @@ function stateOf(agent: AgentSkillStatus, scope: SkillScope): { label: string; t
   const place = scope === 'global' ? agent.global : agent.project;
   const seen = scope === 'global' ? agent.seenGlobal : agent.seenInProject;
   if (!place) return null;
-  if (place.state === 'installed') return { label: 'Added', tone: 'success' };
-  if (place.state === 'outdated') return { label: 'Update available', tone: 'caution' };
-  if (place.state === 'foreign') return { label: 'Has its own “capmac” skill', tone: 'caution' };
-  return seen ? { label: 'Added (shared folder)', tone: 'outline' } : null;
+  if (place.state === 'installed') return { label: t.skills.state.added, tone: 'success' };
+  if (place.state === 'outdated') return { label: t.skills.state.outdated, tone: 'caution' };
+  if (place.state === 'foreign') return { label: t.skills.state.foreign, tone: 'caution' };
+  return seen ? { label: t.skills.state.shared, tone: 'outline' } : null;
 }
 
 function summary(changes: SkillChange[]): string {
   const agents = [...new Set(changes.filter((c) => c.result !== 'absent' && c.result !== 'skipped-foreign').flatMap((c) => c.agents))];
-  return agents.length > 4 ? `${agents.slice(0, 4).join(', ')} and ${agents.length - 4} more` : agents.join(', ');
+  return agents.length > 4 ? t.skills.andMore(agents.slice(0, 4).join(', '), agents.length - 4) : agents.join(', ');
 }
 
 function AgentSkillsDialog({ onClose }: { onClose: () => void }) {
@@ -55,7 +57,7 @@ function AgentSkillsDialog({ onClose }: { onClose: () => void }) {
   }, [scope, projectDir]);
 
   useEffect(() => {
-    refresh().catch((err) => setResult({ tone: 'caution', text: errorInfo(err).message }));
+    refresh().catch((err) => setResult({ tone: 'caution', text: tidy(errorInfo(err).message) }));
   }, [refresh]);
 
   const toggle = (id: string) =>
@@ -80,11 +82,11 @@ function AgentSkillsDialog({ onClose }: { onClose: () => void }) {
     try {
       await window.capmac.invoke('app:capmac-command', { install });
       toast(install
-        ? { tone: 'success', title: 'capmac command added', body: 'New terminals and agent sessions can run capmac.' }
-        : { tone: 'info', title: 'capmac command removed' });
+        ? { tone: 'success', title: t.skills.commandAdded, body: t.skills.commandAddedBody }
+        : { tone: 'info', title: t.skills.commandRemoved });
       await refresh();
     } catch (err) {
-      toast({ tone: 'critical', title: install ? 'Could not add the capmac command' : 'Could not remove the capmac command', body: errorInfo(err).message });
+      toast({ tone: 'critical', title: install ? t.skills.addCommandFailed : t.skills.removeCommandFailed, body: tidy(errorInfo(err).message) });
     } finally {
       setCommandBusy(false);
     }
@@ -107,16 +109,16 @@ function AgentSkillsDialog({ onClose }: { onClose: () => void }) {
       if (action === 'add') {
         setResult(
           foreign.length
-            ? { tone: 'caution', text: `${foreign.map((c) => c.dir).join(', ')} already holds a “capmac” skill that CapMac did not write, so it was left alone.` }
-            : { tone: 'success', text: `${who} can now use CapMac. Agents load skills when a session starts, so start a new one.${scope === 'project' ? ' Commit the new folders so your team gets it too.' : ''}` },
+            ? { tone: 'caution', text: t.skills.foreign(foreign.map((c) => c.dir).join(', ')) }
+            : { tone: 'success', text: t.skills.added(who, scope === 'project') },
         );
-        if (!foreign.length) toast({ tone: 'success', title: 'Skill added', body: who });
+        if (!foreign.length) toast({ tone: 'success', title: t.skills.addedToast, body: who });
       } else {
-        setResult({ tone: 'success', text: changes.some((c) => c.result === 'removed') ? `Removed. It was read by ${who}.` : 'Nothing to remove there.' });
+        setResult({ tone: 'success', text: changes.some((c) => c.result === 'removed') ? t.skills.removed(who) : t.skills.nothingToRemove });
       }
       await refresh();
     } catch (err) {
-      setResult({ tone: 'caution', text: errorInfo(err).message });
+      setResult({ tone: 'caution', text: tidy(errorInfo(err).message) });
     } finally {
       setBusy(null);
     }
@@ -133,93 +135,92 @@ function AgentSkillsDialog({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       size="lg"
       icon="sparkle"
-      title="Teach your AI agents to use CapMac"
+      title={t.skills.title}
       footer={
         <>
           <Button variant="subtle" icon="delete" disabled={!canRemove || busy !== null} busy={busy === 'remove'} onClick={() => void run('remove')}>
-            Remove
+            {t.common.remove}
           </Button>
           <span className="agent-skills__spacer" />
-          <Button onClick={onClose}>Close</Button>
+          <Button onClick={onClose}>{t.common.close}</Button>
           <Button variant="accent" icon="add" disabled={!chosen.length || needsProject || busy !== null} busy={busy === 'add'} onClick={() => void run('add')}>
-            {anyOutdated ? 'Update skill' : 'Add skill'}
+            {anyOutdated ? t.skills.update : t.skills.add}
           </Button>
         </>
       }
     >
       <p className="agent-skills__intro">
-        Adds a short skill to your coding agents. With it, an agent can build your iOS app on the Mac, run it, read its console, take a screenshot and fix build errors
-        with the <code>capmac</code> command.
+        <Rich text={t.skills.intro} />
       </p>
       {info && !info.command.found && (
         <InfoBar
           tone="caution"
           className="agent-skills__command"
-          title="Agents need the capmac command"
+          title={t.skills.needCommand}
           actions={
             <Button busy={commandBusy} onClick={() => void setCommand(true)}>
-              Add the capmac command
+              {t.skills.addCommand}
             </Button>
           }
         >
-          New terminals on this PC can’t run <code>capmac</code> yet. CapMac Studio can add it; it runs the CLI that comes with Studio.
+          <Rich text={t.skills.needCommandBody} />
         </InfoBar>
       )}
       {info?.command.ours && (
         <p className="agent-skills__hint faint">
-          The <code>capmac</code> command runs the CLI that comes with CapMac Studio.{' '}
+          <Rich text={t.skills.commandOurs} />{' '}
           <button type="button" className="agent-skills__inline-link" disabled={commandBusy} onClick={() => void setCommand(false)}>
-            Remove the command
+            {t.skills.removeCommand}
           </button>
         </p>
       )}
 
       <div className="agent-skills__where">
         <Segmented
-          label="Where"
+          label={t.skills.where}
           value={scope}
           onChange={setScope}
           options={[
-            { value: 'global', label: 'All my projects', icon: 'desktop' },
-            { value: 'project', label: 'One project', icon: 'folderOpen' },
+            { value: 'global', label: t.skills.global, icon: 'desktop' },
+            { value: 'project', label: t.skills.project, icon: 'folderOpen' },
           ]}
         />
         {scope === 'project' && (
           <div className="agent-skills__project">
             {projectOptions.length > 0 && (
-              <Select label="Project" value={projectDir ?? ''} onChange={setProjectDir} options={projectOptions} width={260} />
+              <Select label={t.skills.projectLabel} value={projectDir ?? ''} onChange={setProjectDir} options={projectOptions} width={260} />
             )}
             <Button icon="folderOpen" onClick={() => void pickFolder()}>
-              Choose folder…
+              {t.skills.chooseFolder}
             </Button>
           </div>
         )}
       </div>
       <p className="agent-skills__hint faint">
         {scope === 'global'
-          ? 'Just for you, in each agent’s own folder in your user profile.'
+          ? t.skills.globalHint
           : info?.projectRoot
-            ? `In ${info.projectRoot}, in the folders each agent reads. Commit them and your team’s agents get it too.`
-            : 'Pick the project the skill should go into.'}
+            ? t.skills.projectHint(info.projectRoot)
+            : t.skills.pickProject}
       </p>
 
       <div className="agent-skills__list-head">
-        <span>Agents</span>
+        <span>{t.skills.agents}</span>
         <span className="agent-skills__quick">
           <button type="button" className="link" onClick={() => setSelected(new Set(info?.agents.filter((a) => a.detected).map((a) => a.id)))}>
-            Found on this PC
+            {t.skills.foundHere}
           </button>
           <button type="button" className="link" onClick={() => setSelected(new Set(info?.agents.map((a) => a.id)))}>
-            All
+            {t.skills.all}
           </button>
           <button type="button" className="link" onClick={() => setSelected(new Set())}>
-            None
+            {t.skills.none}
           </button>
         </span>
       </div>
       {!info ? (
         <div className="agent-skills__loading">
-          <Spinner label="Looking for agents" />
+          <Spinner label={t.skills.looking} />
         </div>
       ) : (
         <ul className="agent-skills__list">
@@ -230,7 +231,7 @@ function AgentSkillsDialog({ onClose }: { onClose: () => void }) {
                 <label className="agent-skills__row">
                   <input type="checkbox" checked={selected?.has(agent.id) ?? false} onChange={() => toggle(agent.id)} />
                   <span className="agent-skills__name">{agent.name}</span>
-                  {agent.detected && <span className="faint">found on this PC</span>}
+                  {agent.detected && <span className="faint">{t.skills.foundTag}</span>}
                   <span className="agent-skills__spacer" />
                   {state && <Badge tone={state.tone}>{state.label}</Badge>}
                 </label>

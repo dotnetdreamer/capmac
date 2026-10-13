@@ -4,25 +4,14 @@
  */
 import { create } from 'zustand';
 import type { Diagnostic, Envelope, ErrorInfo, HostEvent, Target } from '../../shared/contract';
+import { t } from '../../shared/i18n';
 import { projectKey } from './projects';
 
 export type TimelinePhase = 'web' | 'sync' | 'deps' | 'cap' | 'build' | 'boot' | 'install' | 'launch' | 'archive' | 'export' | 'download';
 
 export const RUN_PHASES: TimelinePhase[] = ['web', 'sync', 'deps', 'cap', 'build', 'boot', 'install', 'launch'];
 export const IPA_PHASES: TimelinePhase[] = ['web', 'sync', 'deps', 'cap', 'archive', 'export', 'download'];
-export const PHASE_LABELS: Record<TimelinePhase, string> = {
-  web: 'Web build',
-  sync: 'Sync',
-  deps: 'Dependencies',
-  cap: 'cap sync',
-  build: 'Xcode build',
-  boot: 'Boot',
-  install: 'Install',
-  launch: 'Launch',
-  archive: 'Archive',
-  export: 'Export',
-  download: 'Download',
-};
+export const PHASE_LABELS: Record<TimelinePhase, string> = t.phases;
 
 export interface PhaseState {
   status: 'pending' | 'running' | 'done' | 'skipped' | 'failed' | 'cancelled';

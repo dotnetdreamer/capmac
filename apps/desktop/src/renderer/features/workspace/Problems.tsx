@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import type { Diagnostic } from '../../../shared/contract';
+import { t } from '../../../shared/i18n';
 import { openInEditor } from '../../state/actions';
 import { toast, useApp } from '../../state/app';
 import type { RunState } from '../../state/runs';
-import { plural, relativeTo } from '../../lib/format';
+import { relativeTo } from '../../lib/format';
 import { Button, IconButton } from '../../ui/Button';
 import { EmptyState } from '../../ui/Feedback';
 import { Icon } from '../../ui/Icon';
@@ -15,15 +16,15 @@ function asText(d: Diagnostic): string {
 
 function copy(text: string, what: string) {
   void navigator.clipboard.writeText(text).then(
-    () => toast({ tone: 'success', title: `Copied ${what}` }),
-    () => toast({ tone: 'critical', title: 'Could not copy to the clipboard' }),
+    () => toast({ tone: 'success', title: t.problems.copied(what) }),
+    () => toast({ tone: 'critical', title: t.problems.copyFailed }),
   );
 }
 
 /** The source line and the caret line under it (xcodebuild's excerpt). */
 function Excerpt({ lines, line }: { lines: string[]; line?: number }) {
   return (
-    <pre className="excerpt selectable" aria-label="Code excerpt">
+    <pre className="excerpt selectable" aria-label={t.problems.excerpt}>
       {lines.map((text, i) => {
         const caret = /^\s*[\^~]+\s*$/.test(text);
         return (
@@ -44,7 +45,7 @@ function DiagnosticRow({ d, root }: { d: Diagnostic; root: string }) {
   const open = () => d.file && void openInEditor(d.file, d.line, d.column);
   return (
     <li className={`problem problem--${d.severity}`}>
-      <button type="button" className="problem__main" onClick={open} disabled={!d.file} aria-label={`${d.severity}: ${d.message}${d.file ? `, ${relativeTo(d.file, root)} line ${d.line ?? ''}. Open in editor` : ''}`}>
+      <button type="button" className="problem__main" onClick={open} disabled={!d.file} aria-label={`${t.problems.severity[d.severity]}: ${d.message}${d.file ? `, ${t.problems.openAt(relativeTo(d.file, root), d.line ?? '')}` : ''}`}>
         <Icon name={icon} size={16} filled className="problem__icon" />
         <span className="problem__message">{d.message}</span>
         {d.line && (
@@ -56,7 +57,7 @@ function DiagnosticRow({ d, root }: { d: Diagnostic; root: string }) {
       </button>
       {d.context && d.context.length > 0 && <Excerpt lines={d.context} line={d.line} />}
       <span className="problem__actions">
-        <IconButton icon="copy" size="sm" label="Copy problem" onClick={() => copy(asText(d), 'the problem')} />
+        <IconButton icon="copy" size="sm" label={t.problems.copyOne} onClick={() => copy(asText(d), t.problems.theProblem)} />
       </span>
     </li>
   );
@@ -86,7 +87,7 @@ function group(diags: Diagnostic[]): FileGroup[] {
 
 function Group({ g, root, defaultOpen }: { g: FileGroup; root: string; defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
-  const name = g.file ? relativeTo(g.file, root) : 'General';
+  const name = g.file ? relativeTo(g.file, root) : t.problems.general;
   const base = name.split(/[\\/]/).pop();
   // The folder next to the file name, as VS Code shows it ("ios\App\App").
   const dir = name.slice(0, name.length - (base?.length ?? 0)).replace(/[\\/]+$/, '');
@@ -129,8 +130,8 @@ export function Problems({ path, run }: { path: string; run: RunState | undefine
 
   if (diags.length === 0) {
     return (
-      <EmptyState compact icon="checkCircle" title={run?.runNumber ? 'No problems' : 'Problems show up here'}>
-        {run?.runNumber ? 'The last build reported no errors or warnings in your code.' : 'Compiler errors and warnings from Xcode, with a click to open them in your editor.'}
+      <EmptyState compact icon="checkCircle" title={run?.runNumber ? t.problems.none : t.problems.idle}>
+        {run?.runNumber ? t.problems.noneBody : t.problems.idleBody}
       </EmptyState>
     );
   }
@@ -139,24 +140,24 @@ export function Problems({ path, run }: { path: string; run: RunState | undefine
     <div className="problems">
       <div className="problems__bar">
         <span className="problems__summary">
-          {errors > 0 && <span className="count count--error">{plural(errors, 'error')}</span>}
-          {own.length - errors > 0 && <span className="count count--warn">{plural(own.length - errors, 'warning')}</span>}
+          {errors > 0 && <span className="count count--error">{t.count.errors(errors)}</span>}
+          {own.length - errors > 0 && <span className="count count--warn">{t.count.warnings(own.length - errors)}</span>}
           {/* Only dependency warnings: say plainly that the user's own code is fine. */}
           {own.length === 0 && (
             <span className="problems__clean">
               <Icon name="checkCircle" size={16} filled />
-              No problems in your code
+              {t.problems.clean}
             </span>
           )}
         </span>
         <span className="session-bar__spacer" />
         {own.length > 0 && (
-          <Button size="sm" variant="subtle" icon="copy" onClick={() => copy(own.map(asText).join('\n\n'), plural(own.length, 'problem'))}>
-            Copy all
+          <Button size="sm" variant="subtle" icon="copy" onClick={() => copy(own.map(asText).join('\n\n'), t.count.problems(own.length))}>
+            {t.problems.copyAll}
           </Button>
         )}
       </div>
-      <ul className="problems__list" aria-label="Problems">
+      <ul className="problems__list" aria-label={t.problems.label}>
         {groups.map((g, i) => (
           <Group key={g.file ?? '-'} g={g} root={path} defaultOpen={i < 6} />
         ))}
@@ -165,8 +166,8 @@ export function Problems({ path, run }: { path: string; run: RunState | undefine
             <button type="button" className="problem-group__head" aria-expanded={depsOpen} onClick={() => setDepsOpen((o) => !o)}>
               <Icon name={depsOpen ? 'chevronDown' : 'chevronRight'} size={12} />
               <Icon name="box" size={16} className="problem-group__file" />
-              <span className="problem-group__name">{plural(deps.length, 'warning')} from dependencies</span>
-              <span className="faint">Pods, Swift packages, node_modules</span>
+              <span className="problem-group__name">{t.problems.fromPackages(deps.length)}</span>
+              <span className="faint">{t.problems.packagesHint}</span>
             </button>
             {depsOpen && (
               <ul className="problem-group__items">
