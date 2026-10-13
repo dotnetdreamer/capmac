@@ -6,7 +6,7 @@
  */
 import { z } from 'zod';
 import type { ErrorInfo } from '@capmac/core/engine/errors';
-import type { ConnectionState, EngineEvent, FixId, SessionMode } from '@capmac/core/engine/events';
+import type { Check, ConnectionState, EngineEvent, FixId, SessionMode } from '@capmac/core/engine/events';
 import type { ProbeResult, ScreenInfo, StreamFallback, TargetsResult } from '@capmac/core/shared/protocol';
 import { PUBLIC_KEY_RE, RELAY_CHOICES, ROUTE_CHOICES } from '@capmac/core/shared/remote';
 import type { RemoteSettings, RemoteTestResult, Route, SignalServerSetting } from '@capmac/core/shared/remote';
@@ -136,6 +136,8 @@ export interface RemoteStatusReport {
   pcs: Array<RemotePc & { current: boolean }>;
   route: Route | null;
   rttMs: number | null;
+  /** The health check's Remote access row, as of now (it replaces the one in the last check). */
+  check: Check;
 }
 
 export interface DiscoveredMac {
@@ -203,7 +205,7 @@ export interface MethodResults {
   'remote.server': SignalServerSetting;
   'remote.setServer': SignalServerSetting;
   'macs.remote.enable': { mac: MacSummary; test: RemoteTestResult | null };
-  'macs.remote.disable': MacSummary;
+  'macs.remote.disable': { mac: MacSummary; check: Check };
   'macs.remote.set': { mac: MacSummary; reconnecting: boolean };
   'macs.remote.status': RemoteStatusReport;
   'macs.remote.revoke': Array<RemotePc & { current: boolean }>;

@@ -59,6 +59,7 @@ import {
 } from '@capmac/core/engine';
 import { STREAM_CONFIG } from '@capmac/core/shared/stream';
 import type { ProbeResult, Target, TargetsResult } from '@capmac/core/shared/protocol';
+import type { RemoteDoorStatus } from '@capmac/core/shared/remote-door';
 import {
   inputEventSchema,
   type CallResult,
@@ -634,13 +635,19 @@ const handlers: Handlers = {
   },
   'macs.remote.disable': async ({ name, localOnly }) => {
     const ctx = contextFor({ mac: name });
-    if (localOnly) await disableRemote(name, ctx, { localOnly: true });
-    else await disableRemote(await link(name).session(), ctx);
+    let door: RemoteDoorStatus | null = null;
+    if (localOnly) {
+      await disableRemote(name, ctx, { localOnly: true });
+    } else {
+      const session = await link(name).session();
+      await disableRemote(session, ctx);
+      door = await remoteDoorStatus(session).catch(() => null);
+    }
     // A connection over the internet ends with remote access: dial in again the local way.
     const l = links.get(name);
     if (l?.connected && l.route !== 'lan') l.dropConnection();
     emit({}, { type: 'macs-changed' });
-    return summaryOf(name);
+    return { mac: await summaryOf(name), check: remoteChecks(await hostConfig(name), door, null, null)[0]! };
   },
   'macs.remote.set': async ({ name, route, relay, keepAwake, signalUrl }) => {
     const session = keepAwake !== undefined || signalUrl !== undefined ? await link(name).session() : null;
@@ -657,13 +664,14 @@ const handlers: Handlers = {
   },
   'macs.remote.status': async ({ name }) => {
     const session = await link(name).session();
-    const [door, me] = await Promise.all([remoteDoorStatus(session).catch(() => null), thisPc()]);
+    const [door, me, host] = await Promise.all([remoteDoorStatus(session).catch(() => null), thisPc(), hostConfig(name)]);
     return {
       door,
       thisPc: me,
       pcs: (door?.pcs ?? []).map((pc) => ({ ...pc, current: pc.key === me.key })),
       route: session.route,
       rttMs: session.rttMs,
+      check: remoteChecks(host, door, session.route, me.key)[0]!,
     };
   },
   'macs.remote.revoke': async ({ name, key }) => revokeRemotePc(await link(name).session(), key, contextFor({ mac: name })),

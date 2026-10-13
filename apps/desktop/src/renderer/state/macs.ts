@@ -28,6 +28,8 @@ interface MacsState {
   setConnection(name: string, state: ConnectionState, extra: { attempt?: number; error?: string; latencyMs?: number; label?: string; route?: Route; rttMs?: number }): void;
   runHealth(name: string, projectPath?: string): Promise<void>;
   applyCheck(name: string, check: Check): void;
+  /** Puts a fresh check in place of its row in the last health result (remote access, after a change). */
+  refreshCheck(name: string, check: Check): void;
 }
 
 export const useMacs = create<MacsState>((set, get) => ({
@@ -75,6 +77,12 @@ export const useMacs = create<MacsState>((set, get) => ({
       if (!current || current.status !== 'checking') return s;
       const checks = current.checks.some((c) => c.id === check.id) ? current.checks.map((c) => (c.id === check.id ? check : c)) : [...current.checks, check];
       return { health: { ...s.health, [name]: { ...current, checks } } };
+    }),
+  refreshCheck: (name, check) =>
+    set((s) => {
+      const current = s.health[name];
+      if (!current || current.status !== 'done' || !current.checks.some((c) => c.id === check.id)) return s;
+      return { health: { ...s.health, [name]: { ...current, checks: current.checks.map((c) => (c.id === check.id ? check : c)) } } };
     }),
 }));
 

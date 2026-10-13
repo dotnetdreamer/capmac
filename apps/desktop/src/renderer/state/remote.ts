@@ -73,6 +73,7 @@ export const useRemote = create<RemoteState>((set, get) => ({
     try {
       const report = await call('macs.remote.status', { name });
       set((s) => ({ reports: { ...s.reports, [name]: { status: 'done', report, at: Date.now() } } }));
+      useMacs.getState().refreshCheck(name, report.check);
     } catch (err) {
       set((s) => ({ reports: { ...s.reports, [name]: { ...s.reports[name], status: 'error', error: errorInfo(err), at: Date.now() } } }));
     }
@@ -106,7 +107,9 @@ export async function turnOn(mac: MacSummary, options: { keepAwake?: boolean } =
 /** Turns remote access off; `localOnly` when the Mac cannot be reached. */
 export async function turnOff(mac: MacSummary, localOnly = false): Promise<'ok' | 'unreachable' | 'failed'> {
   try {
-    replaceMac(await call('macs.remote.disable', { name: mac.name, localOnly }));
+    const result = await call('macs.remote.disable', { name: mac.name, localOnly });
+    replaceMac(result.mac);
+    useMacs.getState().refreshCheck(mac.name, result.check);
     toast({ tone: 'info', title: `Remote access is off for ${mac.label}`, body: localOnly ? 'The Mac still lists this PC until you turn it off from its network.' : 'The Mac no longer lets this PC in over the internet.' });
     return 'ok';
   } catch (err) {
