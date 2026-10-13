@@ -143,6 +143,8 @@ export interface DiscoveredMac {
   host: string;
   port: number;
   addresses: string[];
+  /** How it was found: on this network (Bonjour), or on your tailnet (Tailscale). */
+  via?: 'bonjour' | 'tailscale';
 }
 
 export interface ProjectSummary {

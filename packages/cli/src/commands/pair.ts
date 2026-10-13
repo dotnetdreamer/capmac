@@ -40,7 +40,7 @@ async function chooseDestination(arg: string | undefined, ctx: EngineContext): P
   const found = await withStep(ctx, 'Looking for Macs with Remote Login on your network', 'other', () => discoverMacs(), (list) => (list.length ? `${list.length} found` : 'none found'));
   if (found.length > 0) {
     const choice = await select<Destination | null>('Which Mac?', [
-      ...found.map((m) => ({ label: m.name, hint: `${m.host}${m.addresses[0] ? ` · ${m.addresses[0]}` : ''}`, value: { host: m.host, port: m.port, label: m.name } as Destination | null })),
+      ...found.map((m) => ({ label: m.name, hint: `${m.via === 'tailscale' ? 'Tailscale · ' : ''}${m.host}${m.addresses[0] ? ` · ${m.addresses[0]}` : ''}`, value: { host: m.host, port: m.port, label: m.name } as Destination | null })),
       { label: 'Another Mac (type its address)', value: null },
     ]);
     if (choice) return choice;

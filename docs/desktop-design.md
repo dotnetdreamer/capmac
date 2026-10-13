@@ -9,6 +9,7 @@ This document covers:
 3. Architecture: the engine, the CLI and Electron.
 4. The engine API.
 5. Simulator streaming v2: the plan, the spike and the recommendation.
+6. Remote access: reaching the Mac over the internet.
 
 ---
 
@@ -821,5 +822,108 @@ What it found, and what the product changed:
 
 - Input on Xcode 27 through DTUHID, the path idb moved to, detected at runtime.
 - The smooth stream in the CLI's browser viewer (`capmac screen`), with the same worker code.
-- Adaptive bitrate: the budget is fixed at 125% of 6 Mbps.
+- ~~Adaptive bitrate~~: done, see §6.
 - Rotation (`SimDevice` orientation), and HEVC where both ends decode it in hardware.
+
+---
+
+## 6. Remote access
+
+**Goal:** reach a paired Mac from anywhere (a café, the office, a phone's hotspot) exactly as on the local network: run, live reload, the simulator, builds. Peer to peer when the two networks allow it, through a relay when they don't. Nothing else to install, and the local network unchanged.
+
+**Status:** shipped in the CLI (`capmac remote …`) and CapMac Studio (Macs › Remote access), with the same options and one shared config. Verified on the real Mac with a signaling server on this PC (both machines on one network, so peer to peer took a local path). A test between two real networks waits for the server on your VPS.
+
+### How it works
+
+```
+PC (engine)                              your server (services/signal)                     Mac
+ssh2 ── sock ── WebRTC data channel ════ UDP, peer to peer (hole punched) ════════ door ── TCP ── sshd :22
+           └─── or the relay ─────────── wss://server/v1/pipe/<session> ────────── door
+      signaling: wss://server/v1/pc/<mac key>          wss://server/v1/mac/<mac key> (always connected)
+```
+
+- **One SSH connection, as before.** ssh2 takes any byte stream as its `sock`, so the data channel (or the relay) only has to carry SSH to the Mac's sshd. The agent protocol, sync, builds, the stream, input and the live-reload reverse tunnels are unchanged.
+- **The door** (`packages/core/src/door`) is a LaunchAgent, `dev.capmac.remote`, run by the Mac's Node.js 22+ while the user is logged in. The agent op `remote-install` writes it to `~/.capmac/remote`, installs node-datachannel there with the Mac's own npm, and loads it.
+  - It keeps a WebSocket to the signaling server, so PCs can find the Mac on any network.
+  - It lets in only the PCs in `allowed.json`, checks their signatures, and bridges each connection to `127.0.0.1:<ssh port>` and nothing else.
+  - *Keep this Mac awake* runs `caffeinate -i -s` for as long as the door runs.
+  - It reports itself in `status.json` for the health check, and logs to `door.log` (kept small).
+  - Changing it through itself is safe. Turning remote access off, or restarting the door (keep awake, repair), while connected over the internet answers first. A detached process then stops or restarts the door a second later. The agent knows it came through the door because sshd sees that connection from 127.0.0.1.
+- **The signaling server** (`services/signal`, one Node.js file or one container):
+  - **signaling:** it relays offers, answers and ICE candidates;
+  - **presence:** it tells a PC whether its Mac is online, and when it was last seen;
+  - **the relay:** two WebSockets, one from each end, piped together;
+  - **STUN:** on UDP 3478;
+  - optional **TURN credentials** for coturn.
+
+  It keeps no state on disk, and limits sockets and attempts per address and per key.
+- **Peer to peer first, then the relay.** WebRTC gets 8 seconds (less when ICE fails); then the relay, unless relaying is off. CapMac relays through its own server, not TURN, because libjuice (node-datachannel's ICE) relays over UDP only: a WebSocket over HTTPS gets through networks that only allow the web.
+- **Which way:**
+  - *Automatic* gives the local network a 500 ms head start, then also tries the internet; the first SSH session to be ready wins.
+  - *Local network only* and *Over the internet* do what they say.
+  - The CLI's `--route` (or `CAPMAC_ROUTE`) overrides it for one command.
+
+  A host key mismatch on the local network, while the internet route works, is another device at that address on whatever network this PC is on: it is not reported.
+- **The local network got faster too.** The address that worked last time is tried first while Windows resolves the `.local` name: SSH is ready in 0.2 s instead of 2.9 s.
+- **Adaptive bitrate** (`agent/helper/bitrate.ts`): the helper takes a new bitrate on the fly (`r <bps>`). Once a second the agent looks at the frame window:
+  - down 30% as soon as frames lag past 220 ms or are dropped;
+  - up 15% after three calm seconds of real traffic.
+
+  The starting point and ceiling depend on the route: 6 Mbps on the local network, 4 (up to 6) peer to peer, 2.5 (up to 4) through the relay.
+
+### Security
+
+- **SSH stays the boundary:** the Mac's pinned host key and CapMac's own key protect the connection end to end. The server and the relay only ever see encrypted bytes.
+- **Identities:** every PC (`%USERPROFILE%\.capmac\remote_ed25519`) and every door (`~/.capmac/remote/door_ed25519`) has an Ed25519 key. The PC's key goes on the door's allowlist, and the door's key is pinned on the PC, both at pairing over the local network.
+- **Signatures** (`shared/remote.ts` says exactly what is signed; each purpose has its own prefix):
+  - the hello on every socket, against the server's challenge;
+  - each offer and answer, binding the DTLS fingerprints to the session and both keys, so the server cannot sit in the middle of a peer-to-peer connection;
+  - each relay request, for one use, within 10 minutes of the Mac's clock.
+- **The door refuses everyone else** before a single byte reaches sshd. That matters: macOS's sshd accepts passwords.
+
+### The options, in the CLI and CapMac Studio
+
+| Option | CLI | CapMac Studio |
+|---|---|---|
+| Reach this Mac from anywhere (off by default) | `capmac remote on` / `off [--local]`, `capmac pair --remote` | Macs › Remote access; the pairing screen |
+| Connection: Automatic, Local network only, Over the internet | `capmac remote set --route`; `--route` on any command, for one time | Macs › Remote access › Connection; the command palette |
+| Relay: when needed, never, always | `capmac remote set --relay` | Macs › Remote access › Relay |
+| Keep this Mac awake | `capmac remote set --keep-awake on\|off` | Macs › Remote access; the command palette |
+| The PCs that can reach the Mac | `capmac remote pcs`, `capmac remote revoke` | Macs › Remote access › PCs |
+| The signaling server | `capmac remote server`, `CAPMAC_SIGNAL_URL`, `capmac remote set --signal-url` (moves a Mac) | Settings › Remote access; *Move to …* on a Mac |
+| Status and tests | `capmac remote status [--test]`, `capmac remote test`, `capmac doctor` | the Mac's card and chip, the toolbar, the simulator footer, *Test over the internet*, Check health |
+
+### Results
+
+Measured on 2026-10-13, this PC to the M1 Pro over home Wi-Fi, with the signaling server on this PC:
+
+| | Local network | Over the internet, peer to peer | Over the internet, relay |
+|---|---|---|---|
+| SSH ready | 0.2 s (was 2.9 s) | 0.4–0.5 s | 0.3–0.4 s |
+| Echo through SSH (p50) | 7–12 ms | 9 ms | 16 ms |
+| Upload / download | 88 / 57 Mbps | 90 / 63 Mbps | 58 / 47 Mbps |
+| Simulator stream | 55–61 fps | 64 fps, p50 15–21 ms, 4 → 6 Mbps | |
+
+Other measurements:
+
+- **Turning remote access on:** about 3 s the first time (npm installs node-datachannel on the Mac), 1 s after that.
+- **A full `capmac run --route internet`** worked end to end on the sample, console included.
+
+On one network, "peer to peer" takes a local path, and the relay here went through this PC: a real internet path will be slower.
+
+### The transport (the spike)
+
+`spikes/internet-access/` compared the candidates with CapMac's real SSH session:
+
+- **WebRTC through node-datachannel:** 130 / 83 Mbps, and prebuilt for every platform CapMac targets.
+- **iroh 1.0's Node binding:** 31–39 Mbps for a full CPU core, with no Intel Mac build.
+- **iroh's native dumbpipe:** fast, but it would mean shipping and signing a Rust helper.
+- **PeerJS:** made for browsers and no longer released.
+
+WebRTC with our own server won: everything stays TypeScript, and the user's own server does signaling, the relay and STUN.
+
+### Next
+
+- The test between two real networks (a phone's hotspot) once the server is deployed, and coturn if some network needs TURN over UDP.
+- If a big sync holds up the stream over the internet (SSH sends everything in order), give the screen its own SSH connection over a second data channel: SCTP streams don't block each other.
+- Tailscale: list a tailnet's Macs when pairing.

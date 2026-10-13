@@ -266,3 +266,23 @@ describe('the door on the Mac', () => {
     expect(throughDoor({})).toBe(false);
   });
 });
+
+describe('Macs on a tailnet', () => {
+  it('lists the online Macs from `tailscale status --json`, with their MagicDNS names', async () => {
+    const { parseTailscaleStatus } = await import('../../packages/core/src/engine/discovery.js');
+    const status = JSON.stringify({
+      Self: { HostName: 'DESKTOP-PC', OS: 'windows' },
+      Peer: {
+        'nodekey:1': { HostName: 'IKs-M1', DNSName: 'iks-m1.tail1234.ts.net.', OS: 'macOS', Online: true, TailscaleIPs: ['100.101.102.103', 'fd7a:115c:a1e0::1'] },
+        'nodekey:2': { HostName: 'old-mac', DNSName: 'old-mac.tail1234.ts.net.', OS: 'macOS', Online: false, TailscaleIPs: ['100.64.0.9'] },
+        'nodekey:3': { HostName: 'phone', DNSName: 'phone.tail1234.ts.net.', OS: 'iOS', Online: true, TailscaleIPs: ['100.64.0.10'] },
+        'nodekey:4': { HostName: 'no-magicdns', DNSName: '', OS: 'macOS', Online: true, TailscaleIPs: ['100.64.0.11'] },
+      },
+    });
+    expect(parseTailscaleStatus(status)).toEqual([
+      { name: 'IKs-M1', host: 'iks-m1.tail1234.ts.net', port: 22, addresses: ['100.101.102.103'], via: 'tailscale' },
+      { name: 'no-magicdns', host: '100.64.0.11', port: 22, addresses: ['100.64.0.11'], via: 'tailscale' },
+    ]);
+    expect(parseTailscaleStatus('not json')).toEqual([]);
+  });
+});

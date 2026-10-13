@@ -8,7 +8,7 @@ import { useRemote } from '../../state/remote';
 import { signalUrlProblem } from '@capmac/core/shared/remote';
 import { Logo } from '../../ui/AppIcon';
 import { Button } from '../../ui/Button';
-import { InfoBar, Spinner } from '../../ui/Feedback';
+import { Badge, InfoBar, Spinner } from '../../ui/Feedback';
 import { PasswordField, Switch, TextField } from '../../ui/Form';
 import { Icon } from '../../ui/Icon';
 import { CheckList } from '../macs/CheckList';
@@ -171,7 +171,10 @@ function Find({ next, back }: { next: (mac: { host: string; port: number; label?
               <Icon name="mac" size={20} />
             </span>
             <span className="ob-mac__text">
-              <span className="ob-mac__name">{m.name}</span>
+              <span className="ob-mac__name">
+                {m.name}
+                {m.via === 'tailscale' && <Badge tone="outline">Tailscale</Badge>}
+              </span>
               <span className="ob-mac__host mono">
                 {m.host}
                 {m.addresses[0] ? ` · ${m.addresses[0]}` : ''}
@@ -188,7 +191,7 @@ function Find({ next, back }: { next: (mac: { host: string; port: number; label?
         )}
         {state === 'done' && found.length === 0 && (
           <div className="ob-empty">
-            <strong>No Macs found.</strong> Check that Remote Login is on and that both computers are on the same network (a VPN can hide the Mac). You can also type its address.
+            <strong>No Macs found.</strong> Check that Remote Login is on and that both computers are on the same network (a VPN can hide the Mac). You can also type its address, or its Tailscale name.
           </div>
         )}
       </div>
