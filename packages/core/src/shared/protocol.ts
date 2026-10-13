@@ -179,7 +179,10 @@ export interface StreamParams {
   /** Longest side of the video in pixels. */
   maxSize?: number;
   fps?: number;
+  /** The bitrate to start at; adaptive bitrate moves it between minBitrate and maxBitrate. */
   bitrate?: number;
+  minBitrate?: number;
+  maxBitrate?: number;
 }
 
 export interface ScreenInfo {
@@ -289,7 +292,7 @@ export type AgentEvent =
   /** `stream`: a clock ping answered (Unix epoch µs; `pc` is echoed). */
   | { t: 'pong'; id: number; pc: number; mac: number }
   /** `stream`: the helper's memory and traffic, every few seconds. */
-  | { t: 'stream-status'; footprint: number; fps: number; dropped: number }
+  | { t: 'stream-status'; footprint: number; fps: number; dropped: number; bitrate?: number }
   | { t: 'result'; ok: true; data: unknown }
   | { t: 'result'; ok: false; error: AgentErrorInfo };
 

@@ -17,6 +17,7 @@ export interface VideoWindowOptions {
 export class VideoWindow {
   private readonly inFlight: Array<{ seq: number; at: number }> = [];
   private dropping = false;
+  private peakLag = 0;
   private readonly maxLagMs: number;
   private readonly resumeLagMs: number;
   private readonly maxBacklogBytes: number;
@@ -37,6 +38,7 @@ export class VideoWindow {
   offer(seq: number, key: boolean, backlogBytes: number): boolean {
     const now = this.now();
     const lag = this.lag(now);
+    if (lag > this.peakLag) this.peakLag = lag;
     if (this.dropping) {
       if (!key || lag > this.resumeLagMs || backlogBytes > this.maxBacklogBytes / 4) {
         this.dropped += 1;
@@ -64,5 +66,12 @@ export class VideoWindow {
 
   get congested(): boolean {
     return this.dropping;
+  }
+
+  /** The worst lag seen since the last call (for adaptive bitrate), and starts over. */
+  takePeakLag(): number {
+    const peak = Math.max(this.peakLag, this.lag(this.now()));
+    this.peakLag = 0;
+    return peak;
   }
 }

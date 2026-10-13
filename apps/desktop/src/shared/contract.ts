@@ -281,7 +281,9 @@ export type ScreenPortMessage =
   /** Smooth stream: preparing the helper on the Mac (compiling it the first time). */
   | { type: 'preparing'; stage: 'building' | 'starting'; xcode?: string }
   /** The Mac's clock minus this PC's (µs), for the latency readout. */
-  | { type: 'clock'; offsetUs: number; rttUs: number };
+  | { type: 'clock'; offsetUs: number; rttUs: number }
+  /** Smooth stream: the bitrate adaptive bitrate chose, and frames dropped to catch up (every few seconds). */
+  | { type: 'status'; bitrate: number | null; dropped: number };
 
 /** Messages on a screen port, renderer → engine. */
 export type ScreenPortCommand =

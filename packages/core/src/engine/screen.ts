@@ -7,6 +7,7 @@
  * stream restarts, starting from a keyframe.
  */
 import type { InputEvent, ScreenInfo, StreamFallback } from '../shared/protocol.js';
+import type { Route } from '../shared/remote.js';
 import { parseStreamHeader, STREAM_FRAME, type StreamHeader } from '../shared/stream.js';
 import type { AgentCall } from './agent-client.js';
 import { toErrorInfo, type ErrorInfo } from './errors.js';
@@ -56,8 +57,19 @@ export interface ScreenHandlers {
   onPreparing?(stage: 'building' | 'starting', xcode?: string): void;
   /** The Mac's clock minus this PC's, in µs, and the round trip it was measured with. */
   onClock?(offsetUs: number, rttUs: number): void;
-  /** Smooth stream: the helper's memory and traffic on the Mac, every few seconds. */
-  onStatus?(status: { footprint: number; fps: number; dropped: number }): void;
+  /** Smooth stream: the helper's memory and traffic on the Mac, and the bitrate adaptive bitrate chose, every few seconds. */
+  onStatus?(status: { footprint: number; fps: number; dropped: number; bitrate?: number }): void;
+}
+
+/**
+ * Where adaptive bitrate starts and how high it may go, by route: the local
+ * network takes the full rate; over the internet the Mac's upload is often
+ * the limit, and the relay goes through your server.
+ */
+export function bitratesFor(route: Route): { bitrate: number; minBitrate: number; maxBitrate: number } {
+  if (route === 'relay') return { bitrate: 2_500_000, minBitrate: 400_000, maxBitrate: 4_000_000 };
+  if (route === 'direct') return { bitrate: 4_000_000, minBitrate: 500_000, maxBitrate: 6_000_000 };
+  return { bitrate: 6_000_000, minBitrate: 1_000_000, maxBitrate: 6_000_000 };
 }
 
 /** No keyframe this long after asking for one: the smooth stream is not working. */
@@ -200,7 +212,8 @@ export class ScreenStream {
   private async startSmooth(session: MacSession): Promise<void> {
     this.lastSeq = 0;
     this.ackedSeq = 0;
-    const call: AgentCall<unknown> = await session.agent.start('stream', { udid: this.udid, maxSize: this.videoSize, fps: 60 }, {
+    const rates = bitratesFor(session.route);
+    const call: AgentCall<unknown> = await session.agent.start('stream', { udid: this.udid, maxSize: this.videoSize, fps: 60, ...rates }, {
       onEvent: (event) => {
         if (this.call !== call) return;
         switch (event.t) {
@@ -219,7 +232,7 @@ export class ScreenStream {
             this.onPong(event.id, event.mac);
             break;
           case 'stream-status':
-            this.handlers.onStatus?.({ footprint: event.footprint, fps: event.fps, dropped: event.dropped });
+            this.handlers.onStatus?.({ footprint: event.footprint, fps: event.fps, dropped: event.dropped, bitrate: event.bitrate });
             break;
           case 'log':
             if (event.level !== 'debug') this.handlers.onLog?.(event.level, event.msg);

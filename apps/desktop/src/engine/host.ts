@@ -444,6 +444,7 @@ function openScreen(streamId: string, mac: string, udid: string, port: MessagePo
     },
     onPreparing: (stage, xcode) => post({ type: 'preparing', stage, xcode }),
     onClock: (offsetUs, rttUs) => post({ type: 'clock', offsetUs, rttUs }),
+    onStatus: (status) => post({ type: 'status', bitrate: status.bitrate ?? null, dropped: status.dropped }),
   });
   if (maxSize) stream.setVideoSize(maxSize);
   port.on('message', (e) => {

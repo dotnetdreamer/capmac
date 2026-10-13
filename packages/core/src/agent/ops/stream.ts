@@ -13,6 +13,7 @@ import path from 'node:path';
 import type { InputEvent, ScreenInfo, StreamHelperState, StreamParams } from '../../shared/protocol.js';
 import { STREAM_CONFIG } from '../../shared/stream.js';
 import { toolEnv } from '../env.js';
+import { BitrateController } from '../helper/bitrate.js';
 import { ensureHelper, helperState } from '../helper/build.js';
 import { HelperInput } from '../helper/input.js';
 import { HelperProcess, type HelperExit } from '../helper/process.js';
@@ -70,6 +71,12 @@ export async function opStream(params: StreamParams, io: AgentIO): Promise<{ fra
   io.send({ t: 'stream-prepare', stage: 'starting', xcode: binary.xcode.version });
 
   const window = new VideoWindow();
+  const maxBitrate = clampInt(params.maxBitrate ?? params.bitrate, 1_000_000, 20_000_000, 6_000_000);
+  const bitrate = new BitrateController({
+    start: clampInt(params.bitrate, 300_000, maxBitrate, maxBitrate),
+    min: clampInt(params.minBitrate, 300_000, maxBitrate, 600_000),
+    max: maxBitrate,
+  });
   const watch = new StallWatch(() => screenFingerprint(params.udid, env, io.signal));
   let frames = 0;
   let footprint = 0;
@@ -81,7 +88,7 @@ export async function opStream(params: StreamParams, io: AgentIO): Promise<{ fra
       '--developer-dir', binary.xcode.developerDir,
       '--max-size', String(clampInt(params.maxSize, 480, 3000, 1400)),
       '--fps', String(clampInt(params.fps, 10, 60, 60)),
-      '--bitrate', String(clampInt(params.bitrate, 1_000_000, 20_000_000, 6_000_000)),
+      '--bitrate', String(bitrate.current),
     ],
     {
       onVideo: (message, header) => {
@@ -170,6 +177,9 @@ export async function opStream(params: StreamParams, io: AgentIO): Promise<{ fra
     let lastCheck = Date.now();
     let lastStatus = Date.now();
     let lastFrames = 0;
+    let lastTick = Date.now();
+    let tickFrames = 0;
+    let tickDropped = 0;
     while (!io.signal.aborted && !ended.failure) {
       await sleep(100, io.signal);
       const now = Date.now();
@@ -179,6 +189,14 @@ export async function opStream(params: StreamParams, io: AgentIO): Promise<{ fra
         lastKeyAsk = now;
       }
       if (now - lastHeard > CLIENT_TIMEOUT_MS) break;
+      // Adaptive bitrate: once a second, from how the frames got through.
+      if (now - lastTick >= 1000) {
+        lastTick = now;
+        const change = bitrate.tick({ peakLagMs: window.takePeakLag(), dropped: window.dropped - tickDropped, frames: frames - tickFrames, backlogBytes: io.backlog });
+        tickFrames = frames;
+        tickDropped = window.dropped;
+        if (change) helper.send(`r ${change}`);
+      }
       if (now - lastCheck >= 1000) {
         lastCheck = now;
         void watch.check().then((stalled) => {
@@ -191,7 +209,7 @@ export async function opStream(params: StreamParams, io: AgentIO): Promise<{ fra
         });
       }
       if (now - lastStatus >= 5000) {
-        io.send({ t: 'stream-status', footprint, fps: Math.round(((frames - lastFrames) * 1000) / (now - lastStatus)), dropped: window.dropped + helperDropped });
+        io.send({ t: 'stream-status', footprint, fps: Math.round(((frames - lastFrames) * 1000) / (now - lastStatus)), dropped: window.dropped + helperDropped, bitrate: bitrate.current });
         lastStatus = now;
         lastFrames = frames;
       }

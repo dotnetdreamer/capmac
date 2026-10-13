@@ -29,6 +29,7 @@
 // stdin, one command per line; the end of stdin quits (lifting any finger still down):
 //   k                             keyframe now
 //   s <pixels>                    longest side of the video
+//   r <bits per second>           average bitrate (adaptive bitrate; the byte budget follows)
 //   p <number>                    pong with that number
 //   q                             quit
 //   t d|m|u <x> <y>               one finger down, move, up; x and y from 0 to 1, top left origin
@@ -749,6 +750,17 @@ static void handleCommand(char *line) {
         dirty = true;
         encodeSoon();
       }
+    });
+  } else if (cmd == 'r') {
+    // A new average bitrate (adaptive bitrate over the internet); the byte budget follows it.
+    long value = strtol(line + 1, NULL, 10);
+    if (value < 200000 || value > 20000000) return;
+    dispatch_async(encodeQueue, ^{
+      if ((int)value == bitrate) return;
+      bitrate = (int)value;
+      if (session) VTSessionSetProperty(session, kVTCompressionPropertyKey_AverageBitRate, (__bridge CFNumberRef)@(bitrate));
+      if (budgetBytes > budgetPerSecond() / 2) budgetBytes = budgetPerSecond() / 2;
+      LOG("bitrate %d bps", bitrate);
     });
   } else if (cmd == 'q') {
     shutdownAndExit(0);

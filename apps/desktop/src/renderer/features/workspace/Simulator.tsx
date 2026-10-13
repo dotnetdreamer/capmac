@@ -89,6 +89,7 @@ function CompatibleNote({ fallback, onRetry, onRestart }: { fallback: StreamFall
 /** The live simulator screen: a canvas fed by a worker that decodes frames off the main thread. */
 function Screen({ mac, target, frame }: { mac: string; target: Target; frame: boolean }) {
   const macRoute = useMacs((s) => s.macs.find((m) => m.name === mac)?.route ?? null);
+  const [targetBitrate, setTargetBitrate] = useState<number | null>(null);
   const macRtt = useMacs((s) => s.macs.find((m) => m.name === mac)?.rttMs ?? null);
   const stageRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -144,6 +145,7 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
         setPreparing(null);
       } else if (m.type === 'stats') setStats({ fps: m.fps, kbps: m.kbps, decodeMs: m.decodeMs, latencyMs: m.latencyMs, latencyP95Ms: m.latencyP95Ms, inputMs: m.inputMs });
       else if (m.type === 'info') setInfo(m.info);
+      else if (m.type === 'status') setTargetBitrate(m.bitrate);
       else if (m.type === 'preparing') setPreparing({ stage: m.stage, xcode: m.xcode });
       else if (m.type === 'codec') {
         setCodec(m.codec);
@@ -447,6 +449,7 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
   const statsTip = [
     streamName,
     overInternet ? `Over the internet, ${macRoute === 'direct' ? 'peer to peer' : 'through the relay'}${macRtt !== null ? ` (round trip ${macRtt} ms)` : ''}` : null,
+    codec === 'h264' && targetBitrate ? `Up to ${formatRate(Math.round(targetBitrate / 1000))}, adapting to the connection` : null,
     stats && codec === 'h264' && stats.latencyMs !== null ? `Latency ${Math.round(stats.latencyMs)} ms (p95 ${Math.round(stats.latencyP95Ms ?? stats.latencyMs)} ms)` : null,
     stats && stats.fps > 0 ? `Decoding ${stats.decodeMs.toFixed(1)} ms a frame` : null,
     stats?.inputMs != null ? `Touch to picture ${Math.round(stats.inputMs)} ms` : null,
