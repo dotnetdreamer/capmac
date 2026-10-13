@@ -1,6 +1,9 @@
 node_modules/
 dist/
 out/
+!/out/
+/out/*
+!/out/capmac-intro-v4.mp4
 apps/desktop/release/
 coverage/
 test-results/

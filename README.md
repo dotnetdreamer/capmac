@@ -1,279 +1,237 @@
-# CapMac — Pair to Mac for Capacitor
+<div align="center">
 
-Develop your Capacitor app on **Windows**, and let a **Mac** on your network do the iOS part: build with Xcode, run on the simulator or an iPhone, stream the logs back, live-reload from your Windows dev server, and even show the simulator in your browser. It's what Xamarin's *Pair to Mac* did, for Capacitor.
+# CapMac
 
-```
-Windows (your editor, dev server)                          Mac (Xcode)
-┌──────────────────────────────┐   one SSH connection   ┌─────────────────────────────────┐
-│ capmac CLI                   │ ─────────────────────► │ capmac agent (uploaded on demand)│
-│  • syncs only changed files  │   files, commands,     │  • npm install, npx cap sync     │
-│  • shows build errors with   │ ◄───────────────────── │  • xcodebuild                    │
-│    clickable Windows paths   │   logs, screen frames  │  • simctl / devicectl            │
-│  • Vite/Angular dev server ◄─┼── reverse tunnel ──────┼─ app's WebView loads it          │
-└──────────────────────────────┘                        └─────────────────────────────────┘
-```
+Build and run Capacitor iOS apps from Windows with a paired Mac
 
-## CapMac Studio, the Windows app
+Your editor, web build and dev server stay on Windows, while the Mac builds with Xcode and runs the app on a simulator or iPhone
+CapMac brings back build errors, console logs and the simulator screen, and works with Ionic projects too
 
-The same engine with a window around it. Pair your Mac in a few clicks, add your Capacitor app, and press **Live** (F5) or **Run** (Ctrl+F5). You get:
+https://github.com/user-attachments/assets/d55fac9f-92fc-4e6e-953a-574a824a5ecb
 
-- every build step on a timeline;
-- build errors as problems you click to open at the line in your editor;
-- your app's console with source and level filters, search, and JSON you can expand;
-- the iOS simulator, live, next to your code: up to 60 frames a second, about 15 ms behind the Mac on a home network. Click and drag to touch, scroll with the wheel or touchpad, type on your PC's keyboard, paste, and press Home or Lock.
+</div>
 
-If the connection to the Mac drops, it reconnects and restores the session. Ctrl+K finds any command.
-
-The simulator streams as H.264 from its framebuffer through a small helper that CapMac compiles on the Mac, with your Xcode, the first time you open a simulator. The same helper sends touches and keys, so AXe is not needed. If the smooth stream cannot run, the pane switches to screenshots (the *compatible* stream) by itself and says why. Settings › Appearance › Simulator stream chooses between the two.
-
-`npm run desktop:build` builds it into `apps/desktop/release/<version>/`:
-
-- `capmac-studio-<version>-x64-setup.exe`, a per-user installer;
-- `capmac-studio-<version>-x64-portable.exe`, which needs no installation;
-- the same two for arm64.
-
-Builds are unsigned and don't update themselves until you set a few environment variables: Azure Artifact Signing or a code signing certificate, and `CAPMAC_UPDATE_URL`, the HTTPS folder installed copies check for new versions. Then installed copies update in the background and install on restart, without interrupting a running app. [docs/signing-and-updates.md](docs/signing-and-updates.md) has the options, their costs, and how to publish an update.
-
-The design (screens, visual language, architecture, simulator streaming) is in [docs/desktop-design.md](docs/desktop-design.md).
+[Quick start](#quick-start) | [CapMac Studio](#capmac-studio) | [Commands](#commands) | [AI coding agents](#ai-coding-agents) | [Development](#developing-capmac)
 
 ## Quick start
 
-**On the Mac (once):** install Xcode and open it once, then turn on **System Settings › General › Sharing › Remote Login**. Stay logged in to the Mac's desktop (or enable automatic login on a headless Mac): Apple's simulators only run inside a desktop session.
+On the Mac, install Xcode, open it once and install an iOS simulator runtime
+Enable **System Settings › General › Sharing › Remote Login** and keep the paired user logged in to the macOS desktop so simulators can run
 
-**On Windows:**
+On Windows, install Node.js and npm, install your app's dependencies, then pair the Mac and run your app
 
 ```powershell
-npm install -g capmac            # or: npx capmac …
-capmac pair                      # finds your Mac, asks its password once, installs a key
+npm install -g capmac
+capmac pair
 cd my-capacitor-app
-capmac run                       # build web → sync → build on the Mac → launch → stream logs
-capmac dev                       # live reload: save in VS Code, the simulator updates instantly
+capmac doctor
+capmac run
 ```
 
-`capmac pair` only needs your Mac password once: it installs a dedicated SSH key (`%USERPROFILE%\.capmac\id_ed25519`) and pins the Mac's host key. Node.js on the Mac is optional — if it's missing, CapMac offers to install a private copy in `~/.capmac/runtime` (no sudo, nothing system-wide).
+Run app commands from the folder containing `capacitor.config.*`
+If the app has no iOS project yet, run `npx cap add ios` first
 
-**Measured** on an M1 Mac (macOS 26.6, Xcode 26.6) over Wi-Fi with Capacitor 8.5 apps (Swift Package Manager and CocoaPods):
+`capmac pair` finds Macs on your network, or accepts an address such as `capmac pair user@mac.local`
+It asks you to trust the Mac's host key and uses your password once to install a dedicated SSH key, without storing the password
+Use `--identity <file>` for an existing SSH key or `--agent` for the Windows OpenSSH agent
 
-| | |
-|---|---|
-| First `capmac run` (npm install, `cap sync`, Swift packages, simulator boot) | ~50 s |
-| `capmac run` again, nothing changed | ~6 s |
-| Web-only change (no Xcode build) | ~5 s |
-| Native (Swift) change, incremental build | ~10 s |
-| `capmac dev`: save a file → app reloads | ~1 s |
+If Node.js is missing or too old on the Mac, pairing offers a private copy in `~/.capmac/runtime`
+CocoaPods is needed on the Mac only for projects that use it
+
+For live reload with the simulator in your browser
+
+```powershell
+capmac dev --screen
+```
+
+The dev server runs on Windows through an SSH tunnel
+Web edits use the server's live reload, native edits trigger a rebuild, and the session reconnects if the connection drops
+Use `capmac dev --url http://localhost:5173` with a server you already started
+
+## CapMac Studio
+
+The Windows desktop app uses the same engine as the CLI
+Pair a Mac, add your project and press **Live** (F5) or **Run** (Ctrl+F5)
+
+The workspace shows the build timeline, errors that open at the line in your editor, a searchable console with source and level filters, expandable JSON, and an interactive simulator
+Click, drag, scroll and type from Windows, or use Home, Lock and screenshot controls
+Screen viewing is available for simulators
+
+Studio uses an H264 stream with a screenshot fallback
+If touch or keyboard input is unavailable, `capmac doctor --fix` can install AXe on the Mac
+
+From a [development checkout](#developing-capmac), `npm run desktop:build` creates x64 and arm64 installers and portable executables in `apps/desktop/release/<version>/`
+Builds are unsigned by default and updates stay off without a configured feed
+See [signing and updates](docs/signing-and-updates.md) for distribution setup
 
 ## Keep your Capacitor and Ionic commands
 
-Your team already types `npx cap run ios` or `ionic capacitor run ios -l`. With CapMac installed, those same commands run on the Mac. Nobody has to learn `capmac run`.
-
-This "takeover" is **on by default**. The first capmac command you run (usually `capmac pair`), or the first launch of CapMac Studio, turns it on. Then open a new terminal (restart VS Code so its terminals get it too):
-
-```powershell
-npx cap run ios                  # builds on the Mac, launches, shows the app's console
-ionic capacitor run ios -l       # Ionic live reload, through capmac's tunnel
-```
-
-Turn it off with `capmac takeover off`, or in CapMac Studio under **Settings › Terminal commands**. It stays off until you turn it back on.
-
-| You type | CapMac does |
-|---|---|
-| `npx cap run ios [--target <id>]` | `capmac run`, without a web build (like `cap run`). In a terminal it stays attached to show the app's console; from a script it returns once the app is running. |
-| `npx cap run ios --list [--json]` | Lists the Mac's simulators and devices, in Capacitor's format, so `ionic capacitor run ios` can ask which one to use. |
-| `npx cap run ios -l [--host <h>] [--port <p>]` | `capmac dev` with your running dev server. With no `--host` or `--port`, CapMac starts the dev server itself. |
-| `ionic capacitor run ios -l` | Ionic starts its dev server; CapMac tunnels it to the Mac. `--external` also works but isn't needed. |
-| `npx cap open ios` · `ionic cap build ios` | Opens the project in Xcode on the Mac's screen. |
-| `npx cap build ios` | `capmac build --ipa` into `ios/App/output`, with `--xcode-export-method` (`app-store-connect`, `release-testing`, `enterprise`, `debugging`), `--xcode-team-id`, `--scheme` and `--configuration`. |
-
-Everything else (`cap sync`, `cap copy`, `cap add` and all of Android) still runs on Windows, unchanged. `capmac cap run ios -l` does the same without takeover.
-
-**How it works:** takeover adds `--require %USERPROFILE%\.capmac\takeover.cjs` to your Windows user's `NODE_OPTIONS`. In every Node.js process, that small file checks whether the process is the Capacitor CLI running `run`, `open` or `build` for `ios`. If it is, CapMac runs the command instead; if not, it does nothing. Every way of starting Capacitor goes through it, whether `npx cap`, `ionic capacitor`, an npm script or a VS Code task, with no change to any project. CapMac Studio ships its own copy of the CLI for this, so takeover also works without `npm install -g capmac`; your terminal's Node.js runs it.
-
-- `CAPMAC_TAKEOVER=0` runs one command with plain Capacitor (`$env:CAPMAC_TAKEOVER=0; npx cap run ios`).
-- `capmac takeover off` turns it off at once, even in terminals that are already open. `capmac takeover on` turns it back on, and `capmac takeover` shows the current state.
-- It is never turned on automatically in CI (`CI=true`) or by `npx capmac`, which runs a throwaway copy.
-- Leave `%USERPROFILE%\.capmac\takeover.cjs` in place while takeover is on: Node.js stops with "Cannot find module" if `NODE_OPTIONS` points to a file that is missing. If CapMac itself is uninstalled, Capacitor runs as usual and prints a reminder.
-
-## What you get
-
-| | |
-|---|---|
-| **`capmac run`** | Builds your web app on Windows, syncs the project (only changed files), runs `npm install` + `npx cap sync ios` on the Mac when needed, builds with `xcodebuild`, installs and launches on a simulator or device, and streams the app's console (`console.log` from JS, native logs) until you press Ctrl+C. Web-only changes skip Xcode entirely and update the installed app in about a second. |
-| **`capmac dev`** | Live reload. Your dev server (`vite`, `ng serve`, …) runs on Windows; an SSH reverse tunnel makes it `http://localhost:<port>` on the Mac, and the app is built to load from there. HMR works as usual. Native changes (Swift, plugins, `capacitor.config`, `package.json`) trigger an automatic rebuild. If the Mac sleeps or Wi-Fi drops, CapMac reconnects, restores the tunnel and relaunches by itself. Keys: `r` rebuild, `R` clean rebuild, `l` relaunch, `o` open screen, `q` quit. |
-| **`capmac run --no-logs` · `--for <seconds>`** | For scripts and AI agents: return once the app is running, or show its console for that many seconds and then stop. |
-| **`capmac screenshot [file]`** | Saves a full-resolution PNG of the running simulator and prints its path. |
-| **`capmac skill`** | Teaches AI coding agents to use CapMac (see [AI coding agents](#ai-coding-agents)). |
-| **`capmac logs`** | Streams the system log (os_log/NSLog) of the app running on a simulator. |
-| **`capmac screen`** | The Mac's simulator in your browser (like Xamarin's *Remoted iOS Simulator*): click to tap, drag to swipe, scroll, type, Home/Lock buttons, screenshots, plus the app console side-by-side. Touch and typing go through CapMac's own helper, compiled on the Mac on first use; with an Xcode whose simulators don't take its input, [AXe](https://github.com/cameroncooke/AXe) is used when installed (`capmac doctor --fix` installs it). |
-| **`capmac build --ipa`** | Archives and exports a signed `.ipa` (development, ad-hoc, app-store, enterprise) and downloads it to `build/ios/`. `--upload` sends it to App Store Connect/TestFlight instead. |
-| **`capmac takeover [on\|off]`** | `npx cap run ios`, `ionic capacitor run ios`, `cap open ios` and `cap build ios` run on the Mac. On by default (see above). |
-| **`capmac doctor [--fix]`** | Checks this PC, the connection and the Mac (Xcode, license, simulators, Node, CocoaPods, disk, signing) and fixes what it can. |
-| **`capmac targets`** | Lists simulators and connected devices. Pick with `--target "iPhone 16 Pro"` or `--device`. |
-| **`capmac exec -- <cmd>`** | Runs any command inside the project on the Mac (`capmac exec -- pod update`). |
-| **`capmac pull <path>`** | Copies files back from the Mac (e.g. after `capmac exec -- npx cap add ios`, run `capmac pull ios`). |
-| **`capmac open`** | Opens the synced project in Xcode on the Mac's screen. |
-| **`capmac info`** | Shows what CapMac detected and which files it would sync — no Mac needed. |
-| **`capmac remote [on\|off\|set\|status]`** | Reach the Mac from anywhere, over the internet (see [Away from the Mac's network](#away-from-the-macs-network)). |
-| **`capmac sync`, `logs`, `clean`, `keychain`, `macs`, `use`, `unpair`** | The rest of the toolbox; `capmac <command> --help` for details. |
-
-Build errors come back as `C:\path\to\your\file.swift:12:9: error: …` — clickable in VS Code's terminal and matched by the built-in `$gcc` problem matcher. App logs show JS `console.*` calls (`js`), Capacitor's own messages (`cap`) and native output (`ios`); add `--os-logs` to also see NSLog/os_log like Xcode's console, or `--bridge` for plugin call traffic.
-
-**Live reload details:** CapMac points the app's bundled `capacitor.config.json` at the tunnelled dev server and adds an `NSAllowsLocalNetworking` exception to the Mac's copy of `Info.plist` (your own files are never touched), so plain-HTTP dev servers load on iOS 17+. Both are undone automatically on the next `capmac run`.
-
-### VS Code
-
-Add to `.vscode/tasks.json` to get build errors in the Problems panel:
-
-```json
-{
-  "version": "2.0.0",
-  "tasks": [
-    { "label": "iOS: run on Mac", "type": "shell", "command": "npx capmac run", "problemMatcher": "$gcc" },
-    { "label": "iOS: live reload", "type": "shell", "command": "npx capmac dev", "isBackground": true, "problemMatcher": "$gcc" }
-  ]
-}
-```
-
-## AI coding agents
-
-Claude Code, Codex, GitHub Copilot, Cursor and other coding agents can drive CapMac too. Give them the **CapMac skill**, a short `SKILL.md` in the [Agent Skills](https://agentskills.io) format. It teaches an agent to build your iOS app on the Mac, run it, read its console, take a screenshot, fix build errors and leave password prompts to you.
+A global CapMac install enables takeover on your first command, and the packaged Studio app enables it on launch
+After pairing, open a new terminal or restart VS Code so its terminals pick up the setting
 
 ```powershell
-capmac skill add                                       # asks which agents (the ones on this PC are ticked) and where
-capmac skill add --agent claude-code,codex --global    # for all your projects
-capmac skill add --agent all --project                 # into this repository, to commit for your team
-capmac skill                                           # which agents have it, globally and in this project
-capmac skill remove --global
+npx cap run ios
+ionic capacitor run ios -l
 ```
 
-In CapMac Studio: **Settings › Terminal commands › AI coding agents › Set up…**, with the same choices.
+| Command | What happens on the Mac |
+| --- | --- |
+| `npx cap run ios` | Uses your existing web build, builds with Xcode and launches the app |
+| `npx cap run ios --list` | Lists the Mac's simulators and connected devices |
+| `npx cap run ios -l` | Runs live reload through CapMac |
+| `ionic capacitor run ios -l` | Tunnels the dev server Ionic starts on Windows |
+| `npx cap open ios` or `ionic cap build ios` | Opens Xcode on the Mac's screen |
+| `npx cap build ios` | Exports a signed IPA into `ios/App/output` |
 
-| Agent | All your projects | One project |
-|---|---|---|
-| Claude Code | `~\.claude\skills\capmac` | `.claude\skills\capmac` |
-| Codex, GitHub Copilot, Cursor, Gemini CLI, Cline, Kilo Code, Amp, Augment, Goose | `~\.agents\skills\capmac` (shared) | `.agents\skills\capmac` (shared) |
-| OpenCode | `~\.config\opencode\skills\capmac` | `.agents\skills\capmac` |
-| Windsurf (Devin Desktop) | `~\.codeium\windsurf\skills\capmac` | `.windsurf\skills\capmac` |
-| JetBrains Junie | `~\.junie\skills\capmac` | `.agents\skills\capmac` |
+`cap sync`, `cap copy`, `cap add` and Android commands still run on Windows
 
-Most agents read the shared `.agents\skills` folder, so CapMac writes it once for all of them. Project skills go at the repository root. CapMac only replaces or removes copies it wrote itself. For any other agent, `capmac skill show` prints the skill to paste where that agent reads instructions.
+Takeover adds a preload to your Windows user's `NODE_OPTIONS`
+Keep `%USERPROFILE%\.capmac\takeover.cjs` in place while it is enabled
+Use `capmac takeover off` to disable it, `capmac takeover on` to enable it, or `CAPMAC_TAKEOVER=0` for one command
+It is not enabled automatically by a temporary `npx capmac` copy or when `CI=true`
 
-Agents run `capmac` as a command. If new terminals can't find it (no `npm install -g capmac`), `capmac skill add` offers to add it, and so does CapMac Studio, whose built-in CLI then serves as the command. Either way it goes in `%LOCALAPPDATA%\capmac\bin`, on your user PATH, and `capmac skill remove --command` takes it off again, leaving the rest of PATH exactly as it was. Output in a pipe is plain text without colour codes, which is easier for agents to read.
+## Commands
+
+| Command | Use |
+| --- | --- |
+| `capmac run` | Build the web app, sync changes, build on the Mac, launch and stream the app's console |
+| `capmac dev` | Live reload with automatic rebuilds for native changes |
+| `capmac build` | Build without launching |
+| `capmac build --ipa` | Export a signed IPA to `build/ios/` |
+| `capmac build --upload` | Upload to App Store Connect for TestFlight |
+| `capmac targets` | List simulators and connected devices |
+| `capmac screen` | View and control a simulator in your browser |
+| `capmac screenshot [file]` | Save a simulator PNG and print its path |
+| `capmac doctor --fix` | Check setup and repair what it can |
+| `capmac info --files` | Show the detected project and exact sync list without connecting |
+| `capmac exec -- <command>` | Run a command in the Mac's project copy |
+| `capmac pull <path>` | Copy files back from the Mac |
+| `capmac open` | Open the project in Xcode on the Mac |
+
+Use `--target "<name or UDID>"` to select a simulator or device and `--mac <name>` to select a paired Mac
+For scripts, `capmac run --no-logs` returns after launch, while `capmac run --for 20` captures the console for 20 seconds and then stops the app
+
+Build errors use Windows file paths so you can open them from your terminal
+Add `--os-logs` for NSLog and os_log, `--bridge` for Capacitor plugin traffic, or `--verbose` for full tool output
+Use `capmac --help` and `capmac <command> --help` for the remaining commands and options
 
 ## Running on an iPhone
 
-1. Plug the iPhone into the Mac once (or pair it over Wi-Fi in Xcode › Window › Devices), tap **Trust**, and turn on **Developer Mode**.
-2. Sign in to **Xcode › Settings › Accounts** on the Mac once.
-3. `capmac run --device --team <YOUR_TEAM_ID>` (or set `ios.team` in `capmac.json`).
-
-Code signing over SSH needs the Mac's login keychain unlocked; CapMac detects this and asks for your Mac password when needed (`capmac keychain` does it up front). In `capmac dev --device`, the tunnel is exposed on the Mac's LAN address so the phone can reach your dev server.
-
-Xcode's own Apple ID session is unreliable over SSH ("Your session has expired", "No Accounts"). For dependable device builds give CapMac an **App Store Connect API key** — xcodebuild then manages profiles and registers new devices by itself:
+Connect or pair the iPhone with the Mac, tap **Trust**, enable **Developer Mode** and sign in under **Xcode › Settings › Accounts**
 
 ```powershell
-capmac run --device --team ABCDE12345 --api-key C:\keys\AuthKey_ABC123XYZ9.p8 --api-issuer 69a6de7e-…
+capmac run --device --team "<TEAM_ID>"
 ```
 
-…or set it once in `capmac.json` (`"ios": { "apiKey": { "path": "../keys/AuthKey_ABC123XYZ9.p8", "issuerId": "69a6de7e-…" } }`) or via `CAPMAC_ASC_KEY_PATH` / `CAPMAC_ASC_KEY_ID` / `CAPMAC_ASC_ISSUER_ID`. The same key is used by `capmac build --ipa` and `--upload`.
+Signing needs the Mac's login keychain unlocked
+CapMac asks when needed, or you can unlock it before building with `capmac keychain`
+For device live reload, the iPhone must be able to reach the Mac's network address
 
-## Configuration (optional)
+If Xcode reports an expired account session over SSH, supply an App Store Connect API key
 
-`capmac.json` next to `capacitor.config.*`:
+```powershell
+capmac run --device --team "<TEAM_ID>" --api-key C:/keys/AuthKey_ABC123XYZ9.p8 --api-issuer "<ISSUER_ID>"
+```
+
+You can also set `ios.apiKey` in `capmac.json`, or use `CAPMAC_ASC_KEY_PATH`, `CAPMAC_ASC_KEY_ID` and `CAPMAC_ASC_ISSUER_ID`
+The same key works for IPA exports and uploads
+
+## Configuration
+
+Optional `capmac.json` beside `capacitor.config.*`
 
 ```json
 {
   "host": "studio",
-  "ios": { "target": "iPhone 16 Pro", "team": "ABCDE12345", "configuration": "Debug", "scheme": "App" },
-  "web": { "build": "npm run build", "dev": "npm run dev", "devUrl": "http://localhost:5173" },
+  "ios": { "target": "iPhone 16 Pro", "team": "ABCDE12345", "scheme": "App" },
+  "web": { "build": "npm run build", "dev": "npm run dev" },
   "sync": { "exclude": ["docs/", "*.mp4"], "include": [".env.ios"] }
 }
 ```
 
-**What gets synced:** everything git would track, plus the iOS project in full (so gitignored files like `GoogleService-Info.plist` come along) and your built web assets. Never synced: `node_modules` (installed on the Mac for macOS), `android/`, `Pods/`, build output. Add a `.capmacignore` (gitignore syntax) for anything else. Run `capmac info --files` to see the exact list. Shell scripts are converted to LF line endings and marked executable on the way.
+Sync respects `.gitignore`, includes the iOS project and built web assets, and skips `node_modules`, Android, Pods and build output
+Use `.capmacignore` or the sync settings above to change the file list
+Dependencies are installed on the Mac when needed, and simulator builds reuse native output when only web assets changed
 
-Monorepos work: CapMac syncs from the folder that holds the lockfile and runs Capacitor in your app's subfolder.
+Monorepos sync from the lockfile root and run Capacitor in the app's subfolder
+The Mac's project copy lives under `~/.capmac/projects/`
 
 ## Away from the Mac's network
 
-With **remote access** on, CapMac reaches your Mac from anywhere: at a café, at the office, on your phone's hotspot. Everything works as at home: run, live reload, the simulator, builds. When the two networks allow it, the connection goes **peer to peer** (WebRTC), as fast as your internet connection; when they don't, it goes **through the relay** on your server.
+Remote access needs your own [signaling server](services/signal/deploy/README.md)
+Deploy it, then run these commands while your PC is on the Mac's network
 
-It needs a small signaling server of your own (it introduces the two ends, relays when needed, and never sees inside the connection):
+```powershell
+capmac remote server wss://signal.example.com
+capmac remote on
+capmac remote status --test
+```
 
-1. **Deploy the server** on your VPS: see [services/signal/deploy](services/signal/deploy/README.md) (one Docker container, or one Node.js file).
-2. **Tell CapMac where it is:** `capmac remote server wss://signal.example.com` (or CapMac Studio › Settings › Remote access).
-3. **On the Mac's network, turn it on:** `capmac remote on` (or tick *Reach this Mac from anywhere* when pairing, or Macs › Remote access in CapMac Studio).
+CapMac then uses the local network when available and the internet otherwise, with WebRTC for a direct connection or your server's relay when needed
+SSH protects the connection on either route
 
-From then on, CapMac uses the local network when the Mac answers there and the internet otherwise. `capmac remote status --test` shows how it connects. The options, in the CLI and in CapMac Studio:
+The Mac must stay awake and logged in
+`capmac remote set --keep-awake on` prevents idle sleep while remote access is on
+Use `capmac remote --help` for route, relay and access controls
 
-| Option | CLI | CapMac Studio |
-|---|---|---|
-| Reach this Mac from anywhere | `capmac remote on` / `off`, `capmac pair --remote` | Macs › Remote access; the pairing screen |
-| Connection: automatic, local network only, or internet only | `capmac remote set --route auto\|lan\|internet`; `--route` on any command, for one time | Macs › Remote access › Connection |
-| Relay: when needed, never, or always | `capmac remote set --relay allow\|never\|always` | Macs › Remote access › Advanced |
-| Keep the Mac awake | `capmac remote set --keep-awake on\|off` | Macs › Remote access |
-| The PCs that can reach the Mac | `capmac remote pcs`, `capmac remote revoke <pc>` | Macs › Remote access › PCs |
-| Your signaling server | `capmac remote server <url>`, `CAPMAC_SIGNAL_URL` | Settings › Remote access |
+## AI coding agents
 
-The Mac has to be awake and you logged in to it (the service runs in your login session, like the simulators). *Keep the Mac awake* stops it from sleeping while remote access is on; a MacBook with its lid closed and no display attached sleeps anyway.
+Install the CapMac skill so your coding agent can build, run, read logs and take screenshots through the CLI
 
-## How it works
+```powershell
+capmac skill add
+```
 
-- **One SSH connection** (via [ssh2](https://github.com/mscdex/ssh2)) carries everything: commands, file transfers, log streams, screen frames and the dev-server tunnel. On the local network: no extra ports, no daemon, no firewall changes on the Mac. With remote access on, the same SSH connection travels inside a WebRTC data channel, or through your server's relay, and a small LaunchAgent on the Mac (`dev.capmac.remote`) lets it in.
-- **The agent** is a single dependency-free Node.js script that CapMac uploads to `~/.capmac/agent/<hash>/` and runs per operation. Closing the connection (Ctrl+C) stops whatever it was running.
-- **Incremental sync:** CapMac hashes your files (cached by size + mtime), the Mac replies with what it is missing, and only those files travel as one compressed stream.
-- **Smart rebuilds:** CapMac classifies each change — dependencies → `npm install` + `cap sync`; native → `xcodebuild`; web only → `cap copy` and a one-second update of the installed simulator app.
-- **Project copies** live in `~/.capmac/projects/<app>-<id>/` on the Mac (source mirror, DerivedData, build logs). `capmac clean --all` removes one.
+Choose the agents and whether to install for all projects or just this repository
+For an explicit choice, use `capmac skill add --agent claude-code,codex --global`
+Start a new agent session after installation
 
-## Security
-
-- SSH key authentication with a dedicated ed25519 key; the Mac's host key is pinned at pairing time and checked on every connection.
-- Your Mac password is used once at pairing (to install the key) and, if needed, to unlock the keychain for code signing. It's never stored.
-- CapMac only writes inside `~/.capmac` on the Mac (and `~/.ssh/authorized_keys` once, at pairing; with remote access, `~/Library/LaunchAgents/dev.capmac.remote.plist`).
-- The remote-screen page listens on `127.0.0.1` only.
-- **Remote access** keeps SSH as the security boundary: the pinned host key and CapMac's key protect the connection end to end, so the signaling server and the relay only ever see encrypted bytes. The service on the Mac lets in only the PCs you turned remote access on from (each has its own key, `remote_ed25519`), before a single byte reaches sshd. Both ends sign their WebRTC certificates, so the server cannot put itself in the middle of a peer-to-peer connection either.
+Studio has the same setup under **Settings › Terminal commands › AI coding agents**
+`capmac skill` shows installed copies and `capmac skill show` prints the instructions for other agents
 
 ## Troubleshooting
 
 | Problem | Fix |
-|---|---|
-| `The Mac refused the SSH connection` | Turn on Remote Login on the Mac. |
-| `Node.js was not found on the Mac` | `capmac doctor --fix` installs a private copy. |
-| Xcode license / first launch | `capmac doctor --fix` (asks for the Mac password for `sudo`). |
-| `errSecInternalComponent` while signing | The keychain is locked over SSH: `capmac keychain`. |
-| `Signing for "App" requires a development team` | `--team <TEAM_ID>` or `ios.team` in `capmac.json`. |
-| Private npm registry fails on the Mac | Put the token in `~/.npmrc` on the Mac (env vars from Windows don't travel). |
-| Simulator won't boot (`launchd_sim`, `CoreSimulatorService`) | Log in to the Mac's desktop as the paired user; simulators need a GUI session. |
-| App built with Xcode 27 doesn't launch | iOS 27 requires the UIScene lifecycle: run `npx cap migrate` (Capacitor 8.5+). |
-| Device build: "No Accounts" / "session has expired" | Use an App Store Connect API key (`--api-key`, see above). |
-| Wrong files synced | `capmac info --files`, then adjust `.capmacignore` / `capmac.json`. |
-| Away from home: `… is offline` | The Mac is asleep, logged out, or its remote access is off. Wake it or log in; *Keep the Mac awake* prevents it next time. |
-| `Cannot reach the signaling server` | Check its address (`capmac remote server`) and that it is running (`https://<server>/healthz`). |
-| `… no longer lets this PC in over the internet` | On the Mac's network, run `capmac remote on` again. |
-| CapMac Studio shows the *compatible* stream | The note under the simulator says why. *Try the smooth stream* starts it again; *Restart simulator* fixes a simulator whose screen stopped updating. If the helper doesn't compile after an Xcode update, update CapMac. |
-
-Add `--verbose` to any command to see full tool output. Build logs are kept on the Mac in `~/.capmac/projects/<id>/logs/`.
+| --- | --- |
+| SSH connection refused | Enable Remote Login on the Mac |
+| Missing Node.js, Xcode setup or iOS runtime | Run `capmac doctor --fix` |
+| Simulator will not boot | Log in to the Mac's desktop as the paired user |
+| Signing reports `errSecInternalComponent` | Unlock the keychain with `capmac keychain` |
+| Signing requires a development team | Pass `--team <TEAM_ID>` or set `ios.team` |
+| Familiar Capacitor commands are still local | Check `capmac takeover` and open a new terminal or restart VS Code |
+| Remote Mac is offline | Check that it is awake, logged in and has remote access enabled |
 
 ## Developing CapMac
 
 ```powershell
 npm install
-npm run build      # packages/cli/dist: cli.js (CLI), agent.mjs (Mac agent), viewer.html
-npm test           # unit tests (engine, CLI, agent, desktop logic) + an SSH round-trip test
+npm run build
+npm test
 npm run typecheck
 node bin/capmac.js --help
-
-npm run desktop:dev    # CapMac Studio with hot reload (Vite for the UI; main, preload and engine rebuild and restart)
-npm run desktop:test   # builds the app, then Playwright launches it with a fresh profile
-npm run desktop:build  # installers and portable exes in apps/desktop/release/
+npm run desktop:dev
+npm run desktop:test
+npm run desktop:build
 ```
 
-The repo is an npm workspace:
+| Folder | Purpose |
+| --- | --- |
+| `packages/core` | Shared engine, protocol and Mac agent |
+| `packages/cli` | CLI commands and browser simulator viewer |
+| `apps/desktop` | CapMac Studio |
+| `services/signal` | Signaling and relay server for remote access |
+| `examples/hello-capacitor` | Minimal Vite and Capacitor app |
 
-| Folder | What |
-|---|---|
-| `packages/core` | `@capmac/core` (private): the engine both front ends share, the wire protocol (`src/shared`) and the Mac agent (`src/agent`). Consumed as TypeScript source; the engine reports through typed events and asks through a `Prompter`, it never prints. |
-| `packages/cli` | `capmac`, the published CLI: commands, the terminal renderer for engine events, the browser screen viewer. Publish from this folder (`npm publish -w capmac`). |
-| `apps/desktop` | CapMac Studio, the Windows desktop app (Electron 44, React 19, Vite 8). The engine runs in a utility process; the UI is a sandboxed renderer talking to it through a small validated API. See [docs/desktop-design.md](docs/desktop-design.md). |
-| `spikes/streaming-v2` | The spike behind CapMac Studio's smooth simulator stream: the measurements and the tools used to explore Apple's private simulator interfaces. Results in the design doc. |
-| `bin/capmac.js` | Runs the CLI from `packages/cli/dist` (so `node bin/capmac.js …` works from a clone). |
+See the [desktop design](docs/desktop-design.md) for architecture and simulator streaming details
 
-`examples/hello-capacitor` is a minimal Vite + Capacitor 8 (Swift Package Manager) app for trying things out.
+### Project intro video
+
+The [Remotion intro](apps/intro/README.md) is an editable 68 second 1080p video showing the CLI, Studio and iOS workflow
+
+```powershell
+npm ci --prefix apps/intro
+npm run intro:studio
+npm run intro:render
+```
+
+The render is saved to `out/capmac-intro-v4.mp4`

@@ -22,7 +22,11 @@
     "test:watch": "vitest",
     "desktop:dev": "npm run dev -w @capmac/desktop",
     "desktop:build": "npm run dist -w @capmac/desktop",
-    "desktop:test": "npm run test:e2e -w @capmac/desktop"
+    "desktop:test": "npm run test:e2e -w @capmac/desktop",
+    "intro:studio": "npm --prefix apps/intro run studio",
+    "intro:render": "npm --prefix apps/intro run render",
+    "intro:poster": "npm --prefix apps/intro run poster",
+    "intro:check": "npm --prefix apps/intro run typecheck"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

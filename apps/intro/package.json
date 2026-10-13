@@ -1,0 +1,29 @@
+{
+  "name": "@capmac/intro",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The CapMac launch film, built with Remotion.",
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts CapMacIntro ../../out/capmac-intro-v4.mp4 --codec=h264 --crf=17 --audio-bitrate=320k",
+    "poster": "remotion still src/index.ts CapMacPoster ../../out/capmac-poster-v3.png",
+    "typecheck": "tsc --noEmit",
+    "previews": "node scripts/previews.mjs",
+    "music:prepare": "python scripts/prepare_music.py"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.535",
+    "@remotion/cli": "4.0.535",
+    "@remotion/media-parser": "4.0.535",
+    "@remotion/renderer": "4.0.535",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "remotion": "4.0.535"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "5.9.3"
+  }
+}

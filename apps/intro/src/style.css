@@ -1,0 +1,3 @@
+* {box-sizing: border-box;}
+body {margin: 0;}
+::selection {background: #9c8aff;}
