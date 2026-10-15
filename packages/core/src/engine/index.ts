@@ -5,6 +5,7 @@
  */
 export * from './agent-client.js';
 export * from './agent-skills.js';
+export * from './app-screen.js';
 export * from './capmac-command.js';
 export * from './config.js';
 export * from './context.js';
@@ -12,6 +13,8 @@ export * from './devices.js';
 export * from './devserver.js';
 export * from './discovery.js';
 export * from './doctor.js';
+export * from './electron.js';
+export * from './electron-project.js';
 export * from './errors.js';
 export * from './events.js';
 export * from './format.js';

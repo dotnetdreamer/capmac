@@ -26,7 +26,7 @@ import { openInEditor } from './editor.js';
 import { installSkill, removeSkill, skillProjectRoot, skillStatus } from '@capmac/core/engine/agent-skills';
 import { capmacCommandStatus, installCapmacCommand, removeCapmacCommand } from '@capmac/core/engine/capmac-command';
 import { disableTakeover, enableTakeover, ensureTakeoverDefault, samePath, takeoverStatus, type TakeoverInstall } from '@capmac/core/engine/takeover';
-import { agentPath, cliDir, iconsDir, outDir, remoteModulesDir, sampleDir } from './paths.js';
+import { agentPath, cliDir, electronSampleDir, iconsDir, outDir, remoteModulesDir, sampleDir } from './paths.js';
 import { SettingsStore } from './settings.js';
 import { AppTray } from './tray.js';
 import { Updates } from './updates.js';
@@ -178,9 +178,21 @@ function onEnginePrompt(prompt: PromptRequest): void {
     engine.respondPrompt({ id: prompt.id, ok: false });
     return;
   }
-  showWindow();
   pendingPrompts.push(prompt);
   send('engine:prompt', prompt);
+  askForAttention(prompt.message);
+}
+
+/**
+ * A question waits in the window without taking the keyboard: someone busy in
+ * another app could otherwise type into it (a password, even). The taskbar
+ * button flashes and a notification says CapMac Studio needs an answer.
+ */
+function askForAttention(message: string): void {
+  if (!win || win.isDestroyed() || win.isFocused()) return;
+  if (!win.isVisible()) win.showInactive();
+  win.flashFrame(true);
+  notify(t.system.needsAnswer, message);
 }
 
 // ─── IPC (every payload validated; only our own pages may call) ───────────
@@ -263,10 +275,10 @@ function registerIpc(): void {
     await fs.writeFile(result.filePath, text);
     return result.filePath;
   });
-  handle('app:screen-open', ({ mac, udid, maxSize }, event) => {
+  handle('app:screen-open', ({ mac, udid, maxSize, projectPath }, event) => {
     const streamId = `scr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const { port1, port2 } = new MessageChannelMain();
-    engine.openScreen(streamId, mac, udid, port1, { prefer: settings.get().simulatorStream, maxSize });
+    engine.openScreen(streamId, mac, udid, port1, { prefer: settings.get().simulatorStream, maxSize, projectPath });
     event.sender.postMessage('screen-port', { streamId }, [port2]);
     return { streamId };
   });
@@ -356,6 +368,7 @@ function openWindow(): BrowserWindow {
   });
   w.on('show', updateVisibility);
   w.on('hide', updateVisibility);
+  w.on('focus', () => w.flashFrame(false));
   w.on('minimize', updateVisibility);
   w.on('restore', updateVisibility);
   w.on('close', (event) => {
@@ -401,6 +414,7 @@ app.whenReady().then(async () => {
   engine = new EngineProcess(outDir('engine', 'engine.cjs'), () => ({
     agentPath: agentPath(),
     sampleDir: sampleDir(),
+    electronSampleDir: electronSampleDir(),
     samplesHome: path.join(app.getPath('documents'), 'CapMac Studio'),
     remoteModulesDir: remoteModulesDir(),
     settings: { verbose: settings.get().verbose, osLogs: settings.get().osLogs },

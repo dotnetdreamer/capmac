@@ -11,6 +11,11 @@ import {
   openInXcode,
   Pipeline,
   pullFromMac,
+  describeFlavor,
+  electronPlan,
+  macTarget,
+  runsOnMac,
+  scanOptionsFor,
   scanProject,
   streamAppLogs,
   syncToMac,
@@ -26,23 +31,30 @@ import { canPrompt, confirm, formatBytes, log, pc, plural } from '../ui.js';
 import { ScreenViewer } from '../viewer/server.js';
 
 function targetRow(t: Target, nameWidth: number): string {
+  if (t.kind === 'mac') return `  ${t.name.padEnd(nameWidth)}  ${t.os.padEnd(11)}  ${pc.green('ready    ')}  ${pc.dim(t.udid)}`;
   const state = t.kind === 'simulator'
     ? t.state === 'Booted' ? pc.green('booted   ') : pc.dim('shut down')
     : t.state === 'connected' ? pc.green(t.connection === 'network' ? 'connected (Wi-Fi)' : 'connected (USB)') : t.available ? pc.yellow('paired') : pc.red('not connected');
   return `  ${t.name.padEnd(nameWidth)}  ${t.os.padEnd(11)}  ${state}  ${pc.dim(t.udid)}`;
 }
 
-export async function targetsCommand(options: MacOption & { json?: boolean }): Promise<void> {
+export async function targetsCommand(options: MacOption & { json?: boolean; electron?: boolean }): Promise<void> {
   const { ctx } = terminalContext();
   const config = await loadProject(process.cwd()).catch(() => null);
   const session = await MacSession.open({ host: options.mac ?? config?.config.host });
   try {
     const all = await withStep(ctx, `Listing simulators and devices on ${session.label}`, 'other', () => session.call<TargetsResult>('targets'));
+    // The Mac's own desktop, where an Electron app runs.
+    const mac = options.electron || config?.electron ? macTarget(session.label, session.host.macos) : null;
     if (options.json) {
-      process.stdout.write(`${JSON.stringify(all, null, 2)}\n`);
+      process.stdout.write(`${JSON.stringify(mac ? { ...all, mac } : all, null, 2)}\n`);
       return;
     }
-    const width = Math.min(40, Math.max(12, ...[...all.devices, ...all.simulators].map((t) => t.name.length)));
+    const width = Math.min(40, Math.max(12, ...[...all.devices, ...all.simulators, ...(mac ? [mac] : [])].map((t) => t.name.length)));
+    if (mac) {
+      log.line(pc.bold('Mac (Electron)'));
+      log.line(targetRow(mac, width));
+    }
     log.line(pc.bold('Devices'));
     if (all.devices.length) for (const d of all.devices) log.line(targetRow(d, width));
     else log.line(pc.dim(all.deviceSupport ? '  none connected (plug one into the Mac, or pair it over Wi-Fi in Xcode)' : '  needs Xcode 15+ on the Mac'));
@@ -50,7 +62,8 @@ export async function targetsCommand(options: MacOption & { json?: boolean }): P
     if (all.simulators.length) for (const s of all.simulators) log.line(targetRow(s, width));
     else log.line(pc.dim('  none installed'));
     log.line();
-    log.dim(`Pick one with ${pc.cyan('capmac run --target "iPhone 16"')} or ${pc.cyan('capmac run --device')}.`);
+    const electronHint = mac && config?.kind === 'capacitor' && config.hasIos ? `, or the Electron app with ${pc.cyan('capmac run --electron')}` : '';
+    log.dim(`Pick one with ${pc.cyan('capmac run --target "iPhone 16"')} or ${pc.cyan('capmac run --device')}${electronHint}.`);
   } finally {
     session.close();
   }
@@ -59,29 +72,46 @@ export async function targetsCommand(options: MacOption & { json?: boolean }): P
 /** Shows what capmac detected about the project and which files it would sync. */
 export async function infoCommand(options: { files?: boolean; live?: boolean }): Promise<void> {
   const project = await loadProject(process.cwd());
-  const rows: Array<[string, string]> = [
-    ['App', `${project.appName} (${project.appId})`],
-    ['Capacitor project', project.capDir],
-    ['Synced folder', project.syncRoot + (project.projectRel ? pc.dim(`  (app in ${project.projectRel}/)`) : '')],
-    ['Web assets', project.webDir],
-    ['iOS platform', project.hasIos ? `${project.iosDir}/App · ${project.iosPackageManager}` : pc.red('missing (npx cap add ios)')],
-    ['Scheme', project.config.ios?.scheme ?? project.scheme],
-    ['Team ID', project.config.ios?.team ?? project.teamId ?? pc.dim('not set (only needed for devices)')],
-    ['Package manager', project.packageManager],
-    ['Mac', project.config.host ?? pc.dim('default')],
-    ['Project id on the Mac', project.projectId],
-  ];
+  const electron = project.electron;
+  const plan = electron ? electronPlan(project) : null;
+  const launch = plan ? ('electron' in plan.launch ? `electron ${plan.launch.electron.join(' ')}` : plan.launch.command) : '';
+  const electronRows: Array<[string, string]> = electron && plan
+    ? [
+        [project.kind === 'electron' ? 'Electron app' : 'Electron platform', `${electron.rel ? `${electron.rel}/ · ` : ''}${describeFlavor(electron.flavor)}${electron.electronRange ? ` · electron ${electron.electronRange}` : ''}`],
+        ['On the Mac: build', plan.build ?? pc.dim('nothing to build')],
+        ['On the Mac: launch', launch],
+        ['Live reload', plan.dev ? plan.dev.command : electron.flavor === 'capacitor' ? 'your dev server, through a tunnel' : pc.dim('CapMac reloads the windows, or restarts the app')],
+      ]
+    : [];
+  const rows: Array<[string, string]> = project.kind === 'electron'
+    ? [
+        ['App', `${project.appName} (${project.appId})`],
+        ['Project', project.capDir],
+        ['Synced folder', project.syncRoot + (project.projectRel ? pc.dim(`  (app in ${project.projectRel}/)`) : '')],
+        ...electronRows,
+        ['Package manager', project.packageManager],
+        ['Mac', project.config.host ?? pc.dim('default')],
+        ['Project id on the Mac', project.projectId],
+      ]
+    : [
+        ['App', `${project.appName} (${project.appId})`],
+        ['Capacitor project', project.capDir],
+        ['Synced folder', project.syncRoot + (project.projectRel ? pc.dim(`  (app in ${project.projectRel}/)`) : '')],
+        ['Web assets', project.webDir],
+        ['iOS platform', project.hasIos ? `${project.iosDir}/App · ${project.iosPackageManager}` : electron ? pc.dim('not added') : pc.red('missing (npx cap add ios)')],
+        ...(project.hasIos
+          ? ([
+              ['Scheme', project.config.ios?.scheme ?? project.scheme],
+              ['Team ID', project.config.ios?.team ?? project.teamId ?? pc.dim('not set (only needed for devices)')],
+            ] as Array<[string, string]>)
+          : []),
+        ...electronRows,
+        ['Package manager', project.packageManager],
+        ['Mac', project.config.host ?? pc.dim('default')],
+        ['Project id on the Mac', project.projectId],
+      ];
   for (const [k, v] of rows) log.line(`${pc.dim(k.padEnd(22))} ${v}`);
-  const scan = await scanProject({
-    root: project.syncRoot,
-    projectRel: project.projectRel,
-    webDir: project.webDir,
-    iosDir: project.iosDir,
-    includeWebDir: !options.live,
-    include: project.config.sync?.include,
-    exclude: project.config.sync?.exclude,
-    cacheFile: path.join(capmacDir(), 'cache', `${project.projectId}.json`),
-  });
+  const scan = await scanProject(scanOptionsFor(project, !options.live));
   const total = scan.files.reduce((sum, f) => sum + f.size, 0);
   log.line();
   log.line(`${pc.bold('Would sync')} ${plural(scan.files.length, 'file')} (${formatBytes(total)})${options.live ? pc.dim(' — live mode, web assets left out') : ''}`);
@@ -212,13 +242,22 @@ export async function logsCommand(options: MacOption & { target?: string }): Pro
   }
 }
 
-export async function screenCommand(options: MacOption & { target?: string; port?: string; open?: boolean }): Promise<void> {
+export async function screenCommand(options: MacOption & { target?: string; port?: string; open?: boolean; electron?: boolean }): Promise<void> {
   const { ctx } = terminalContext();
   const project = await loadProject(process.cwd());
   const link = new MacLink(options.mac ?? project.config.host, ctx, { autoReconnect: true });
   let viewer: ScreenViewer | null = null;
   try {
     const session = await link.session();
+    if (runsOnMac(project, options)) {
+      // The Electron app's window: it shows once the app runs (`capmac run` or `capmac dev` in another terminal).
+      const title = `${project.appName} · ${session.label}`;
+      viewer = await ScreenViewer.start(link, { kind: 'app', projectId: project.projectId, label: session.label }, { title, port: options.port ? Number(options.port) : undefined });
+      if (options.open !== false) viewer.open();
+      log.dim(`Shows ${project.appName}'s window while it runs on the Mac. Press Ctrl+C to stop.`);
+      await new Promise<void>((resolve) => process.once('SIGINT', () => resolve()));
+      return;
+    }
     const pipeline = new Pipeline(session, project, ctx);
     const target = await pipeline.chooseTarget({ target: options.target, simulator: true });
     if (target.kind !== 'simulator') throw new UserError('The remote screen works with simulators only.');

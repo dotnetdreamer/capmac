@@ -11,6 +11,8 @@ export interface HostInit {
   agentPath: string;
   /** The bundled sample app ("Run the sample app"). */
   sampleDir: string | null;
+  /** The bundled Electron sample ("Try the Electron sample"). */
+  electronSampleDir: string | null;
   /** Where "Run the sample app" puts its copy (Documents\capmac Studio). */
   samplesHome: string;
   /** node-datachannel for remote access (resources/remote when packaged; null: from node_modules). */
@@ -23,7 +25,7 @@ export type MainToHost =
   | { kind: 'call'; id: number; method: EngineMethod; params: unknown }
   | { kind: 'prompt-response'; response: PromptResponse }
   /** Comes with the engine's end of a MessageChannel in `ports`. */
-  | { kind: 'screen-open'; streamId: string; mac: string; udid: string; prefer: 'smooth' | 'compatible'; maxSize?: number }
+  | { kind: 'screen-open'; streamId: string; mac: string; udid: string; prefer: 'smooth' | 'compatible'; maxSize?: number; projectPath?: string }
   | { kind: 'settings'; settings: HostSettings }
   | { kind: 'visibility'; visible: boolean }
   | { kind: 'shutdown' };

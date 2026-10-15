@@ -55,40 +55,59 @@ async function takeBaseline(root: string, relevant: (rel: string) => boolean, si
  * file's size and modification time.
  */
 export function watchNativeChanges(project: ProjectInfo, onChange: (kinds: Set<ChangeKind>, paths: string[]) => void, debounceMs = 700): FSWatcher {
-  let pending = new Map<string, ChangeKind>();
-  let timer: NodeJS.Timeout | null = null;
   const ctx = { projectRel: project.projectRel, webDir: project.webDir, iosDir: project.iosDir };
+  // Capacitor's Electron platform is not part of the iOS build.
+  const electronRel = project.electron ? [project.projectRel, project.electron.rel].filter(Boolean).join('/') : null;
   const relevantKind = (rel: string): ChangeKind | null => {
     if (NOISE.test(rel)) return null;
+    if (electronRel && (rel === electronRel || rel.startsWith(`${electronRel}/`))) return null;
     const kind = classifyChange(rel, ctx);
     return kind === 'web' || kind === 'other' ? null : kind;
   };
+  return watchWrites(project.syncRoot, (rel) => relevantKind(rel) !== null, (paths) => {
+    onChange(new Set(paths.map((rel) => relevantKind(rel) ?? 'other')), paths);
+  }, debounceMs);
+}
+
+/** Folders whose files never need syncing (dependencies, caches, build output of common tools). */
+export function isNoise(rel: string): boolean {
+  return NOISE.test(rel);
+}
+
+/**
+ * Reports files under `root` that were written (or deleted), in batches,
+ * `debounceMs` after the last write; `relevant` picks the files (POSIX paths
+ * from `root`). Reads are not changes: each event is checked against the
+ * file's size and modification time (see watchNativeChanges).
+ */
+export function watchWrites(root: string, relevant: (rel: string) => boolean, onChange: (paths: string[]) => void, debounceMs = 700): FSWatcher {
+  let pending = new Set<string>();
+  let timer: NodeJS.Timeout | null = null;
   const started = Date.now();
   const stop = new AbortController();
   let stamps: Map<string, Stamp> | null = null;
   // Files written while the baseline was being taken (already reported).
   const early = new Map<string, Stamp>();
-  void takeBaseline(project.syncRoot, (rel) => relevantKind(rel) !== null, stop.signal).then((baseline) => {
+  void takeBaseline(root, relevant, stop.signal).then((baseline) => {
     stamps = new Map([...baseline, ...early]);
   });
 
-  const report = (rel: string, kind: ChangeKind) => {
-    pending.set(rel, kind);
+  const report = (rel: string) => {
+    pending.add(rel);
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       const batch = pending;
-      pending = new Map();
+      pending = new Set();
       timer = null;
-      onChange(new Set(batch.values()), [...batch.keys()]);
+      onChange([...batch]);
     }, debounceMs);
   };
 
-  const watcher = watch(project.syncRoot, { recursive: true }, (_event, filename) => {
+  const watcher = watch(root, { recursive: true }, (_event, filename) => {
     if (!filename) return;
     const rel = filename.toString().split('\\').join('/');
-    const kind = relevantKind(rel);
-    if (!kind) return;
-    void stampOf(path.join(project.syncRoot, rel)).then((stamp) => {
+    if (NOISE.test(rel) || !relevant(rel)) return;
+    void stampOf(path.join(root, rel)).then((stamp) => {
       if (stamp === null || stop.signal.aborted) return;
       if (stamps) {
         const known = stamps.get(rel);
@@ -100,7 +119,7 @@ export function watchNativeChanges(project: ProjectInfo, onChange: (kinds: Set<C
         if (stamp !== MISSING && Number(stamp.slice(stamp.indexOf(':') + 1)) < started) return;
         early.set(rel, stamp);
       }
-      report(rel, kind);
+      report(rel);
     });
   });
   watcher.on('error', () => undefined);

@@ -7,7 +7,8 @@ import type { AppLogEntry } from '../../shared/contract';
 import { t } from '../../shared/i18n';
 import { projectKey } from './projects';
 
-export type ConsoleSource = 'js' | 'cap' | 'native' | 'bridge' | 'web' | 'capmac';
+/** 'main' and 'electron': an Electron app's main process, and Chromium inside it. */
+export type ConsoleSource = 'js' | 'cap' | 'native' | 'bridge' | 'web' | 'capmac' | 'main' | 'electron';
 export type ConsoleLevel = 'error' | 'warn' | 'info' | 'log' | 'debug';
 
 export interface ConsoleLine {
@@ -23,7 +24,7 @@ export interface ConsoleLine {
 export const SOURCE_LABELS: Record<ConsoleSource, string> = t.console.sources;
 export const SOURCE_TAGS: Record<ConsoleSource, string> = t.console.tags;
 
-const KIND_TO_SOURCE: Record<AppLogEntry['kind'], ConsoleSource> = { console: 'js', capacitor: 'cap', native: 'native', bridge: 'bridge' };
+const KIND_TO_SOURCE: Record<AppLogEntry['kind'], ConsoleSource> = { console: 'js', capacitor: 'cap', native: 'native', bridge: 'bridge', main: 'main', electron: 'electron' };
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
 
 export class ConsoleBuffer {
@@ -57,13 +58,14 @@ export class ConsoleBuffer {
   /** App output: multi-line console messages are merged into one line. */
   pushApp(entry: AppLogEntry): void {
     const last = this.lines[this.lines.length - 1];
-    if (entry.continuation && last && last.source === 'js') {
+    const source = KIND_TO_SOURCE[entry.kind];
+    if (entry.continuation && last && last.source === source && (source === 'js' || source === 'main')) {
       // Replace (not mutate) so memoized rows re-render.
       this.lines[this.lines.length - 1] = { ...last, text: `${last.text}\n${entry.text}` };
       this.changed();
       return;
     }
-    this.push({ ts: entry.ts, source: KIND_TO_SOURCE[entry.kind], level: entry.level, text: entry.text, err: entry.stream === 'stderr' || undefined });
+    this.push({ ts: entry.ts, source, level: entry.level, text: entry.text, err: entry.stream === 'stderr' || undefined });
   }
 
   pushText(source: ConsoleSource, text: string, level: ConsoleLevel = 'log'): void {
@@ -129,7 +131,7 @@ export interface ConsoleFilter {
 }
 
 export const DEFAULT_FILTER: ConsoleFilter = {
-  sources: { js: true, cap: true, native: true, bridge: false, web: true, capmac: true },
+  sources: { js: true, cap: true, native: true, bridge: false, web: true, capmac: true, main: true, electron: true },
   levels: { error: true, warn: true, info: true, log: true, debug: true },
 };
 

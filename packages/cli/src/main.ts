@@ -54,7 +54,7 @@ function wrap<A extends unknown[]>(fn: (...args: A) => Promise<void>): (...args:
 const program = new Command();
 program
   .name('capmac')
-  .description('Pair to Mac for Capacitor: build, run, live-reload and see your iOS app on a Mac, from Windows.')
+  .description('Pair to Mac for Capacitor and Electron: build, run, live-reload and see your iOS app, or your Electron app, on a Mac, from Windows.')
   .version(VERSION, '-V, --version')
   .option('-v, --verbose', 'show full tool output')
   .showHelpAfterError()
@@ -72,9 +72,10 @@ const routeOption = () => new Option('--route <how>', 'how to reach the Mac this
 
 function targetOptions(cmd: Command): Command {
   return cmd
-    .option('-t, --target <name|udid>', 'simulator or device to use (see `capmac targets`)')
+    .option('-t, --target <name|udid>', 'simulator or device to use (see `capmac targets`); "mac" for the Electron app')
     .option('-d, --device', 'run on a connected iPhone/iPad instead of a simulator')
-    .option('-s, --simulator', 'only consider simulators');
+    .option('-s, --simulator', 'only consider simulators')
+    .option('-e, --electron', "the Electron app, on the Mac's desktop (a Capacitor app with iOS too)");
 }
 
 function buildOptions(cmd: Command): Command {
@@ -120,7 +121,7 @@ program
 buildOptions(targetOptions(
   program
     .command('run')
-    .description('build the web app, sync, build on the Mac and launch on a simulator or device')
+    .description("build the web app, sync, build on the Mac and launch on a simulator or device (an Electron app: on the Mac's desktop)")
     .addOption(mac()).addOption(routeOption())
     .option('--release', 'shortcut for --configuration Release')
     .option('--no-web-build', 'do not run the web build first (use the existing web dir)')
@@ -134,7 +135,7 @@ buildOptions(targetOptions(
 buildOptions(targetOptions(
   program
     .command('dev')
-    .description('live reload: your dev server runs here, the app on the Mac loads it through an SSH tunnel')
+    .description('live reload: your dev server runs here, the app on the Mac loads it through an SSH tunnel (an Electron app reloads on the Mac as you save)')
     .addOption(mac()).addOption(routeOption())
     .option('--url <url>', 'use an already running dev server (e.g. http://localhost:5173)')
     .option('--dev-command <cmd>', 'command that starts the dev server (default: the "dev"/"start" script)')
@@ -169,23 +170,26 @@ program
   .command('targets')
   .description('list simulators and devices available on the Mac')
   .addOption(mac()).addOption(routeOption())
+  .option('-e, --electron', "also list the Mac's desktop, where the Electron app runs")
   .option('--json', 'machine-readable output')
   .action(wrap(targetsCommand));
 
 program
   .command('screen')
-  .description('show the Mac\'s simulator in your browser, with touch and keyboard input')
+  .description("show the Mac's simulator in your browser, with touch and keyboard input (an Electron app: its window)")
   .addOption(mac()).addOption(routeOption())
   .option('-t, --target <name|udid>', 'simulator to show')
+  .option('-e, --electron', "the Electron app's window (it must be running)")
   .option('--port <port>', 'local port for the viewer (default 7373)')
   .option('--no-open', 'do not open the browser automatically')
   .action(wrap(screenCommand));
 
 program
   .command('screenshot [file]')
-  .description("save a PNG of the running simulator's screen (default: a temp file; the path is printed)")
+  .description("save a PNG of the running simulator's screen, or the Electron app's window (default: a temp file; the path is printed)")
   .addOption(mac()).addOption(routeOption())
   .option('-t, --target <name|udid>', 'simulator (default: the booted one this app last ran on)')
+  .option('-e, --electron', "the Electron app's window (it must be running)")
   .action(wrap((file: string | undefined, options) => screenshotCommand(file, options)));
 
 program

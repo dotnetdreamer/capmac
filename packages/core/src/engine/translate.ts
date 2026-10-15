@@ -30,6 +30,15 @@ export function phaseOf(op: string, stepId: string): Phase {
       return 'archive';
     case 'archive:export':
       return 'export';
+    case 'electron-prepare:install':
+    case 'electron-prepare:install-app':
+      return 'deps';
+    case 'electron-prepare:electron':
+      return 'electron';
+    case 'electron-prepare:cap':
+      return 'cap';
+    case 'electron-prepare:build':
+      return 'build';
     default:
       return 'other';
   }

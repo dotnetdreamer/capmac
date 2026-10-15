@@ -17,8 +17,10 @@ import { Console } from './Console';
 import { BuildIpaDialog, BuildLogDialog } from './Dialogs';
 import { isListed, Problems } from './Problems';
 import { SessionBar } from './SessionBar';
+import { AppWindowPane } from './AppWindow';
 import { SimulatorPane } from './Simulator';
-import { automaticTarget } from './TargetPicker';
+import { automaticTarget, macDesktopTarget } from './TargetPicker';
+import { MAC_TARGET_ID } from '../../state/runs';
 import { Timeline } from './Timeline';
 import { Toolbar } from './Toolbar';
 import './workspace.css';
@@ -86,7 +88,11 @@ export function Workspace({ path }: { path: string }) {
   const updateSettings = useApp((s) => s.updateSettings);
   const deviceFrame = useApp((s) => s.settings?.deviceFrame ?? true);
   const mac = resolveMac(macs, prefs?.mac ?? entry.summary?.host);
-  useWatchTargets(mac?.name);
+  const electron = entry.summary?.electron ?? null;
+  // An Electron app on its own (or Capacitor with Electron and no iOS) only runs on the Mac's desktop.
+  const onlyMac = Boolean(electron && (entry.summary?.kind === 'electron' || !entry.summary?.hasIos));
+  const macDesktop = useMemo(() => (mac && electron ? macDesktopTarget(mac.label, mac.macos) : null), [mac, electron]);
+  useWatchTargets(onlyMac ? null : mac?.name);
   const targetsEntry = useTargets((s) => (mac ? s.byMac[mac.name] : undefined));
   const targets = targetsEntry?.targets ?? null;
 
@@ -97,6 +103,8 @@ export function Workspace({ path }: { path: string }) {
   const timelinePanel = usePanelRef();
   const bottomPanel = usePanelRef();
   const outer = useDefaultLayout({ id: 'capmac-ws-outer', storage, onlySaveAfterUserInteractions: true });
+  // A Mac app's window is wide: its own layout, remembered apart from the simulator's.
+  const outerMac = useDefaultLayout({ id: 'capmac-ws-outer-mac', storage, onlySaveAfterUserInteractions: true });
   const inner = useDefaultLayout({ id: 'capmac-ws-inner', storage, onlySaveAfterUserInteractions: true });
 
   useEffect(() => {
@@ -107,12 +115,14 @@ export function Workspace({ path }: { path: string }) {
 
   // The target: the toolbar pick, else the last run's, else what `capmac run` would choose. Always with live state.
   const { target, auto } = useMemo((): { target: Target | null; auto: boolean } => {
+    // The Mac's desktop when picked (Run and Live go where the picker points), or when it is the only place to run.
+    if (macDesktop && (onlyMac || prefs?.target === MAC_TARGET_ID)) return { target: macDesktop, auto: onlyMac && prefs?.target !== MAC_TARGET_ID };
     const all = targets ? [...targets.simulators, ...targets.devices] : [];
     const picked = prefs?.target ? all.find((item) => item.udid === prefs.target) : undefined;
     if (picked) return { target: picked, auto: false };
     if (run?.target) return { target: all.find((item) => item.udid === run.target!.udid) ?? run.target, auto: true };
     return { target: automaticTarget(targets), auto: true };
-  }, [targets, prefs?.target, run?.target]);
+  }, [targets, prefs?.target, run?.target, macDesktop, onlyMac]);
 
   const errors = run?.diagnostics.filter((d) => d.severity === 'error').length ?? 0;
   // The tab counts what the Problems list shows, not the dependency warnings folded away.
@@ -190,34 +200,49 @@ export function Workspace({ path }: { path: string }) {
   }
 
   const summary = entry.summary;
+  const electronKind = summary.electron ? (summary.electron.flavor === 'capacitor' ? 'capacitor' : 'plain') : null;
+  const onMacTarget = target?.kind === 'mac';
   return (
     <div className="workspace">
-      <Toolbar path={path} summary={summary} icon={entry.icon} run={run} macs={macs} mac={mac} targets={targets} target={target} autoTarget={auto} targetsLoading={Boolean(mac) && !targets && !targetsEntry?.error} />
-      <SessionBar path={path} run={run} mac={mac} />
-      {!summary.hasIos && (
+      <Toolbar path={path} summary={summary} icon={entry.icon} run={run} macs={macs} mac={mac} targets={targets} target={target} autoTarget={auto} targetsLoading={Boolean(mac) && !targets && !targetsEntry?.error} macDesktop={macDesktop} onlyMac={onlyMac} />
+      <SessionBar path={path} run={run} mac={mac} electron={electronKind} />
+      {!summary.hasIos && !summary.electron && (
         <div className="session-banner">
           <InfoBar tone="caution" title={t.workspace.noIosTitle}>
             <Rich text={t.workspace.noIosBody} />
           </InfoBar>
         </div>
       )}
-      {summary.hasIos && !summary.hasNodeModules && summary.devCommand && <DepsBanner path={path} packageManager={summary.packageManager} onInstalled={() => void inspect(path, true)} />}
+      {(summary.hasIos || summary.electron?.flavor === 'capacitor') && !summary.hasNodeModules && summary.devCommand && <DepsBanner path={path} packageManager={summary.packageManager} onInstalled={() => void inspect(path, true)} />}
       {macs.length === 0 && (
         <div className="session-banner">
           <InfoBar tone="info" title={t.workspace.pairBanner} actions={<Button size="sm" variant="accent" onClick={() => useApp.getState().navigate({ name: 'onboarding' })}>{t.common.pairMac}</Button>} />
         </div>
       )}
-      <Group orientation="horizontal" id="capmac-ws-outer" className="ws-panels" defaultLayout={outer.defaultLayout} onLayoutChanged={outer.onLayoutChanged}>
-        <Panel id="simulator" panelRef={simPanel} collapsible collapsedSize={0} minSize={240} defaultSize="31%" className="ws-panel">
+      <Group
+        key={onMacTarget ? 'mac' : 'sim'}
+        orientation="horizontal"
+        id={onMacTarget ? 'capmac-ws-outer-mac' : 'capmac-ws-outer'}
+        className="ws-panels"
+        defaultLayout={(onMacTarget ? outerMac : outer).defaultLayout}
+        onLayoutChanged={(onMacTarget ? outerMac : outer).onLayoutChanged}
+      >
+        <Panel id="simulator" panelRef={simPanel} collapsible collapsedSize={0} minSize={240} defaultSize={onMacTarget ? '50%' : '31%'} className="ws-panel">
           <Pane
-            title={t.workspace.simulator}
+            title={onMacTarget ? t.workspace.macApp : t.workspace.simulator}
             labelledBy="pane-sim"
-            sub={target?.kind === 'simulator' ? `${target.name} · ${target.os}` : undefined}
-            className="pane--sim"
-            actions={<IconButton icon="phone" size="sm" label={deviceFrame ? t.workspace.hideFrame : t.workspace.showFrame} pressed={deviceFrame} onClick={() => void updateSettings({ deviceFrame: !deviceFrame })} />}
+            sub={target?.kind === 'simulator' || onMacTarget ? `${target!.name} · ${target!.os}` : undefined}
+            className={onMacTarget ? 'pane--sim pane--mac' : 'pane--sim'}
+            actions={
+              onMacTarget ? (
+                <IconButton icon="desktop" size="sm" label={deviceFrame ? t.workspace.hideWindowFrame : t.workspace.showWindowFrame} pressed={deviceFrame} onClick={() => void updateSettings({ deviceFrame: !deviceFrame })} />
+              ) : (
+                <IconButton icon="phone" size="sm" label={deviceFrame ? t.workspace.hideFrame : t.workspace.showFrame} pressed={deviceFrame} onClick={() => void updateSettings({ deviceFrame: !deviceFrame })} />
+              )
+            }
           >
             <ErrorBoundary label={t.crash.parts.simulator} compact>
-              <SimulatorPane mac={mac} target={target} />
+              {onMacTarget ? <AppWindowPane mac={mac} path={path} run={run} frame={deviceFrame} /> : <SimulatorPane mac={mac} target={target} />}
             </ErrorBoundary>
           </Pane>
         </Panel>
@@ -227,7 +252,7 @@ export function Workspace({ path }: { path: string }) {
             <Panel id="timeline" panelRef={timelinePanel} collapsible collapsedSize={0} minSize={124} defaultSize={168} className="ws-panel">
               <Pane title={t.workspace.timeline} labelledBy="pane-timeline">
                 <ErrorBoundary label={t.crash.parts.timeline} compact>
-                  <Timeline run={run} />
+                  <Timeline run={run} electron={electronKind} macSelected={onMacTarget} />
                 </ErrorBoundary>
               </Pane>
             </Panel>

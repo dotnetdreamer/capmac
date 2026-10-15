@@ -8,17 +8,20 @@
   :root {
     --bg: #f4f5f7; --panel: #ffffff; --text: #16181d; --muted: #6b7280; --border: #e3e5ea;
     --accent: #3a7afe; --ok: #1f9d55; --warn: #c27c0e; --err: #d64545; --device: #101114; --shadow: 0 20px 50px rgba(15,23,42,.18);
+    --titlebar: #e8e8ea; --titletext: #3b3d42;
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #0e0f12; --panel: #17191e; --text: #e8eaee; --muted: #8b93a1; --border: #262a31;
       --accent: #6b9bff; --ok: #3fbf7f; --warn: #e0a43a; --err: #f06b6b; --device: #000; --shadow: 0 20px 60px rgba(0,0,0,.55);
+      --titlebar: #2b2c30; --titletext: #c9cbd1;
     }
   }
   :root[data-theme="dark"] {
     --bg: #0e0f12; --panel: #17191e; --text: #e8eaee; --muted: #8b93a1; --border: #262a31;
     --accent: #6b9bff; --ok: #3fbf7f; --warn: #e0a43a; --err: #f06b6b; --device: #000; --shadow: 0 20px 60px rgba(0,0,0,.55);
+    --titlebar: #2b2c30; --titletext: #c9cbd1;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -30,17 +33,29 @@
   .dot.err { background: var(--err); }
   .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
   .spacer { flex: 1; }
-  button { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
-  button:hover { border-color: var(--accent); }
+  button, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  button:hover, select:hover { border-color: var(--accent); }
   button:disabled { opacity: .45; cursor: not-allowed; }
+  select { max-width: 220px; }
+  [hidden] { display: none !important; }
   main { flex: 1; display: flex; min-height: 0; }
   .stage { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; min-width: 0; position: relative; }
-  .device { background: var(--device); padding: 12px; border-radius: 46px; box-shadow: var(--shadow); height: 100%; max-height: 900px; aspect-ratio: var(--ratio, 0.4615); display: flex; }
+  .device { background: var(--device); padding: 12px; border-radius: 46px; box-shadow: var(--shadow); height: 100%; max-height: 900px; aspect-ratio: var(--ratio, 0.4615); display: flex; flex-direction: column; }
   .screen { position: relative; flex: 1; border-radius: 36px; overflow: hidden; background: #000; outline: none; }
   .screen:focus-visible { box-shadow: 0 0 0 3px var(--accent); }
   .screen img { width: 100%; height: 100%; object-fit: contain; display: block; user-select: none; -webkit-user-drag: none; touch-action: none; }
   .screen.input img { cursor: pointer; }
-  .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #cfd3da; font-size: 13px; padding: 24px; pointer-events: none; }
+  /* A Mac app's window: a title bar with the traffic lights above the page. */
+  .titlebar { display: none; height: 28px; flex: none; align-items: center; gap: 8px; padding: 0 10px; background: var(--titlebar); color: var(--titletext); font-size: 12.5px; font-weight: 600; position: relative; user-select: none; }
+  .titlebar .title { position: absolute; left: 70px; right: 70px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .light { width: 12px; height: 12px; border-radius: 50%; border: 0; padding: 0; flex: none; }
+  .light.close { background: #ff5f57; } .light.min { background: #febc2e; } .light.zoom { background: #28c840; }
+  body.app .device { aspect-ratio: auto; height: auto; max-height: none; padding: 0; border-radius: 11px; overflow: hidden; background: var(--titlebar); }
+  body.app .titlebar { display: flex; }
+  body.app .screen { border-radius: 0; background: #fff; }
+  body.app .screen.input img { cursor: default; }
+  body.app .ripple { display: none; }
+  .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #cfd3da; font-size: 13px; padding: 24px; pointer-events: none; background: rgba(0,0,0,.55); }
   .ripple { position: absolute; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 50%; background: rgba(255,255,255,.45); pointer-events: none; animation: ripple .45s ease-out forwards; }
   @keyframes ripple { from { transform: scale(.4); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
   .banner { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 999px; font-size: 12px; max-width: calc(100% - 32px); }
@@ -51,7 +66,7 @@
   .tabs button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
   .log { flex: 1; overflow: auto; font: 12px/1.45 var(--mono); padding: 8px 10px; white-space: pre-wrap; word-break: break-word; }
   .line { padding: 1px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); }
-  .line .tag { display: inline-block; min-width: 30px; color: var(--muted); }
+  .line .tag { display: inline-block; min-width: 38px; color: var(--muted); }
   .line.warn { color: var(--warn); } .line.error { color: var(--err); } .line.debug, .line.bridge { color: var(--muted); }
   .empty { color: var(--muted); padding: 16px 4px; font-family: system-ui, sans-serif; }
   .kbd { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); display: none; gap: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 6px; box-shadow: var(--shadow); }
@@ -66,6 +81,7 @@
   <h1 id="title">CapMac screen</h1>
   <span class="meta" id="meta">connecting…</span>
   <span class="spacer"></span>
+  <select id="win" title="Window" hidden></select>
   <button id="home" title="Home (H)">⌂ Home</button>
   <button id="lock" title="Lock / side button">⏻</button>
   <button id="type" title="Type text (T)">⌨ Type</button>
@@ -73,15 +89,21 @@
   <button id="toggleLogs" title="Show / hide console (L)">☰ Console</button>
 </header>
 <main>
-  <div class="stage">
+  <div class="stage" id="stage">
     <div class="device" id="device">
+      <div class="titlebar" id="titlebar">
+        <button class="light close" id="lightClose" title="Close the window" aria-label="Close the window"></button>
+        <button class="light min" id="lightMin" title="Minimize" aria-label="Minimize"></button>
+        <button class="light zoom" id="lightZoom" title="Zoom" aria-label="Zoom"></button>
+        <span class="title" id="winTitle"></span>
+      </div>
       <div class="screen" id="screen" tabindex="0" aria-label="Simulator screen">
         <img id="img" alt="">
-        <div class="overlay" id="overlay">Connecting to the simulator…</div>
+        <div class="overlay" id="overlay">Connecting…</div>
       </div>
     </div>
     <div class="banner" id="banner" hidden></div>
-    <form class="kbd" id="kbd"><input id="kbdText" placeholder="Text to type on the simulator" autocomplete="off"><button type="submit">Send</button></form>
+    <form class="kbd" id="kbd"><input id="kbdText" placeholder="Text to type" autocomplete="off"><button type="submit">Send</button></form>
   </div>
   <aside id="logs">
     <div class="tabs">
@@ -97,51 +119,133 @@
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  const img = $('img'), screenEl = $('screen'), overlay = $('overlay'), dot = $('dot'), meta = $('meta'), banner = $('banner');
+  const img = $('img'), screenEl = $('screen'), overlay = $('overlay'), dot = $('dot'), meta = $('meta'), banner = $('banner'), device = $('device');
   let info = null, frames = 0, lastFpsAt = performance.now(), filter = 'all';
+  // An Electron app's window (pointer and keyboard), or a simulator (touch).
+  let app = false, windows = [], watched = null, waiting = false, ratio = 0;
 
-  async function post(path, body) {
-    const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
-    if (!r.ok) throw new Error(await r.text());
-    return r.json().catch(() => ({}));
+  // Input goes out one request at a time, in order (a mouse-up must not overtake its mouse-down).
+  let queue = Promise.resolve();
+  function post(path, body) {
+    const run = () => fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) }).then((r) => (r.ok ? r.json().catch(() => ({})) : r.text().then((t) => { throw new Error(t); })));
+    queue = queue.then(run, run);
+    return queue;
+  }
+
+  function setMode(next) {
+    if (next === app) return;
+    app = next;
+    document.body.classList.toggle('app', app);
+    screenEl.setAttribute('aria-label', app ? 'App window' : 'Simulator screen');
+    $('home').hidden = app;
+    $('lock').hidden = app;
+    overlay.textContent = app ? 'Waiting for the app…' : 'Connecting to the simulator…';
+    layout();
+  }
+
+  function applyInfo(next) {
+    info = { ...(info || {}), ...next };
+    document.title = info.title || 'CapMac screen';
+    $('title').textContent = info.title || 'CapMac screen';
+    setMode(info.mode === 'app');
+    const input = info.screen && info.screen.input;
+    screenEl.classList.toggle('input', !!input);
+    for (const id of ['home', 'lock', 'type']) $(id).disabled = !input;
+    if (!app && info.screen && !input) {
+      banner.hidden = false;
+      banner.textContent = 'View only — install AXe on the Mac for touch input: capmac doctor --fix';
+    } else banner.hidden = true;
+    if (next.windows) setWindows(next.windows, next.watched ?? null);
+    if (next.waiting !== undefined) setWaiting(next.waiting);
+    if (next.cursor) setCursor(next.cursor);
   }
 
   async function loadInfo() {
     try {
-      info = await (await fetch('/api/info')).json();
-      document.title = info.title || 'CapMac screen';
-      $('title').textContent = info.title || 'CapMac screen';
-      const input = info.screen && info.screen.input;
-      screenEl.classList.toggle('input', !!input);
-      for (const id of ['home', 'lock', 'type']) $(id).disabled = !input;
-      if (info.screen && !input) {
-        banner.hidden = false;
-        banner.textContent = 'View only — install AXe on the Mac for touch input: capmac doctor --fix';
-      } else banner.hidden = true;
-    } catch { /* retry on next frame */ }
+      applyInfo(await (await fetch('/api/info')).json());
+    } catch { /* retry on the next frame */ }
   }
 
+  function setWindows(list, current) {
+    windows = list || [];
+    watched = current;
+    const win = $('win');
+    win.hidden = !app || windows.length < 2;
+    win.innerHTML = '';
+    const follow = document.createElement('option');
+    follow.value = ''; follow.textContent = 'Follow the focused window';
+    win.appendChild(follow);
+    for (const w of windows) {
+      const o = document.createElement('option');
+      o.value = String(w.id); o.textContent = w.title || `Window ${w.id}`;
+      win.appendChild(o);
+    }
+    const shown = windows.find((w) => w.id === watched);
+    $('winTitle').textContent = shown ? shown.title : '';
+    if (app && windows.length === 0) setOverlay(waiting ? 'Waiting for the app…' : 'The app has no window open');
+    else if (app && !waiting && frames + framesTotal > 0) overlay.style.display = 'none';
+  }
+  $('win').onchange = () => post('/api/window', { window: $('win').value ? Number($('win').value) : null });
+
+  function setWaiting(value) {
+    waiting = value;
+    if (app && waiting) setOverlay('Waiting for the app…');
+  }
+  function setOverlay(text) {
+    overlay.textContent = text;
+    overlay.style.display = 'flex';
+  }
+
+  const CURSORS = { pointer: 'default', hand: 'pointer', text: 'text', wait: 'wait', help: 'help', crosshair: 'crosshair', move: 'move', progress: 'progress', 'not-allowed': 'not-allowed', nodrop: 'no-drop', 'no-drop': 'no-drop', copy: 'copy', alias: 'alias', 'context-menu': 'context-menu', cell: 'cell', 'vertical-text': 'vertical-text', grab: 'grab', grabbing: 'grabbing', 'zoom-in': 'zoom-in', 'zoom-out': 'zoom-out', none: 'none', 'col-resize': 'col-resize', 'row-resize': 'row-resize', 'e-resize': 'e-resize', 'w-resize': 'w-resize', 'n-resize': 'n-resize', 's-resize': 's-resize', 'ne-resize': 'ne-resize', 'nw-resize': 'nw-resize', 'se-resize': 'se-resize', 'sw-resize': 'sw-resize', 'ns-resize': 'ns-resize', 'ew-resize': 'ew-resize', 'nesw-resize': 'nesw-resize', 'nwse-resize': 'nwse-resize', 'all-scroll': 'all-scroll' };
+  function setCursor(type) {
+    img.style.cursor = app ? (CURSORS[type] || 'default') : '';
+  }
+
+  // The window fits the stage, title bar included.
+  function layout() {
+    if (!app) {
+      device.style.width = device.style.height = '';
+      return;
+    }
+    const stage = $('stage').getBoundingClientRect();
+    const bar = 28, pad = 40;
+    const r = ratio || 1.5;
+    let w = stage.width - pad, h = w / r;
+    if (h > stage.height - pad - bar) { h = stage.height - pad - bar; w = h * r; }
+    device.style.width = Math.max(120, Math.floor(w)) + 'px';
+    device.style.height = Math.max(80, Math.floor(h + bar)) + 'px';
+  }
+  new ResizeObserver(layout).observe($('stage'));
+
+  let framesTotal = 0;
   function startStream() {
     img.src = '/stream?ts=' + Date.now();
   }
   img.addEventListener('load', () => {
     frames++;
-    overlay.style.display = 'none';
+    framesTotal++;
+    if (!(app && (waiting || windows.length === 0))) overlay.style.display = 'none';
     dot.className = 'dot live';
-    if (img.naturalWidth && img.naturalHeight) $('device').style.setProperty('--ratio', String(img.naturalWidth / img.naturalHeight));
+    if (img.naturalWidth && img.naturalHeight) {
+      const next = img.naturalWidth / img.naturalHeight;
+      if (Math.abs(next - ratio) > 0.002) {
+        ratio = next;
+        device.style.setProperty('--ratio', String(ratio));
+        layout();
+      }
+    }
     if (!info || !info.screen) loadInfo();
   });
   img.addEventListener('error', () => {
     dot.className = 'dot err';
-    overlay.style.display = 'flex';
-    overlay.textContent = 'Lost the screen stream — reconnecting…';
+    setOverlay('Lost the screen stream — reconnecting…');
     setTimeout(startStream, 1500);
   });
   setInterval(() => {
     const now = performance.now();
     const fps = frames / ((now - lastFpsAt) / 1000);
     frames = 0; lastFpsAt = now;
-    if (info) meta.textContent = `${info.target} · ${fps.toFixed(1)} fps · ${info.screen ? info.screen.source : '…'}`;
+    if (info) meta.textContent = `${info.target} · ${fps.toFixed(1)} fps · ${info.screen ? (app ? 'app window' : info.screen.source) : '…'}`;
   }, 1000);
 
   function point(e) {
@@ -162,14 +266,50 @@
     post('/api/input', event).catch((err) => console.warn('input failed', err));
   }
 
+  // ─── An app's window: pointer, wheel and keys, as on a Mac ──────────────
+  // Windows shortcuts become the Mac's: Ctrl is ⌘ (Command); the Windows key is ⌃ (Control).
+  const mods = (e) => (e.shiftKey ? 1 : 0) | (e.metaKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.ctrlKey ? 8 : 0);
+  const BUTTONS = ['left', 'middle', 'right'];
+  let moveFrame = 0, lastMove = null;
+
+  // ─── A simulator: taps and swipes ───────────────────────────────────────
   let down = null;
   img.addEventListener('pointerdown', (e) => {
+    if (app) {
+      e.preventDefault();
+      img.setPointerCapture(e.pointerId);
+      screenEl.focus();
+      const p = point(e);
+      send({ kind: 'mouse', phase: 'down', x: p.x, y: p.y, button: BUTTONS[e.button] || 'left', clicks: e.detail || 1, modifiers: mods(e) });
+      return;
+    }
     if (e.button !== 0) return;
     img.setPointerCapture(e.pointerId);
     down = { ...point(e), t: performance.now() };
     screenEl.focus();
   });
+  img.addEventListener('pointermove', (e) => {
+    if (!app) return;
+    lastMove = { ...point(e), buttons: e.buttons, modifiers: mods(e) };
+    if (moveFrame) return;
+    moveFrame = requestAnimationFrame(() => {
+      moveFrame = 0;
+      const m = lastMove;
+      if (m) send({ kind: 'mouse', phase: 'move', x: m.x, y: m.y, buttons: m.buttons, modifiers: m.modifiers });
+    });
+  });
+  img.addEventListener('pointerleave', (e) => {
+    if (!app || e.buttons) return;
+    const p = point(e);
+    send({ kind: 'mouse', phase: 'leave', x: p.x, y: p.y });
+  });
+  img.addEventListener('contextmenu', (e) => { if (app) e.preventDefault(); });
   img.addEventListener('pointerup', (e) => {
+    if (app) {
+      const p = point(e);
+      send({ kind: 'mouse', phase: 'up', x: p.x, y: p.y, button: BUTTONS[e.button] || 'left', clicks: e.detail || 1, modifiers: mods(e) });
+      return;
+    }
     if (!down) return;
     const up = point(e);
     const dt = performance.now() - down.t;
@@ -183,8 +323,22 @@
     down = null;
   });
   let wheelAcc = 0, wheelTimer = null, wheelPoint = null;
+  let appWheel = { dx: 0, dy: 0, frame: 0, p: null, modifiers: 0 };
   img.addEventListener('wheel', (e) => {
     e.preventDefault();
+    if (app) {
+      const lines = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? img.clientHeight : 1;
+      appWheel.dx += e.deltaX * lines; appWheel.dy += e.deltaY * lines;
+      appWheel.p = point(e); appWheel.modifiers = mods(e);
+      if (!appWheel.frame) {
+        appWheel.frame = requestAnimationFrame(() => {
+          const w = appWheel;
+          appWheel = { dx: 0, dy: 0, frame: 0, p: null, modifiers: 0 };
+          send({ kind: 'wheel', x: w.p.x, y: w.p.y, dx: Math.max(-2000, Math.min(2000, w.dx)), dy: Math.max(-2000, Math.min(2000, w.dy)), modifiers: w.modifiers });
+        });
+      }
+      return;
+    }
     wheelAcc += e.deltaY; wheelPoint = point(e);
     clearTimeout(wheelTimer);
     wheelTimer = setTimeout(() => {
@@ -195,7 +349,26 @@
   }, { passive: false });
 
   let textBuf = '', textTimer = null;
+  function appKey(e, phase) {
+    if (e.isComposing) return;
+    // Ctrl+V arrives as a paste event, with this PC's clipboard.
+    if (e.ctrlKey && !e.altKey && e.code === 'KeyV') return;
+    e.preventDefault();
+    send({ kind: 'keyboard', phase, key: e.key, code: e.code, modifiers: mods(e), repeat: e.repeat || undefined });
+  }
+  screenEl.addEventListener('keyup', (e) => { if (app) appKey(e, 'up'); });
+  screenEl.addEventListener('compositionend', (e) => { if (app && e.data) send({ kind: 'text', text: e.data }); });
+  screenEl.addEventListener('paste', (e) => {
+    const text = e.clipboardData && e.clipboardData.getData('text/plain');
+    if (!text) return;
+    e.preventDefault();
+    send({ kind: 'text', text: text.slice(0, 200000), via: app ? 'paste' : 'type' });
+  });
   screenEl.addEventListener('keydown', (e) => {
+    if (app) {
+      appKey(e, 'down');
+      return;
+    }
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const special = { Enter: 'return', Backspace: 'delete', Tab: 'tab', Escape: 'escape' }[e.key];
     if (special) {
@@ -212,30 +385,54 @@
     }
   });
 
+  const windowAction = (action) => { if (watched !== null) post('/api/window-action', { window: watched, action }); };
+  $('lightClose').onclick = () => windowAction('close');
+  $('lightMin').onclick = () => windowAction('minimize');
+  $('lightZoom').onclick = () => windowAction('zoom');
   $('home').onclick = () => send({ kind: 'button', button: 'home' });
   $('lock').onclick = () => send({ kind: 'button', button: 'lock' });
   $('type').onclick = () => { $('kbd').classList.toggle('show'); $('kbdText').focus(); };
   $('kbd').onsubmit = (e) => { e.preventDefault(); const t = $('kbdText').value; if (t) send({ kind: 'text', text: t }); $('kbdText').value = ''; };
-  $('shot').onclick = () => { const a = document.createElement('a'); a.href = '/api/frame.jpg?ts=' + Date.now(); a.download = 'simulator-' + new Date().toISOString().replace(/[:.]/g, '-') + '.jpg'; a.click(); };
+  $('shot').onclick = () => {
+    const a = document.createElement('a');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    a.href = app ? '/api/screenshot.png?ts=' + Date.now() : '/api/frame.jpg?ts=' + Date.now();
+    a.download = app ? 'app-' + stamp + '.png' : 'simulator-' + stamp + '.jpg';
+    a.click();
+  };
   $('toggleLogs').onclick = () => $('logs').classList.toggle('hidden');
   document.addEventListener('keydown', (e) => {
     if (document.activeElement === screenEl || document.activeElement === $('kbdText')) return;
-    if (e.key === 'h' || e.key === 'H') $('home').click();
+    if (!app && (e.key === 'h' || e.key === 'H')) $('home').click();
     if (e.key === 's' || e.key === 'S') $('shot').click();
     if (e.key === 'l' || e.key === 'L') $('toggleLogs').click();
     if (e.key === 't' || e.key === 'T') { e.preventDefault(); $('type').click(); }
   });
 
+  // Window, cursor and clipboard news (app windows).
+  const news = new EventSource('/api/events');
+  news.onmessage = (m) => {
+    let event;
+    try { event = JSON.parse(m.data); } catch { return; }
+    if (event.type === 'hello') applyInfo(event);
+    else if (event.type === 'windows') setWindows(event.windows, event.watched);
+    else if (event.type === 'waiting') setWaiting(event.waiting);
+    else if (event.type === 'cursor') setCursor(event.cursor);
+    else if (event.type === 'info') applyInfo({ screen: event.screen });
+    else if (event.type === 'clipboard' && document.hasFocus() && navigator.clipboard) navigator.clipboard.writeText(event.text).catch(() => undefined);
+  };
+
   // Console panel (Server-Sent Events).
   const log = $('log');
   const MAX_LINES = 2000;
+  const TAGS = { console: 'js', capacitor: 'cap', bridge: '↔', main: 'main', electron: 'elec' };
   function addLine(entry) {
     if (log.firstElementChild && log.firstElementChild.classList.contains('empty')) log.innerHTML = '';
     const el = document.createElement('div');
     el.className = 'line ' + entry.level + ' ' + entry.kind;
     el.dataset.kind = entry.kind; el.dataset.level = entry.level;
     const tag = document.createElement('span'); tag.className = 'tag';
-    tag.textContent = entry.kind === 'console' ? 'js' : entry.kind === 'capacitor' ? 'cap' : entry.kind === 'bridge' ? '↔' : 'ios';
+    tag.textContent = TAGS[entry.kind] || 'ios';
     el.append(tag, document.createTextNode(' ' + entry.text));
     applyFilter(el);
     const stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;

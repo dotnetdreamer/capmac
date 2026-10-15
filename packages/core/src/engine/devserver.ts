@@ -18,7 +18,7 @@ export interface DevServer {
 
 const URL_IN_TEXT = /(https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0|\[::\]|[\w.-]+):\d+[^\s'"]*)/g;
 /** Vite / webpack / Angular messages that mean "the app just got new code". */
-const HMR_LINE = /\b(hmr update|page reload|hot updated|hmr\b.*\bupdate|Compiled successfully|Application bundle generation complete)\b/i;
+export const HMR_LINE = /\b(hmr update|page reload|hot updated|hmr\b.*\bupdate|Compiled successfully|Application bundle generation complete)\b/i;
 
 export function detectDevCommand(project: ProjectInfo): string | null {
   const scripts = project.scripts;

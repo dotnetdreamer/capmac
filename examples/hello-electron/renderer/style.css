@@ -1,0 +1,119 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f5f6f8;
+  --card: #ffffff;
+  --text: #15171c;
+  --muted: #6b7280;
+  --accent: #3a7afe;
+  font-family: -apple-system, system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1013;
+    --card: #1a1c21;
+    --text: #eceef2;
+    --muted: #9aa1ad;
+    --accent: #6b9bff;
+  }
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+main {
+  padding: 28px 28px 32px;
+  max-width: 760px;
+  margin: 0 auto;
+}
+h1 {
+  font-size: 28px;
+  margin: 0 0 4px;
+}
+.sub,
+.hint {
+  color: var(--muted);
+}
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.row .card {
+  margin: 0;
+}
+.card {
+  background: var(--card);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin: 16px 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.card h2 {
+  font-size: 13px;
+  margin: 0 0 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+dt {
+  color: var(--muted);
+}
+dd {
+  margin: 0;
+}
+button {
+  font: inherit;
+  font-size: 15px;
+  width: 100%;
+  padding: 11px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+button:hover {
+  filter: brightness(1.06);
+}
+button.secondary {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+input {
+  font: inherit;
+  font-size: 15px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--muted) 40%, transparent);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text);
+}
+.echo {
+  margin: 10px 0 0;
+  color: var(--muted);
+}
+.list {
+  margin: 0;
+  padding: 0 0 0 1.4em;
+  max-height: 220px;
+  overflow: auto;
+  li {
+    padding: 8px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--muted) 20%, transparent);
+  }
+  li:last-child {
+    border-bottom: 0;
+  }
+}
+code {
+  font-size: 0.9em;
+}

@@ -34,6 +34,12 @@ export function sampleDir(): string | null {
   return existsSync(dir) ? dir : null;
 }
 
+/** The Electron sample ("Try the Electron sample"). */
+export function electronSampleDir(): string | null {
+  const dir = app.isPackaged ? resources('sample-electron') : path.join(appRoot(), '..', '..', 'examples', 'hello-electron');
+  return existsSync(dir) ? dir : null;
+}
+
 /** node-datachannel (WebRTC for remote access), shipped next to app.asar; in development it comes from node_modules. */
 export function remoteModulesDir(): string | null {
   if (!app.isPackaged) return null;

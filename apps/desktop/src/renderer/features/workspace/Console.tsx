@@ -4,6 +4,7 @@ import { t } from '../../../shared/i18n';
 import { workspaceBus, type WorkspaceAction } from '../../app/commands';
 import { toast, useApp } from '../../state/app';
 import { consoleFor, ConsoleView, DEFAULT_FILTER, jsonPayload, SOURCE_LABELS, SOURCE_TAGS, type ConsoleFilter, type ConsoleLevel, type ConsoleLine, type ConsoleSource } from '../../state/console';
+import { useProject } from '../../state/projects';
 import { clockTime } from '../../lib/format';
 import { IconButton } from '../../ui/Button';
 import { EmptyState } from '../../ui/Feedback';
@@ -12,7 +13,9 @@ import { Icon } from '../../ui/Icon';
 import { Menu, usePopover } from '../../ui/Popover';
 import { JsonTree } from './JsonTree';
 
-const SOURCES: ConsoleSource[] = ['js', 'cap', 'native', 'bridge', 'web', 'capmac'];
+const IOS_SOURCES: ConsoleSource[] = ['js', 'cap', 'native', 'bridge', 'web', 'capmac'];
+const ELECTRON_SOURCES: ConsoleSource[] = ['js', 'main', 'electron', 'web', 'capmac'];
+const BOTH_SOURCES: ConsoleSource[] = ['js', 'cap', 'native', 'bridge', 'main', 'electron', 'web', 'capmac'];
 const LEVELS: Array<{ level: ConsoleLevel; label: string }> = (['error', 'warn', 'info', 'log', 'debug'] as const).map((level) => ({ level, label: t.console.levels[level] }));
 const FILTER_KEY = 'capmac.consoleFilter';
 
@@ -47,7 +50,7 @@ function lineText(line: ConsoleLine): string {
 }
 
 const Row = memo(function Row({ line, timestamps, highlight, current }: { line: ConsoleLine; timestamps: boolean; highlight: (text: string) => ReactNode; current: boolean }) {
-  const json = line.source === 'js' || line.source === 'cap' ? jsonPayload(line) : null;
+  const json = line.source === 'js' || line.source === 'cap' || line.source === 'main' ? jsonPayload(line) : null;
   return (
     <div className={`cl-row cl-row--${line.level} cl-row--${line.source}${current ? ' is-current' : ''}`}>
       {timestamps && <span className="cl-time tabular">{clockTime(line.ts, true)}</span>}
@@ -64,6 +67,9 @@ const Row = memo(function Row({ line, timestamps, highlight, current }: { line: 
 
 export function Console({ path, visible }: { path: string; visible: boolean }) {
   const buffer = consoleFor(path);
+  // The sources this project's app can log from: iOS, Electron, or both.
+  const summary = useProject(path).summary;
+  const sources = !summary?.electron ? IOS_SOURCES : summary.kind === 'electron' || !summary.hasIos ? ELECTRON_SOURCES : BOTH_SOURCES;
   const version = useSyncExternalStore(buffer.subscribe, buffer.getVersion);
   const settings = useApp((s) => s.settings);
   const updateSettings = useApp((s) => s.updateSettings);
@@ -196,7 +202,7 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
     <div className="console">
       <div className="console__bar" role="toolbar" aria-label={t.console.filters}>
         <div className="console__sources" role="group" aria-label={t.console.sourcesLabel}>
-          {SOURCES.map((s) => (
+          {sources.map((s) => (
             <button
               key={s}
               type="button"

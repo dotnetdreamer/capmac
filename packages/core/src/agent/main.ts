@@ -7,6 +7,7 @@ import { AgentIO } from './io.js';
 import { opArchive, opDownload } from './ops/archive.js';
 import { opBuild } from './ops/build.js';
 import { opBoot, opDeploy, opLogs, opShutdown } from './ops/deploy.js';
+import { opElectronLaunch, opElectronPrepare, opElectronScreen, opElectronScreenshot } from './ops/electron.js';
 import { opClean, opExec, opKeychain, opOpenXcode, opPull, opRelay } from './ops/misc.js';
 import { opPrepare } from './ops/prepare.js';
 import { opRemoteInstall, opRemoteRevoke, opRemoteSet, opRemoteStatus, opRemoteUninstall } from './ops/remote.js';
@@ -51,6 +52,10 @@ const OPS: Record<string, Handler> = {
   'remote-set': (params, io) => opRemoteSet(params, io),
   'remote-revoke': (params, io) => opRemoteRevoke(params, io),
   'remote-uninstall': (params, io) => opRemoteUninstall(params, io),
+  'electron-prepare': opElectronPrepare,
+  'electron-launch': opElectronLaunch,
+  'electron-screen': opElectronScreen,
+  'electron-screenshot': opElectronScreenshot,
   version: async () => ({ version: AGENT_VERSION, node: process.version, platform: process.platform, arch: process.arch }),
 };
 
@@ -80,6 +85,15 @@ async function main(): Promise<void> {
   await io.flush();
   killAll();
   process.exit(exitCode);
+}
+
+// The SSH session went away (or someone stopped the agent): take what it started along, so no
+// app window or tool is left running on the Mac.
+for (const [signal, code] of [['SIGHUP', 129], ['SIGTERM', 143]] as const) {
+  process.on(signal, () => {
+    killAll();
+    process.exit(code);
+  });
 }
 
 process.on('unhandledRejection', (reason) => {

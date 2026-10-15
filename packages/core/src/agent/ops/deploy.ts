@@ -12,11 +12,14 @@ async function simulatorState(udid: string, env: NodeJS.ProcessEnv): Promise<str
   return null;
 }
 
-/** Shows the simulator window on the Mac (Simulator.app, or Device Hub on Xcode 27+). */
+/**
+ * Shows the simulator window on the Mac (Simulator.app, or Device Hub on
+ * Xcode 27+), in the background (-g): someone may be working on the Mac.
+ */
 async function showSimulatorWindow(udid: string, env: NodeJS.ProcessEnv): Promise<void> {
-  const simulator = await run('open', ['-a', 'Simulator', '--args', '-CurrentDeviceUDID', udid], { env, timeoutMs: 30_000 }).catch(() => null);
+  const simulator = await run('open', ['-g', '-a', 'Simulator', '--args', '-CurrentDeviceUDID', udid], { env, timeoutMs: 30_000 }).catch(() => null);
   if (simulator?.code === 0) return;
-  await run('open', ['-b', 'com.apple.dt.Devices'], { env, timeoutMs: 30_000 }).catch(() => null);
+  await run('open', ['-g', '-b', 'com.apple.dt.Devices'], { env, timeoutMs: 30_000 }).catch(() => null);
 }
 
 export async function bootSimulator(target: Target, io: AgentIO, env: NodeJS.ProcessEnv, show: boolean): Promise<void> {

@@ -14,6 +14,8 @@ export type Phase =
   | 'devserver'
   | 'sync'
   | 'deps'
+  /** Electron for the Mac, downloaded once per version. */
+  | 'electron'
   | 'cap'
   | 'build'
   | 'boot'
@@ -38,6 +40,8 @@ export interface AppLogEntry {
   ts: number;
   /** Continues the previous console message (multi-line console output). */
   continuation?: boolean;
+  /** Where a page's console call came from: a PC path (or a URL), with `:line`. */
+  source?: string;
 }
 
 export type CheckLevel = 'ok' | 'warn' | 'fail' | 'info';

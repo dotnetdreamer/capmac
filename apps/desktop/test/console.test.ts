@@ -7,7 +7,7 @@ beforeAll(() => {
 });
 
 const all: ConsoleFilter = {
-  sources: { js: true, cap: true, native: true, bridge: true, web: true, capmac: true },
+  sources: { js: true, cap: true, native: true, bridge: true, web: true, capmac: true, main: true, electron: true },
   levels: { error: true, warn: true, info: true, log: true, debug: true },
 };
 const texts = (buffer: ConsoleBuffer, view: ConsoleView) => view.ids.map((id) => buffer.byId(id)!.text);

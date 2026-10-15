@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ErrorInfo, MacSummary } from '../../../shared/contract';
 import { t, tidy } from '../../../shared/i18n';
 import { emitWorkspace } from '../../app/commands';
-import { rebuild, relaunch, startSession } from '../../state/actions';
+import { rebuild, relaunch, reloadApp, startSession } from '../../state/actions';
 import { isActive, isBusy, type RunState } from '../../state/runs';
 import { clockTime, formatDuration, timeAgo } from '../../lib/format';
 import { Button } from '../../ui/Button';
@@ -79,6 +79,42 @@ function LiveCard({ path, run, mac }: { path: string; run: RunState; mac: MacSum
   );
 }
 
+/** Live reload of an Electron app on the Mac: edits sync as you save (no dev server or link on this PC). */
+function MacLiveCard({ path, run, mac }: { path: string; run: RunState; mac: MacSummary | null }) {
+  const live = run.live!;
+  const busy = isBusy(run);
+  const label = mac?.label ?? t.session.mac;
+  return (
+    <div className="session-bar session-bar--live" role="status" aria-label={t.session.liveLabel}>
+      <span className="session-bar__mode">
+        <Icon name="flash" size={14} filled />
+        {t.common.live}
+      </span>
+      <span className="session-bar__chip">
+        <Icon name="mac" size={14} />
+        {label}
+      </span>
+      <span className="session-bar__sep" />
+      <span className="session-bar__hmr">
+        <StatusDot tone={run.app?.state === 'running' ? 'live' : 'idle'} pulse={run.app?.state === 'running'} />
+        {live.hmrUpdatedAt ? t.session.macUpdated(clockTime(live.hmrUpdatedAt)) : t.session.macSync(label)}
+      </span>
+      <span className="session-bar__spacer" />
+      <Tooltip content={t.session.reloadTip}>
+        <Button size="sm" variant="subtle" icon="refresh" onClick={() => void reloadApp(path)} disabled={busy || run.app?.state !== 'running'}>
+          {t.session.reload}
+        </Button>
+      </Tooltip>
+      <Button size="sm" variant="subtle" icon="power" onClick={() => void relaunch(path)} disabled={busy}>
+        {t.session.restartApp}
+      </Button>
+      <Button size="sm" variant="subtle" icon="sync" onClick={() => void rebuild(path)} disabled={busy}>
+        {t.session.rebuild}
+      </Button>
+    </div>
+  );
+}
+
 function RunCard({ run }: { run: RunState }) {
   const busy = isBusy(run);
   const now = useTick(1000, run.app?.state === 'running');
@@ -112,7 +148,7 @@ function RunCard({ run }: { run: RunState }) {
  * --verbose"); here the problems, the output and the build log are one click away.
  */
 function hintFor(error: ErrorInfo, run: RunState, errors: number): string | undefined {
-  if (error.code !== 'BUILD_FAILED') return tidy(error.hint);
+  if (error.code !== 'BUILD_FAILED' && error.code !== 'ELECTRON_BUILD_FAILED') return tidy(error.hint);
   if (errors > 0) return run.mode === 'live' ? t.session.fixAndSave : t.session.fixAndRun;
   return run.buildLogPath ? t.session.seeLog : tidy(error.hint);
 }
@@ -157,7 +193,8 @@ function FailureCard({ path, run }: { path: string; run: RunState }) {
   );
 }
 
-export function SessionBar({ path, run, mac }: { path: string; run: RunState | undefined; mac: MacSummary | null }) {
+/** `electron`: the project's Electron app is Capacitor's (live reload goes through a dev server on this PC) or its own. */
+export function SessionBar({ path, run, mac, electron = null }: { path: string; run: RunState | undefined; mac: MacSummary | null; electron?: 'capacitor' | 'plain' | null }) {
   const active = isActive(run);
   if (mac && active && (mac.state === 'lost' || mac.state === 'reconnecting')) {
     return (
@@ -170,6 +207,7 @@ export function SessionBar({ path, run, mac }: { path: string; run: RunState | u
   }
   if (!run) return null;
   if (run.status === 'failed' && run.error && !run.error.cancelled) return <FailureCard path={path} run={run} />;
+  if (active && run.mode === 'live' && run.live && run.onMac && electron !== 'capacitor') return <MacLiveCard path={path} run={run} mac={mac} />;
   if (active && run.mode === 'live' && run.live) return <LiveCard path={path} run={run} mac={mac} />;
   if (active && run.mode === 'run') return <RunCard run={run} />;
   if (mac && mac.state === 'restored' && active) {

@@ -18,7 +18,9 @@ type InMessage =
   | { type: 'input'; event: unknown }
   | { type: 'restart' }
   | { type: 'retry-smooth' }
-  | { type: 'video-size'; maxSize: number };
+  | { type: 'video-size'; maxSize: number }
+  | { type: 'window'; window: number | null }
+  | { type: 'window-action'; window: number; action: 'close' | 'minimize' | 'zoom' };
 
 const scope = self as unknown as { postMessage(message: unknown): void; onmessage: ((e: MessageEvent<InMessage>) => void) | null };
 
@@ -300,8 +302,8 @@ scope.onmessage = (e) => {
       // Time an input to the next picture (on an idle screen, its answer). A click counts from
       // its release, when apps react; a press that already changed the screen was counted then.
       const e = message.event as { kind?: string; phase?: string } | null;
-      const starts = e?.kind === 'keypress' || e?.kind === 'tap' || e?.kind === 'button' || (e?.kind === 'touch' && e.phase === 'down');
-      const release = e?.kind === 'touch' && e.phase === 'up';
+      const starts = e?.kind === 'keypress' || e?.kind === 'tap' || e?.kind === 'button' || (e?.kind === 'touch' && e.phase === 'down') || ((e?.kind === 'mouse' || e?.kind === 'keyboard') && e.phase === 'down');
+      const release = (e?.kind === 'touch' || e?.kind === 'mouse') && e.phase === 'up';
       if ((starts && !inputAt) || (release && inputAt)) inputAt = performance.now();
       port?.postMessage({ type: 'input', event: message.event });
       break;
@@ -314,6 +316,13 @@ scope.onmessage = (e) => {
       break;
     case 'video-size':
       port?.postMessage({ type: 'size', maxSize: message.maxSize });
+      break;
+    // An app's windows: which one to show, and its traffic lights.
+    case 'window':
+      port?.postMessage({ type: 'window', window: message.window });
+      break;
+    case 'window-action':
+      port?.postMessage({ type: 'window-action', window: message.window, action: message.action });
       break;
   }
 };

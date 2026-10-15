@@ -98,6 +98,13 @@ export async function relaunch(path: string): Promise<void> {
   else await startSession(path, 'run');
 }
 
+/** An Electron app in live reload: reloads its windows. */
+export async function reloadApp(path: string): Promise<void> {
+  const run = useRuns.getState().byKey[projectKey(path)];
+  if (!run?.sessionId || run.mode !== 'live') return;
+  await call('sessions.reload', { sessionId: run.sessionId }).catch((err) => toast({ tone: 'critical', title: t.actions.reloadFailed, body: tidy(errorInfo(err).message) }));
+}
+
 export async function openInXcode(path: string): Promise<void> {
   const id = toast({ tone: 'info', title: t.actions.openingXcode, timeout: 0 });
   try {

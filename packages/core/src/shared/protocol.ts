@@ -3,9 +3,12 @@
  * The first JSON frame the client sends is always `{ t: 'params', op, ... }`.
  */
 
+import type { AppInputEvent, AppWindowInfo, HookEvent } from './electron.js';
+
 export const PROTOCOL_VERSION = 1;
 
-export type TargetKind = 'simulator' | 'device';
+/** 'mac': the Mac's own desktop, where Electron apps run. */
+export type TargetKind = 'simulator' | 'device' | 'mac';
 
 export interface Target {
   kind: TargetKind;
@@ -187,16 +190,18 @@ export interface StreamParams {
 
 export interface ScreenInfo {
   t: 'screen';
-  source: 'axe' | 'simctl' | 'helper';
+  /** 'app': a window of an Electron app on the Mac (through CapMac's module in the app). */
+  source: 'axe' | 'simctl' | 'helper' | 'app';
   /** Screen size in points (null until known). */
   points: { width: number; height: number } | null;
   /** Whether the screen takes input at all. */
   input: boolean;
   /**
    * How input works: 'touch' streams fingers down, move and up as they happen
-   * (capmac's helper); 'gestures' sends whole taps and swipes (AXe).
+   * (capmac's helper); 'gestures' sends whole taps and swipes (AXe); 'mouse'
+   * is a desktop app's pointer and keyboard (Electron apps).
    */
-  inputMode?: 'touch' | 'gestures';
+  inputMode?: 'touch' | 'gestures' | 'mouse';
   /** Why input is not available (or limited to gestures). */
   inputReason?: string;
   /** Points to pixels. */
@@ -229,7 +234,9 @@ export type InputEvent =
   /** Scroll by (dx, dy) points at (x, y). */
   | { kind: 'scroll'; x: number; y: number; dx: number; dy: number }
   /** A key press: a USB HID keyboard usage plus modifier bits (see shared/hid.ts). */
-  | { kind: 'keypress'; usage: number; modifiers?: number };
+  | { kind: 'keypress'; usage: number; modifiers?: number }
+  // A desktop app's window (Electron): pointer, wheel and keys, as the PC reported them.
+  | Exclude<AppInputEvent, { kind: 'text' }>;
 
 export interface ExecParams extends ProjectRef {
   command: string;
@@ -278,7 +285,23 @@ export type AgentEvent =
   | { t: 'out'; stream: 'stdout' | 'stderr'; text: string }
   | ({ t: 'diag' } & Diagnostic)
   | { t: 'progress'; text: string; done?: number }
-  | { t: 'app'; stream: 'stdout' | 'stderr'; text: string }
+  /**
+   * A line from the running app. Electron apps say where it came from: the
+   * main process, Chromium inside Electron, or the dev command around it.
+   */
+  | { t: 'app'; stream: 'stdout' | 'stderr'; text: string; source?: 'main' | 'chromium' | 'tool' }
+  /** Electron: what CapMac's module in the app reported (windows, the pages' console, crashes). */
+  | { t: 'electron'; event: HookEvent }
+  /** Electron: the answer to a control request sent to `electron-launch`. */
+  | { t: 'control-result'; id: number; ok: boolean; data?: unknown; error?: string }
+  /** `electron-screen`: the app's windows, and which one is showing. */
+  | { t: 'app-windows'; windows: AppWindowInfo[]; watched: number | null }
+  /** `electron-screen`: the pointer's shape over the window (Electron's cursor type). */
+  | { t: 'app-cursor'; cursor: string }
+  /** `electron-screen`: text copied in the app, for the PC's clipboard. */
+  | { t: 'app-clipboard'; text: string }
+  /** `electron-screen`: waiting for the app (not running, or restarting), or showing it again. */
+  | { t: 'app-waiting'; waiting: boolean }
   | ScreenInfo
   /** `watch-targets`: the simulators and devices changed. */
   | { t: 'targets'; data: TargetsResult }
@@ -321,6 +344,12 @@ export const ERROR_CODES = {
   streamStalled: 'STREAM_STALLED',
   /** Nothing to build the helper with (no Xcode selected). */
   streamUnsupported: 'STREAM_UNSUPPORTED',
+  /** Electron: the app's build failed. */
+  electronBuild: 'ELECTRON_BUILD_FAILED',
+  /** Electron: the app did not start, or no Electron is installed in the project. */
+  electronLaunch: 'ELECTRON_LAUNCH_FAILED',
+  /** Electron: the app is not running (no window to show). */
+  appNotRunning: 'APP_NOT_RUNNING',
 } as const;
 
 /** The H.264 helper on a Mac, as the health check reports it. */

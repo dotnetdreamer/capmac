@@ -10,11 +10,13 @@ import path from 'node:path';
 import type { MessagePortMain } from 'electron';
 import {
   applyFix,
+  AppScreenStream,
   bootSimulator,
   buildApp,
   CancelledError,
   disableRemote,
   discoverMacs,
+  ElectronLiveSession,
   enableRemote,
   inspectProject,
   installLocalDependencies,
@@ -22,6 +24,7 @@ import {
   loadGlobalConfig,
   loadProject,
   localChecks,
+  MAC_TARGET_ID,
   MacLink,
   macChecks,
   openInXcode,
@@ -34,6 +37,8 @@ import {
   resolveHost,
   revokeRemotePc,
   runApp,
+  runElectronApp,
+  runsOnMac,
   ScreenStream,
   setAgentBundlePath,
   setDefaultMac,
@@ -45,6 +50,7 @@ import {
   thisPc,
   shutdownSimulator,
   syncSize,
+  takeAppScreenshot,
   takeScreenshot,
   TargetWatch,
   toErrorInfo,
@@ -189,6 +195,7 @@ function summarize(host: HostConfig, defaultHost: string | undefined): MacSummar
     username: host.username,
     label: host.macName ?? host.host,
     xcode: host.xcode ?? null,
+    macos: host.macos ?? null,
     isDefault: defaultHost === host.name,
     pairedAt: host.pairedAt,
     state: l ? (l.state === 'idle' ? 'idle' : l.state) : 'idle',
@@ -299,7 +306,8 @@ interface HostSession {
   projectPath: string;
   mac: string;
   controller: AbortController;
-  live: LiveSession | null;
+  /** Live reload: an iOS app's, or an Electron app's on the Mac's desktop. */
+  live: LiveSession | ElectronLiveSession | null;
   done: Promise<void>;
 }
 
@@ -322,7 +330,9 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
   const existing = sessionFor(params.projectPath);
   if (existing) await stopSession(existing.id);
   const project = await loadProject(params.projectPath);
-  requireIos(project);
+  // The Mac's desktop (the target picker's Mac, or an Electron app on its own): the Electron app.
+  const onMac = params.mode !== 'ipa' && runsOnMac(project, { target: 'target' in params && params.target === MAC_TARGET_ID ? 'mac' : undefined });
+  if (!onMac) requireIos(project);
   const mac = params.mac ?? project.config.host ?? (await defaultMacName());
   const id = newId('s');
   const scope: Scope = { sessionId: id, projectPath: project.capDir, mac };
@@ -330,8 +340,8 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
   const controller = new AbortController();
   const l = link(mac);
   const started = Date.now();
-  const target = 'target' in params ? params.target : undefined;
-  emit(scope, { type: 'session-started', mode: params.mode, projectPath: project.capDir, mac, target: target ?? null });
+  const target = 'target' in params && !onMac ? params.target : undefined;
+  emit(scope, { type: 'session-started', mode: params.mode, projectPath: project.capDir, mac, target: onMac ? MAC_TARGET_ID : target ?? null });
   const end = (err?: unknown) => {
     sessions.delete(id);
     const info = err === undefined ? undefined : toErrorInfo(err);
@@ -341,12 +351,17 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
   const session: HostSession = { id, mode: params.mode, projectPath: project.capDir, mac, controller, live: null, done: Promise.resolve() };
   sessions.set(id, session);
 
-  if (params.mode === 'run') {
+  if (params.mode === 'run' && onMac) {
+    const options = params.options ?? {};
+    session.done = runElectronApp(project, l, { full: options.full || options.clean, webBuild: options.webBuild }, ctx, controller.signal).then(() => end(), end);
+  } else if (params.mode === 'run') {
     const options = params.options ?? {};
     session.done = runApp(project, l, { target, ...options, osLogs: options.osLogs ?? settings.osLogs }, ctx, controller.signal).then(() => end(), end);
   } else if (params.mode === 'live') {
     const options = params.options ?? {};
-    const live = new LiveSession(project, l, { target, clean: options.clean, full: options.full, configuration: options.configuration, showSimulator: options.showSimulator, osLogs: options.osLogs ?? settings.osLogs }, ctx);
+    const live = onMac
+      ? new ElectronLiveSession(project, l, { full: options.full || options.clean }, ctx)
+      : new LiveSession(project, l, { target, clean: options.clean, full: options.full, configuration: options.configuration, showSimulator: options.showSimulator, osLogs: options.osLogs ?? settings.osLogs }, ctx);
     session.live = live;
     session.done = new Promise<void>((resolve) => {
       const finish = () => {
@@ -381,10 +396,96 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
 
 const toArrayBuffer = (buffer: Buffer) => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
 
-const screens = new Map<string, { stream: ScreenStream; port: MessagePortMain }>();
+const screens = new Map<string, { stream: ScreenStream | AppScreenStream; port: MessagePortMain }>();
 
 /** Smooth stream: frames posted to the renderer and not taken yet before it counts as falling behind. */
 const VIDEO_MAX_IN_FLIGHT = 30;
+
+/** An Electron app's windows: JPEG frames from the app, mouse and keyboard back (see core's AppScreenStream). */
+async function openAppScreen(streamId: string, mac: string, projectPath: string, port: MessagePortMain, maxSize?: number): Promise<void> {
+  const post = (message: ScreenPortMessage) => port.postMessage(message);
+  let project;
+  try {
+    project = await loadProject(projectPath);
+  } catch (err) {
+    post({ type: 'state', state: 'ended', error: toErrorInfo(err) });
+    return;
+  }
+  // At most two frames on their way to the renderer; under backpressure only the newest waiting one is kept.
+  let seq = 0;
+  let inFlight = 0;
+  let pending: Buffer | null = null;
+  const sendFrame = (jpeg: Buffer) => {
+    if (inFlight >= 2) {
+      pending = jpeg;
+      return;
+    }
+    inFlight += 1;
+    post({ type: 'frame', data: toArrayBuffer(jpeg), seq: ++seq });
+  };
+  const scope = { mac, streamId };
+  const stream = new AppScreenStream(link(mac), project.projectId, { fps: 30, quality: 75, maxSize: Math.min(2400, maxSize ?? 1400) }, {
+    onFrame: sendFrame,
+    onInfo: (info) => {
+      post({ type: 'info', info });
+      emit(scope, { type: 'screen-info', info });
+    },
+    onWindows: (windows, watched) => post({ type: 'windows', windows, watched }),
+    onCursor: (cursor) => post({ type: 'cursor', cursor }),
+    onClipboard: (text) => post({ type: 'clipboard', text }),
+    onWaiting: (waiting) => post({ type: 'waiting', waiting }),
+    onEnd: (error) => post({ type: 'state', state: 'ended', error }),
+    onState: (state) => {
+      if (state === 'streaming') {
+        inFlight = 0;
+        pending = null;
+      }
+      post({ type: 'state', state });
+    },
+    onClock: (offsetUs, rttUs) => post({ type: 'clock', offsetUs, rttUs }),
+  });
+  port.on('message', (e) => {
+    const message = e.data as ScreenPortCommand;
+    switch (message?.type) {
+      case 'ack':
+        inFlight = Math.max(0, inFlight - 1);
+        if (pending) {
+          const next = pending;
+          pending = null;
+          sendFrame(next);
+        }
+        break;
+      case 'input': {
+        const parsed = inputEventSchema.safeParse(message.event);
+        if (parsed.success) stream.input(parsed.data);
+        break;
+      }
+      case 'size':
+        if (typeof message.maxSize === 'number' && Number.isFinite(message.maxSize)) stream.setVideoSize(message.maxSize);
+        break;
+      case 'window':
+        stream.selectWindow(typeof message.window === 'number' ? message.window : null);
+        break;
+      case 'window-action':
+        if (typeof message.window === 'number' && ['close', 'minimize', 'zoom'].includes(message.action)) stream.windowAction(message.window, message.action);
+        break;
+      case 'restart':
+        inFlight = 0;
+        pending = null;
+        void stream.start().catch((err) => post({ type: 'state', state: 'ended', error: toErrorInfo(err) }));
+        break;
+    }
+  });
+  port.on('close', () => closeScreen(streamId));
+  port.start();
+  screens.set(streamId, { stream, port });
+  post({ type: 'state', state: 'connecting' });
+  post({ type: 'codec', codec: 'jpeg', fallback: null });
+  stream.start().then(
+    () => post({ type: 'state', state: 'streaming' }),
+    (err) => post({ type: 'state', state: 'ended', error: toErrorInfo(err) }),
+  );
+}
 
 function openScreen(streamId: string, mac: string, udid: string, port: MessagePortMain, prefer: 'smooth' | 'compatible', maxSize?: number): void {
   const post = (message: ScreenPortMessage) => port.postMessage(message);
@@ -513,7 +614,17 @@ function closeScreen(streamId: string): void {
 
 const SAMPLE_SKIP = new Set(['node_modules', '.git', 'build', 'DerivedData', 'Pods', 'xcuserdata']);
 
-async function createSample(): Promise<{ path: string }> {
+async function createSample(kind: 'ios' | 'electron' = 'ios'): Promise<{ path: string }> {
+  if (kind === 'electron') {
+    if (!init?.electronSampleDir || !existsSync(init.electronSampleDir)) throw new UserError(t.host.noSample);
+    const target = path.join(init.samplesHome, 'Hello Electron');
+    if (!existsSync(path.join(target, 'package.json'))) {
+      await fs.mkdir(init.samplesHome, { recursive: true });
+      // Its icon lives in build/, which the iOS sample's copy leaves out.
+      await fs.cp(init.electronSampleDir, target, { recursive: true, filter: (src) => !['node_modules', '.git', 'out', 'dist'].includes(path.basename(src)) });
+    }
+    return { path: target };
+  }
   if (!init?.sampleDir || !existsSync(init.sampleDir)) throw new UserError(t.host.noSample);
   const target = path.join(init.samplesHome, 'Hello CapMac');
   if (!existsSync(path.join(target, 'capacitor.config.json'))) {
@@ -593,7 +704,7 @@ const handlers: Handlers = {
   },
   'projects.inspect': ({ path: dir }) => inspectProject(dir),
   'projects.syncSize': async ({ path: dir }) => syncSize(await loadProject(dir)),
-  'projects.createSample': () => createSample(),
+  'projects.createSample': ({ kind }) => createSample(kind),
   'projects.installDeps': async ({ path: dir }) => {
     const project = await loadProject(dir);
     await installLocalDependencies(project, contextFor({ projectPath: project.capDir }));
@@ -610,6 +721,11 @@ const handlers: Handlers = {
     if (!live) throw new UserError(t.host.liveNotRunning);
     live.relaunch();
   },
+  'sessions.reload': async ({ sessionId }) => {
+    const live = sessions.get(sessionId)?.live;
+    if (!(live instanceof ElectronLiveSession)) throw new UserError(t.host.liveNotRunning);
+    await live.reload();
+  },
   'builds.ipa': (params) => startSession({ ...params, mode: 'ipa' }),
   'xcode.open': async ({ projectPath, mac }) => {
     const project = await loadProject(projectPath);
@@ -622,8 +738,9 @@ const handlers: Handlers = {
     return { text: await readFromMac(await link(name).session(), project, logPath) };
   },
   'screen.stop': async ({ streamId }) => closeScreen(streamId),
-  'screen.screenshot': async ({ mac, udid }) => {
-    const shot = await takeScreenshot(await link(mac).session(), udid);
+  'screen.screenshot': async ({ mac, udid, projectPath, window }) => {
+    const session = await link(mac).session();
+    const shot = udid === MAC_TARGET_ID && projectPath ? await takeAppScreenshot(session, (await loadProject(projectPath)).projectId, window) : await takeScreenshot(session, udid);
     return { png: toArrayBuffer(shot.png), width: shot.width, height: shot.height };
   },
   'debug.dropConnection': async ({ mac }) => links.get(mac)?.dropConnection(),
@@ -735,7 +852,8 @@ parent.on('message', (e) => {
     }
     case 'screen-open': {
       const port = e.ports[0];
-      if (port) openScreen(message.streamId, message.mac, message.udid, port, message.prefer, message.maxSize);
+      if (port && message.udid === MAC_TARGET_ID && message.projectPath) void openAppScreen(message.streamId, message.mac, message.projectPath, port, message.maxSize);
+      else if (port) openScreen(message.streamId, message.mac, message.udid, port, message.prefer, message.maxSize);
       break;
     }
     case 'settings':

@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { chooseTarget, loadProject, MacSession, recall, takeScreenshot, UserError, withStep } from '@capmac/core/engine';
+import { chooseTarget, loadProject, MacSession, recall, runsOnMac, takeAppScreenshot, takeScreenshot, UserError, withStep } from '@capmac/core/engine';
 import type { Target, TargetsResult } from '@capmac/core/shared/protocol';
 import { terminalContext } from '../terminal.js';
 import { log, pc } from '../ui.js';
@@ -23,16 +23,21 @@ export function screenshotTarget(all: TargetsResult, wanted: string | undefined,
   return pick;
 }
 
-/** `capmac screenshot [file]`: a PNG of the simulator's screen, saved on this PC. */
-export async function screenshotCommand(file: string | undefined, options: { mac?: string; target?: string }): Promise<void> {
+/** `capmac screenshot [file]`: a PNG of the simulator's screen (or the Electron app's window), saved on this PC. */
+export async function screenshotCommand(file: string | undefined, options: { mac?: string; target?: string; electron?: boolean }): Promise<void> {
   const { ctx } = terminalContext();
   const project = await loadProject(process.cwd()).catch(() => null);
   const session = await MacSession.open({ host: options.mac ?? project?.config.host });
   try {
-    const all = await session.call<TargetsResult>('targets');
-    const last = project ? (await recall(project.projectId)).lastTarget : undefined;
-    const target = screenshotTarget(all, options.target, last);
-    const shot = await withStep(ctx, `Screenshot of ${target.name}`, 'other', () => takeScreenshot(session, target.udid));
+    let shot: { png: Buffer; width: number | null; height: number | null };
+    if (project && runsOnMac(project, options)) {
+      shot = await withStep(ctx, `Screenshot of ${project.appName}`, 'other', () => takeAppScreenshot(session, project.projectId));
+    } else {
+      const all = await session.call<TargetsResult>('targets');
+      const last = project ? (await recall(project.projectId)).lastTarget : undefined;
+      const target = screenshotTarget(all, options.target, last);
+      shot = await withStep(ctx, `Screenshot of ${target.name}`, 'other', () => takeScreenshot(session, target.udid));
+    }
     const out = path.resolve(file ?? path.join(os.tmpdir(), 'capmac', `screenshot-${new Date().toISOString().replace(/[:.]/g, '-')}.png`));
     await fs.mkdir(path.dirname(out), { recursive: true });
     await fs.writeFile(out, shot.png);

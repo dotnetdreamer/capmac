@@ -18,6 +18,8 @@ export interface TerminalOptions {
   mode?: 'run' | 'dev' | 'other';
   /** `run` streams app logs (vs `--no-logs`). */
   attach?: boolean;
+  /** An iOS app (the default) or an Electron app on the Mac's desktop: decides labels and wording. */
+  platform?: 'ios' | 'electron';
 }
 
 const URL = /\bhttps?:\/\/[^\s'"`)]+/g;
@@ -82,7 +84,7 @@ export class TerminalReporter {
         if (isVerbose()) log.dim(`  ${event.text}`);
         break;
       case 'devserver-output':
-        log.raw(`${pc.dim('web │')} ${event.text}`);
+        log.raw(`${pc.dim(this.options.platform === 'electron' ? 'dev │' : 'web │')} ${event.text}`);
         break;
       case 'diagnostic':
         this.diagnostic(event.diagnostic);
@@ -135,7 +137,9 @@ export class TerminalReporter {
   private appState(event: Extract<EngineEvent, { type: 'app' }>): void {
     const name = pc.bold(event.name ?? 'The app');
     if (event.state === 'running') {
-      if (this.options.mode === 'dev') {
+      if (this.options.mode === 'dev' && this.options.platform === 'electron') {
+        log.success(`${name} is running on ${event.target} ${pc.dim('· edit your code and CapMac reloads it')}`);
+      } else if (this.options.mode === 'dev') {
         log.success(`${name} is running on ${event.target} ${pc.dim('· edit your web code and it reloads instantly')}`);
       } else {
         log.success(`${name} is running on ${event.target}${this.options.attach !== false ? pc.dim('  (app logs below · Ctrl+C to stop)') : ''}`);
@@ -171,7 +175,14 @@ export class TerminalReporter {
       case 'console': {
         const badge = entry.level === 'error' ? pc.red('js ✖') : entry.level === 'warn' ? pc.yellow('js ▲') : entry.level === 'info' ? pc.cyan('js  ') : entry.level === 'debug' ? pc.dim('js  ') : pc.blue('js  ');
         const text = entry.level === 'error' ? pc.red(entry.text) : entry.level === 'warn' ? pc.yellow(entry.text) : entry.level === 'debug' ? pc.dim(entry.text) : entry.text;
-        log.raw(`${badge} ${text}`);
+        // A page's errors say where they came from (a file on this PC, clickable in VS Code).
+        const where = entry.source && (entry.level === 'error' || entry.level === 'warn') ? pc.dim(`  ${entry.source}`) : '';
+        log.raw(`${badge} ${text}${where}`);
+        break;
+      }
+      case 'main': {
+        const text = entry.level === 'error' ? pc.red(entry.text) : entry.level === 'warn' ? pc.yellow(entry.text) : entry.text;
+        log.raw(`${pc.magenta('main')} ${text}`);
         break;
       }
       case 'capacitor':
@@ -179,6 +190,11 @@ export class TerminalReporter {
         break;
       case 'bridge':
         log.raw(`${pc.dim('↔   ')} ${pc.dim(entry.text)}`);
+        break;
+      case 'electron':
+        // Chromium inside Electron logs its own notices; most are noise unless they are errors.
+        if (entry.level === 'debug' && !isVerbose()) return;
+        log.raw(`${pc.dim('elec')} ${entry.level === 'error' ? pc.red(entry.text) : entry.level === 'warn' ? pc.yellow(entry.text) : entry.text}`);
         break;
       default:
         log.raw(`${pc.dim('ios ')} ${entry.level === 'error' ? pc.red(entry.text) : entry.text}`);

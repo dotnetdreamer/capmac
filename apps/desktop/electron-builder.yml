@@ -16,6 +16,7 @@ files:
   - '!out/agent/**'
   - '!out/cli/**'
   - '!out/sample/**'
+  - '!out/sample-electron/**'
   - '!out/remote/**'
   - '!**/*.map'
 # Outside app.asar: the agent is uploaded to Macs, the sample is copied to Documents,
@@ -28,6 +29,8 @@ extraResources:
     to: cli
   - from: out/sample
     to: sample
+  - from: out/sample-electron
+    to: sample-electron
   # node-datachannel (native) for remote access, for this build's architecture.
   - from: out/remote/${arch}
     to: remote

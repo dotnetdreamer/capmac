@@ -17,19 +17,30 @@ import { enableRemote } from './remote/manage.js';
 import { discoverRuntime, parseNodeVersion, RECOMMENDED_NODE_MAJOR } from './remote-env.js';
 import type { MacSession } from './session.js';
 
-/** Checks that need no Mac: Node.js here, the Capacitor project, a paired Mac. */
+/** What the health check calls each kind of Electron app. */
+const FLAVOR_LABEL = { capacitor: 'Capacitor Electron', 'electron-vite': 'electron-vite', forge: 'Electron Forge', plain: 'Electron' } as const;
+
+/** Checks that need no Mac: Node.js here, the Capacitor or Electron project, a paired Mac. */
 export function localChecks(project: ProjectInfo | null, host: HostConfig | null, nodeVersion = process.version): Check[] {
   const checks: Check[] = [];
   const nodeMajor = Number(nodeVersion.replace(/^v/, '').split('.')[0]);
   checks.push({ id: 'pc-node', group: 'pc', level: nodeMajor >= 20 ? 'ok' : 'warn', label: `Node.js ${nodeVersion} on this PC`, fix: nodeMajor >= 20 ? undefined : 'Update Node.js to 20 or newer.' });
-  if (project) {
+  if (project?.kind === 'electron' && project.electron) {
+    const app = project.electron;
+    checks.push({ id: 'project', group: 'pc', level: 'ok', label: `Electron app "${project.appName}"`, detail: `${FLAVOR_LABEL[app.flavor]}${app.electronRange ? ` · electron ${app.electronRange}` : ''}` });
+  } else if (project) {
     checks.push({ id: 'project', group: 'pc', level: 'ok', label: `Capacitor app "${project.appName}"`, detail: `${project.appId} · web: ${project.webDir}` });
     checks.push(project.hasIos
       ? { id: 'project-ios', group: 'pc', level: 'ok', label: `iOS platform (${project.iosPackageManager === 'unknown' ? 'detected' : project.iosPackageManager})`, detail: `${project.iosDir}/App` }
-      : { id: 'project-ios', group: 'pc', level: 'fail', label: 'iOS platform', detail: 'missing', fix: 'Run `npx cap add ios` (add `--packagemanager SPM` for Swift Package Manager).' });
+      : project.electron
+        ? { id: 'project-ios', group: 'pc', level: 'info', label: 'iOS platform', detail: 'not added (the Electron app runs on the Mac)', fix: 'For iOS too: `npx cap add ios`.' }
+        : { id: 'project-ios', group: 'pc', level: 'fail', label: 'iOS platform', detail: 'missing', fix: 'Run `npx cap add ios` (add `--packagemanager SPM` for Swift Package Manager).' });
+    if (project.electron) {
+      checks.push({ id: 'project-electron', group: 'pc', level: 'ok', label: 'Electron platform', detail: `${project.electron.rel}/${project.electron.electronRange ? ` · electron ${project.electron.electronRange}` : ''}` });
+    }
     if (project.syncRoot !== project.capDir) checks.push({ id: 'project-monorepo', group: 'pc', level: 'info', label: 'Monorepo', detail: `syncing from ${project.syncRoot}` });
   } else {
-    checks.push({ id: 'project', group: 'pc', level: 'info', label: 'Not inside a Capacitor app', detail: 'project checks skipped' });
+    checks.push({ id: 'project', group: 'pc', level: 'info', label: 'Not inside a Capacitor or Electron app', detail: 'project checks skipped' });
   }
   checks.push(host
     ? { id: 'paired', group: 'pc', level: 'ok', label: `Paired Mac "${host.name}"`, detail: `${host.username}@${host.host}` }
@@ -40,8 +51,12 @@ export function localChecks(project: ProjectInfo | null, host: HostConfig | null
 export function macChecks(probe: ProbeResult, project?: ProjectInfo | null): Check[] {
   const checks: Check[] = [];
   const mac = (check: Omit<Check, 'group'>): Check => ({ ...check, group: 'mac' });
+  // An Electron app needs no Xcode, simulators or signing: only the Mac's desktop.
+  const electronOnly = Boolean(project && (project.kind === 'electron' || (project.electron && !project.hasIos)));
   checks.push(mac({ id: 'mac', level: 'info', label: `${probe.computerName ?? probe.hostname}`, detail: `macOS ${probe.macos ?? '?'} · ${probe.arch === 'arm64' ? 'Apple silicon' : 'Intel'} · user ${probe.user}` }));
-  if (!probe.xcode) {
+  if (!probe.xcode && electronOnly) {
+    checks.push(mac({ id: 'xcode', level: 'info', label: 'Xcode', detail: 'not installed (not needed for Electron apps)' }));
+  } else if (!probe.xcode) {
     checks.push(mac({ id: 'xcode', level: 'fail', label: 'Xcode', detail: 'not found', fix: 'Install Xcode from the Mac App Store, open it once, then run `capmac doctor` again.' }));
   } else if (!probe.xcode.ready) {
     const license = /license/i.test(probe.xcode.problem ?? '');
@@ -62,7 +77,9 @@ export function macChecks(probe: ProbeResult, project?: ProjectInfo | null): Che
   const runtimes = probe.simulators.runtimes;
   checks.push(runtimes.length
     ? mac({ id: 'simulators', level: 'ok', label: 'iOS simulators', detail: `${probe.simulators.devices} devices · ${runtimes.join(', ')}` })
-    : mac({
+    : electronOnly
+      ? mac({ id: 'simulators', level: 'info', label: 'iOS simulators', detail: 'none (not needed for Electron apps)' })
+      : mac({
         id: 'simulators',
         level: 'fail',
         label: 'iOS simulators',
@@ -97,7 +114,7 @@ export function macChecks(probe: ProbeResult, project?: ProjectInfo | null): Che
       action: probe.tools.brew ? { id: 'install-cocoapods', label: 'Install', confirm: 'Install CocoaPods on the Mac with Homebrew (brew install cocoapods)?' } : undefined,
     }));
   }
-  const helper = probe.streamHelper;
+  const helper = electronOnly ? undefined : probe.streamHelper;
   if (helper) {
     const xcode = helper.xcode ? ` for Xcode ${helper.xcode}` : '';
     checks.push(
@@ -119,7 +136,7 @@ export function macChecks(probe: ProbeResult, project?: ProjectInfo | null): Che
   }
   // Touch and typing: capmac's helper when the simulators still take its input, else AXe.
   const helperInput = helper ? helper.state !== 'unsupported' && helper.state !== 'failed' && helper.input !== false : false;
-  checks.push(probe.tools.axe
+  if (!electronOnly) checks.push(probe.tools.axe
     ? mac({ id: 'axe', level: 'ok', label: 'AXe', detail: helperInput ? 'installed (CapMac uses its own helper for touch and typing)' : 'touch input for the simulator screen' })
     : helperInput
       ? mac({ id: 'axe', level: 'info', label: 'AXe', detail: 'not needed: CapMac’s helper handles touch and typing' })
@@ -135,7 +152,7 @@ export function macChecks(probe: ProbeResult, project?: ProjectInfo | null): Che
     checks.push(mac({ id: 'disk', level: probe.freeDiskGb >= 15 ? 'ok' : probe.freeDiskGb >= 5 ? 'warn' : 'fail', label: 'Free disk space', detail: `${probe.freeDiskGb} GB`, fix: probe.freeDiskGb >= 15 ? undefined : 'Xcode builds need room; clear ~/Library/Developer/Xcode/DerivedData or old simulators (`xcrun simctl delete unavailable`).' }));
   }
   const devIds = [...new Set(probe.signingIdentities.filter((i) => /Apple Development|iPhone Developer|Apple Distribution|iPhone Distribution/.test(i)))];
-  checks.push(devIds.length
+  if (!electronOnly) checks.push(devIds.length
     ? mac({ id: 'signing', level: 'ok', label: 'Signing identities', detail: devIds.slice(0, 2).join(', ') + (devIds.length > 2 ? ` (+${devIds.length - 2})` : '') })
     : mac({ id: 'signing', level: 'info', label: 'Signing identities', detail: 'none (fine for simulators)', fix: 'For real devices: sign in to Xcode › Settings › Accounts on the Mac once.' }));
   if (probe.keychainLocked) {
@@ -147,7 +164,9 @@ export function macChecks(probe: ProbeResult, project?: ProjectInfo | null): Che
       level: 'warn',
       label: 'Desktop session',
       detail: probe.consoleUser === 'root' ? 'nobody is logged in at the Mac' : `"${probe.consoleUser}" is using the Mac's screen`,
-      fix: `Simulators need ${probe.user} logged in to the Mac desktop (turn on automatic login if the Mac is headless).`,
+      fix: electronOnly
+        ? `Electron apps open their windows on ${probe.user}'s desktop: log in to the Mac as ${probe.user} (turn on automatic login if the Mac is headless).`
+        : `Simulators need ${probe.user} logged in to the Mac desktop (turn on automatic login if the Mac is headless).`,
     }));
   }
   if (project && probe.xcode && Number(probe.xcode.version.split('.')[0]) >= 27 && usesSceneLifecycle(project) === false) {

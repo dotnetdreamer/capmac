@@ -5,8 +5,9 @@ import { macFor, openProject, setProjectPrefs } from '../state/actions';
 import { useApp } from '../state/app';
 import { call } from '../state/engine';
 import { useMacs, useTargets } from '../state/macs';
+import { projectKey, useProjects } from '../state/projects';
 import { buildCommands, type Command } from './commands';
-import { targetState } from '../features/workspace/TargetPicker';
+import { macDesktopTarget, targetState } from '../features/workspace/TargetPicker';
 import { fuzzyScore } from '../lib/fuzzy';
 import { Kbd } from '../ui/Feedback';
 import { Icon, type IconName } from '../ui/Icon';
@@ -39,7 +40,7 @@ function rememberCommand(id: string): void {
 }
 
 function targetLabel(target: Target): string {
-  return target.kind === 'simulator' ? target.name : t.targets.device(target.name);
+  return target.kind === 'simulator' || target.kind === 'mac' ? target.name : t.targets.device(target.name);
 }
 
 function useItems(mode: string | null): { items: Item[]; placeholder: string } {
@@ -49,6 +50,7 @@ function useItems(mode: string | null): { items: Item[]; placeholder: string } {
   const path = route.name === 'project' ? route.path : null;
   const mac = path ? macFor(path) : null;
   const targets = useTargets((s) => (mac ? s.byMac[mac]?.targets : null));
+  const summary = useProjects((s) => (path ? s.byKey[projectKey(path)]?.summary : null));
   useEffect(() => {
     if (mode === 'target' && mac && !targets) {
       void call('targets.list', { mac }).then((list) => useTargets.getState().set(mac, list), () => undefined);
@@ -69,15 +71,19 @@ function useItems(mode: string | null): { items: Item[]; placeholder: string } {
       };
     }
     if (mode === 'target' && path) {
-      const list = targets ? [...targets.simulators, ...targets.devices] : [];
+      // The Mac's desktop first when the project has an Electron app (and only it, for an Electron app alone).
+      const macSummary = macs.find((m) => m.name === mac);
+      const desktop = summary?.electron && macSummary ? macDesktopTarget(macSummary.label, macSummary.macos) : null;
+      const onlyMac = Boolean(summary?.electron && (summary.kind === 'electron' || !summary.hasIos));
+      const list = [...(desktop ? [desktop] : []), ...(targets && !onlyMac ? [...targets.simulators, ...targets.devices] : [])];
       return {
-        placeholder: targets ? t.palette.whichTarget : t.palette.loadingTargets,
+        placeholder: targets || onlyMac ? t.palette.whichTarget : t.palette.loadingTargets,
         items: list.map((target) => ({
           id: target.udid,
           title: targetLabel(target),
-          group: target.kind === 'device' ? t.targets.devices : target.state === 'Booted' ? t.targets.running : target.os,
-          icon: (target.kind === 'device' ? 'phone' : /iPad/.test(target.name) ? 'tablet' : 'phone') as IconName,
-          hint: target.kind === 'device' ? `${target.os} · ${targetState(target)}` : target.state === 'Booted' ? t.palette.runningHint(target.os) : target.os,
+          group: target.kind === 'mac' ? t.targets.macGroup : target.kind === 'device' ? t.targets.devices : target.state === 'Booted' ? t.targets.running : target.os,
+          icon: (target.kind === 'mac' ? 'mac' : target.kind === 'device' ? 'phone' : /iPad/.test(target.name) ? 'tablet' : 'phone') as IconName,
+          hint: target.kind === 'mac' || target.kind === 'device' ? `${target.os} · ${targetState(target)}` : target.state === 'Booted' ? t.palette.runningHint(target.os) : target.os,
           keywords: target.udid,
           run: () => setProjectPrefs(path, { target: target.udid }),
         })),
@@ -88,7 +94,7 @@ function useItems(mode: string | null): { items: Item[]; placeholder: string } {
       items: buildCommands().map((c: Command) => ({ id: c.id, title: c.title, group: t.palette.groups[c.group], icon: c.icon, shortcut: c.shortcut, keywords: c.keywords, hint: c.hint, run: c.run })),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, path, macs, targets, settings?.recentProjects, route]);
+  }, [mode, path, macs, targets, settings?.recentProjects, route, summary, mac]);
 }
 
 export function CommandPalette() {

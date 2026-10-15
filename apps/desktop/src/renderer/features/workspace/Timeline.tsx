@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { t, tidy } from '../../../shared/i18n';
 import { formatDuration } from '../../lib/format';
 import { Rich } from '../../ui/Rich';
-import { IPA_PHASES, isBusy, PHASE_LABELS, RUN_PHASES, type PhaseState, type RunState, type TimelinePhase } from '../../state/runs';
+import { CAP_ELECTRON_PHASES, ELECTRON_PHASES, IPA_PHASES, isBusy, phaseLabel, RUN_PHASES, type PhaseState, type RunState, type TimelinePhase } from '../../state/runs';
 import { ProgressBar, Spinner } from '../../ui/Feedback';
 import { Icon } from '../../ui/Icon';
 
@@ -17,6 +17,9 @@ const SHORT_DETAIL: Array<[RegExp, string]> = [
   [/turned off/i, t.timeline.short.off],
   [/not installed on this PC/i, t.timeline.short.prebuilt],
   [/no build script/i, t.timeline.short.noScript],
+  [/app unchanged/i, t.timeline.short.unchanged],
+  [/already on the Mac/i, t.timeline.short.upToDate],
+  [/built by the dev command/i, t.timeline.short.devCommand],
 ];
 
 function shortDetail(state: PhaseState): string | null {
@@ -54,13 +57,20 @@ function useNow(enabled: boolean): number {
   return now;
 }
 
-export function Timeline({ run }: { run: RunState | undefined }) {
+/**
+ * `electron`: the project's Electron app (Capacitor's platform, or the app
+ * itself); `macSelected`: the toolbar's target is the Mac's desktop. A run
+ * says for itself where it ran.
+ */
+export function Timeline({ run, electron = null, macSelected = false }: { run: RunState | undefined; electron?: 'capacitor' | 'plain' | null; macSelected?: boolean }) {
   const busy = isBusy(run);
+  const onMac = run?.sessionId || run?.runNumber ? Boolean(run?.onMac) : macSelected;
+  const PHASE_LABELS = Object.fromEntries((['web', 'sync', 'deps', 'electron', 'cap', 'build', 'boot', 'install', 'launch', 'archive', 'export', 'download'] as TimelinePhase[]).map((p) => [p, phaseLabel(p, onMac)])) as Record<TimelinePhase, string>;
   const now = useNow(busy);
   const hasCurrent = Boolean(run && Object.keys(run.phases).length > 1);
   const showingPrevious = !hasCurrent && Boolean(run?.previous);
   const phases: Partial<Record<TimelinePhase, PhaseState>> = hasCurrent ? run!.phases : run?.previous?.phases ?? {};
-  const order = run?.mode === 'ipa' ? IPA_PHASES : RUN_PHASES;
+  const order = run?.mode === 'ipa' ? IPA_PHASES : onMac ? (electron === 'capacitor' ? CAP_ELECTRON_PHASES : ELECTRON_PHASES) : RUN_PHASES;
   const runningPhase = order.find((p) => phases[p]?.status === 'running');
   const running = runningPhase ? phases[runningPhase] : undefined;
   const failed = order.find((p) => phases[p]?.status === 'failed');

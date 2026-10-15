@@ -1,4 +1,4 @@
-import { LiveSession, loadApiKey, loadProject, MacLink, requireIos } from '@capmac/core/engine';
+import { ElectronLiveSession, LiveSession, loadApiKey, loadProject, MacLink, requireElectron, requireIos, runsOnMac, type ProjectInfo } from '@capmac/core/engine';
 import { listenForKeys } from '../keys.js';
 import { reportError } from '../report.js';
 import { terminalContext } from '../terminal.js';
@@ -10,6 +10,8 @@ export interface DevOptions {
   target?: string;
   device?: boolean;
   simulator?: boolean;
+  /** Live-reload the Electron app on the Mac's desktop (Capacitor apps that also have iOS). */
+  electron?: boolean;
   url?: string;
   devCommand?: string;
   configuration?: string;
@@ -32,8 +34,32 @@ function printKeys(): void {
   log.line(pc.dim(`  press ${pc.bold('r')} rebuild · ${pc.bold('R')} clean rebuild · ${pc.bold('l')} relaunch · ${pc.bold('o')} open screen · ${pc.bold('c')} clear · ${pc.bold('q')} quit`));
 }
 
+/** Runs until q or Ctrl+C (also while starting up), then stops the session. */
+async function untilQuit(start: () => Promise<void>, keys: Record<string, () => void>, onStarted: () => void, stop: () => Promise<void>): Promise<void> {
+  let resolveQuit!: () => void;
+  const quit = new Promise<void>((resolve) => (resolveQuit = resolve));
+  const stopKeys = listenForKeys({ ...keys, c: () => console.clear(), h: printKeys, '?': printKeys, q: () => resolveQuit(), 'ctrl+c': () => resolveQuit() });
+  const onSigint = () => resolveQuit();
+  process.on('SIGINT', onSigint);
+  try {
+    const started = start().then(() => true);
+    if (await Promise.race([started, quit.then(() => false)])) {
+      onStarted();
+      await quit;
+    } else {
+      started.catch(() => undefined);
+    }
+    log.dim('Shutting down…');
+  } finally {
+    process.off('SIGINT', onSigint);
+    stopKeys();
+    await stop();
+  }
+}
+
 export async function devCommand(options: DevOptions): Promise<void> {
   const project = await loadProject(process.cwd());
+  if (runsOnMac(project, options)) return devOnMac(project, options);
   requireIos(project);
   const auth = options.device || options.target ? await loadApiKey(options, project) : undefined;
   const { ctx, reporter } = terminalContext({ mode: 'dev', bridge: options.bridge, allWarnings: options.allWarnings });
@@ -41,9 +67,6 @@ export async function devCommand(options: DevOptions): Promise<void> {
   const link = new MacLink(options.mac ?? project.config.host, ctx, { autoReconnect: true });
   const live = new LiveSession(project, link, { ...options, auth }, ctx);
   let viewer: ScreenViewer | null = null;
-
-  let resolveQuit!: () => void;
-  const quit = new Promise<void>((resolve) => (resolveQuit = resolve));
   const openScreen = async () => {
     const target = live.target;
     if (!target) return;
@@ -62,35 +85,52 @@ export async function devCommand(options: DevOptions): Promise<void> {
       reportError(err);
     }
   };
-  const stopKeys = listenForKeys({
-    r: () => live.rebuild(),
-    R: () => live.rebuild({ clean: true }),
-    l: () => live.relaunch(),
-    o: () => void openScreen(),
-    c: () => console.clear(),
-    h: printKeys,
-    '?': printKeys,
-    q: () => resolveQuit(),
-    'ctrl+c': () => resolveQuit(),
-  });
-  const onSigint = () => resolveQuit();
-  process.on('SIGINT', onSigint);
-
-  try {
-    // Ctrl+C or q while starting up stops everything too.
-    const started = live.start().then(() => true);
-    if (await Promise.race([started, quit.then(() => false)])) {
+  await untilQuit(
+    () => live.start(),
+    { r: () => live.rebuild(), R: () => live.rebuild({ clean: true }), l: () => live.relaunch(), o: () => void openScreen() },
+    () => {
       if (options.screen) void openScreen();
-      await quit;
-    } else {
-      started.catch(() => undefined);
+    },
+    async () => {
+      await live.stop();
+      await (viewer as ScreenViewer | null)?.close().catch(() => undefined);
+      link.close();
+    },
+  );
+}
+
+/** Live reload of the Electron app on the Mac's desktop. */
+async function devOnMac(project: ProjectInfo, options: DevOptions): Promise<void> {
+  requireElectron(project);
+  const { ctx, reporter } = terminalContext({ mode: 'dev', platform: 'electron', allWarnings: options.allWarnings });
+  reporter.onAppRunning = printKeys;
+  const link = new MacLink(options.mac ?? project.config.host, ctx, { autoReconnect: true });
+  const live = new ElectronLiveSession(project, link, { url: options.url, devCommand: options.devCommand, full: options.full || options.clean, watch: options.watch }, ctx);
+  let viewer: ScreenViewer | null = null;
+  const openScreen = async () => {
+    const target = live.target;
+    if (!target) return;
+    try {
+      if (!viewer) {
+        viewer = await ScreenViewer.start(link, { kind: 'app', projectId: project.projectId, label: target.name }, { title: `${project.appName} · ${target.name}` });
+        const v = viewer;
+        reporter.onAppLog = (entry) => v.pushLog(entry);
+      }
+      viewer.open();
+    } catch (err) {
+      reportError(err);
     }
-    log.dim('Shutting down…');
-  } finally {
-    process.off('SIGINT', onSigint);
-    stopKeys();
-    await live.stop();
-    await (viewer as ScreenViewer | null)?.close().catch(() => undefined);
-    link.close();
-  }
+  };
+  await untilQuit(
+    () => live.start(),
+    { r: () => live.rebuild(), R: () => live.rebuild({ clean: true }), l: () => live.relaunch(), o: () => void openScreen() },
+    () => {
+      if (options.screen) void openScreen();
+    },
+    async () => {
+      await live.stop();
+      await (viewer as ScreenViewer | null)?.close().catch(() => undefined);
+      link.close();
+    },
+  );
 }

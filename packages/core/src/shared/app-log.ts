@@ -4,7 +4,8 @@
  * console calls as "⚡️  [log] - message".
  */
 
-export type AppLogKind = 'console' | 'bridge' | 'capacitor' | 'native';
+/** 'main': an Electron app's main process (its console.log, and Node.js warnings); 'electron': Chromium inside Electron. */
+export type AppLogKind = 'console' | 'bridge' | 'capacitor' | 'native' | 'main' | 'electron';
 export type AppLogLevel = 'log' | 'info' | 'warn' | 'error' | 'debug';
 
 export interface AppLogLine {

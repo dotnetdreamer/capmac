@@ -5,14 +5,21 @@ import os from 'node:os';
 import path from 'node:path';
 import { toPosixRel } from '../shared/paths.js';
 import { loadProjectConfig, type ProjectConfig } from './config.js';
+import { capacitorElectronDir, dependsOnElectron, describeElectronApp, readPackageJson, type ElectronProject } from './electron-project.js';
+
+export type { ElectronProject } from './electron-project.js';
 
 export const CAP_CONFIG_FILES = ['capacitor.config.ts', 'capacitor.config.mts', 'capacitor.config.js', 'capacitor.config.mjs', 'capacitor.config.cjs', 'capacitor.config.json'];
 const LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'bun.lock'];
 
 export type PackageManager = 'npm' | 'yarn' | 'pnpm' | 'bun';
 
+/** A Capacitor app (capacitor.config.*), or an Electron app on its own (a package.json that depends on electron). */
+export type ProjectKind = 'capacitor' | 'electron';
+
 export interface ProjectInfo {
-  /** Folder with capacitor.config.* */
+  kind: ProjectKind;
+  /** The project folder: the one with capacitor.config.*, or the Electron app's. */
   capDir: string;
   configFile: string;
   /** Folder mirrored to the Mac (lockfile root for monorepos). */
@@ -33,6 +40,8 @@ export interface ProjectInfo {
   projectId: string;
   config: ProjectConfig;
   scripts: Record<string, string>;
+  /** The Electron app: the project itself, or Capacitor's Electron platform; null when there is none. */
+  electron: ElectronProject | null;
 }
 
 export class ProjectError extends Error {
@@ -42,10 +51,33 @@ export class ProjectError extends Error {
   }
 }
 
+const hasCapacitorConfig = (dir: string) => CAP_CONFIG_FILES.some((f) => existsSync(path.join(dir, f)));
+
+/** Capacitor's Electron platform folder (it has a copy of capacitor.config, but the project is above it). */
+const isElectronPlatform = (dir: string) => path.basename(dir) === 'electron' && dependsOnElectron(readPackageJson(dir)) && hasCapacitorConfig(path.dirname(dir));
+
 export function findCapacitorDir(start: string): string | null {
   let dir = path.resolve(start);
   for (;;) {
-    if (CAP_CONFIG_FILES.some((f) => existsSync(path.join(dir, f)))) return dir;
+    if (hasCapacitorConfig(dir) && !isElectronPlatform(dir)) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * The project `start` is in: the nearest folder with capacitor.config.*, or
+ * with a package.json that depends on electron. Inside Capacitor's Electron
+ * platform (electron/), that is the Capacitor project around it.
+ */
+export function findProjectDir(start: string): { dir: string; kind: ProjectKind } | null {
+  let dir = path.resolve(start);
+  for (;;) {
+    // Capacitor's Electron platform keeps a copy of capacitor.config: the project is the folder above.
+    if (isElectronPlatform(dir)) return { dir: path.dirname(dir), kind: 'capacitor' };
+    if (hasCapacitorConfig(dir)) return { dir, kind: 'capacitor' };
+    if (dependsOnElectron(readPackageJson(dir))) return { dir, kind: 'electron' };
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
@@ -149,11 +181,49 @@ function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'app';
 }
 
+function projectIdFor(appName: string, syncRoot: string): string {
+  return `${slug(appName)}-${createHash('sha1').update(`${os.hostname()}|${syncRoot.toLowerCase()}`).digest('hex').slice(0, 8)}`;
+}
+
+/** An Electron app on its own (no Capacitor): the app is the project. */
+async function loadElectronProject(dir: string): Promise<ProjectInfo> {
+  const syncRoot = findSyncRoot(dir);
+  const packageJson = readPackageJson(dir) ?? {};
+  const rootPackageJson = syncRoot === dir ? packageJson : readPackageJson(syncRoot) ?? packageJson;
+  const config = await loadProjectConfig(dir);
+  const electron = describeElectronApp(dir, '', false);
+  return {
+    kind: 'electron',
+    capDir: dir,
+    configFile: path.join(dir, 'package.json'),
+    syncRoot,
+    projectRel: toPosixRel(syncRoot, dir),
+    appId: electron.appId ?? packageJson.name ?? path.basename(dir),
+    appName: electron.name,
+    // No Capacitor web assets: the build (if any) runs on the Mac.
+    webDir: '',
+    iosDir: 'ios',
+    scheme: 'App',
+    iosPackageManager: 'unknown',
+    hasIos: false,
+    packageManager: detectPackageManager(syncRoot, rootPackageJson),
+    projectId: projectIdFor(electron.name, syncRoot),
+    config,
+    scripts: packageJson.scripts ?? {},
+    electron,
+  };
+}
+
 export async function loadProject(cwd: string): Promise<ProjectInfo> {
-  const capDir = findCapacitorDir(cwd);
-  if (!capDir) {
-    throw new ProjectError('No Capacitor project found here (no capacitor.config.* in this folder or its parents).', 'Run capmac from your Capacitor app folder.');
+  const found = findProjectDir(cwd);
+  if (!found) {
+    throw new ProjectError(
+      'No Capacitor or Electron app found here (no capacitor.config.*, or package.json that depends on electron, in this folder or its parents).',
+      'Run capmac from your app’s folder.',
+    );
   }
+  if (found.kind === 'electron') return loadElectronProject(found.dir);
+  const capDir = found.dir;
   const configFile = CAP_CONFIG_FILES.map((f) => path.join(capDir, f)).find((f) => existsSync(f))!;
   const resolved = (await evaluateWithCli(capDir)) ?? (await evaluateStatically(configFile));
   const syncRoot = findSyncRoot(capDir);
@@ -179,8 +249,11 @@ export async function loadProject(cwd: string): Promise<ProjectInfo> {
       ? 'CocoaPods'
       : 'unknown';
   const appName = resolved.appName || path.basename(capDir);
-  const projectId = `${slug(appName)}-${createHash('sha1').update(`${os.hostname()}|${syncRoot.toLowerCase()}`).digest('hex').slice(0, 8)}`;
+  const projectId = projectIdFor(appName, syncRoot);
+  const config = await loadProjectConfig(capDir);
+  const electronDir = capacitorElectronDir(capDir, config);
   return {
+    kind: 'capacitor',
     capDir,
     configFile,
     syncRoot,
@@ -195,8 +268,9 @@ export async function loadProject(cwd: string): Promise<ProjectInfo> {
     hasIos: existsSync(nativeDir),
     packageManager: detectPackageManager(syncRoot, rootPackageJson),
     projectId,
-    config: await loadProjectConfig(capDir),
+    config,
     scripts: packageJson.scripts ?? {},
+    electron: electronDir ? describeElectronApp(electronDir, toPosixRel(capDir, electronDir), true) : null,
   };
 }
 
@@ -217,9 +291,32 @@ export function hasInstalledDependencies(project: Pick<ProjectInfo, 'capDir' | '
 }
 
 export function requireIos(project: ProjectInfo): void {
+  if (project.kind === 'electron') {
+    throw new ProjectError('This is an Electron app: it has no iOS app to build.', 'It runs on the Mac’s desktop: `capmac run` launches it there.');
+  }
   if (!project.hasIos) {
     throw new ProjectError(`This app has no iOS platform yet (${project.iosDir}/App is missing).`, 'Add it with `npx cap add ios` (or `npx cap add ios --packagemanager SPM`), then run again.');
   }
+}
+
+export function requireElectron(project: ProjectInfo): ElectronProject {
+  if (project.electron) return project.electron;
+  throw new ProjectError(
+    'This app has no Electron platform.',
+    'Add it on Windows with `npm install @capacitor-community/electron` and `npx cap add @capacitor-community/electron`, then run again.',
+  );
+}
+
+/**
+ * Whether a run goes to the Mac's desktop (the Electron app) rather than a
+ * simulator or device: always for an Electron app, when asked for, and for a
+ * Capacitor app whose only platform here is Electron.
+ */
+export function runsOnMac(project: ProjectInfo, options: { electron?: boolean; target?: string } = {}): boolean {
+  if (project.kind === 'electron') return true;
+  if (options.electron) return true;
+  if (options.target && /^(mac|macos|electron|mac-desktop|this mac)$/i.test(options.target.trim())) return true;
+  return Boolean(project.electron && !project.hasIos);
 }
 
 /** Whether the iOS app adopts the UIScene lifecycle (required when building with the iOS 27 SDK). */

@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type { ErrorInfo } from '@capmac/core/engine/errors';
 import type { Check, ConnectionState, EngineEvent, FixId, SessionMode } from '@capmac/core/engine/events';
 import type { ProbeResult, ScreenInfo, StreamFallback, TargetsResult } from '@capmac/core/shared/protocol';
+import type { AppWindowInfo, ElectronFlavor } from '@capmac/core/shared/electron';
 import { PUBLIC_KEY_RE, RELAY_CHOICES, ROUTE_CHOICES } from '@capmac/core/shared/remote';
 import type { RemoteSettings, RemoteTestResult, Route, SignalServerSetting } from '@capmac/core/shared/remote';
 import type { RemoteDoorStatus, RemotePc } from '@capmac/core/shared/remote-door';
@@ -17,6 +18,7 @@ import type { TakeoverStatus } from '@capmac/core/shared/takeover';
 export type { ErrorInfo } from '@capmac/core/engine/errors';
 export type { AppLogEntry, Check, CheckLevel, ConnectionState, EngineEvent, FixId, Phase, SessionMode, SessionState, StepStatus } from '@capmac/core/engine/events';
 export type { Diagnostic, InputEvent, ProbeResult, ScreenInfo, StreamFallback, StreamHelperState, Target, TargetsResult } from '@capmac/core/shared/protocol';
+export type { AppWindowInfo, ElectronFlavor } from '@capmac/core/shared/electron';
 export type { RelayChoice, RemoteSettings, RemoteTestResult, Route, RouteChoice, SignalServerSetting } from '@capmac/core/shared/remote';
 export type { RemoteDoorStatus, RemotePc } from '@capmac/core/shared/remote-door';
 
@@ -69,7 +71,8 @@ export const engineMethods = {
   'simulators.shutdown': z.object({ mac: macName, udid }).strict(),
   'projects.inspect': z.object({ path: fsPath }).strict(),
   'projects.syncSize': z.object({ path: fsPath }).strict(),
-  'projects.createSample': z.object({}).strict(),
+  /** Copies a bundled sample to Documents\CapMac Studio: the Capacitor iOS app, or the Electron app. */
+  'projects.createSample': z.object({ kind: z.enum(['ios', 'electron']).optional() }).strict(),
   'projects.installDeps': z.object({ path: fsPath }).strict(),
   'sessions.start': z.object({
     projectPath: fsPath,
@@ -81,6 +84,8 @@ export const engineMethods = {
   'sessions.stop': z.object({ sessionId: id }).strict(),
   'sessions.rebuild': z.object({ sessionId: id, clean: z.boolean().optional() }).strict(),
   'sessions.relaunch': z.object({ sessionId: id }).strict(),
+  /** An Electron app in live reload: reload its windows. */
+  'sessions.reload': z.object({ sessionId: id }).strict(),
   'builds.ipa': z.object({
     projectPath: fsPath,
     mac: macName.optional(),
@@ -92,7 +97,8 @@ export const engineMethods = {
   'xcode.open': z.object({ projectPath: fsPath, mac: macName.optional() }).strict(),
   'logs.buildLog': z.object({ projectPath: fsPath, mac: macName.optional(), path: text(4096) }).strict(),
   'screen.stop': z.object({ streamId: id }).strict(),
-  'screen.screenshot': z.object({ mac: macName, udid }).strict(),
+  /** A simulator's screen, or (the Mac's desktop, with the project) the Electron app's window. */
+  'screen.screenshot': z.object({ mac: macName, udid, projectPath: fsPath.optional(), window: z.number().int().min(0).optional() }).strict(),
   'debug.dropConnection': z.object({ mac: macName }).strict(),
   // Remote access: the same options as `capmac remote`.
   'remote.server': z.object({}).strict(),
@@ -116,6 +122,8 @@ export interface MacSummary {
   /** "IK's M1" */
   label: string;
   xcode: string | null;
+  /** macOS version ("26.6.1"), as last seen. */
+  macos: string | null;
   isDefault: boolean;
   pairedAt: string;
   state: ConnectionState | 'idle';
@@ -150,6 +158,8 @@ export interface DiscoveredMac {
 }
 
 export interface ProjectSummary {
+  /** A Capacitor app, or an Electron app on its own. */
+  kind: 'capacitor' | 'electron';
   path: string;
   appName: string;
   appId: string;
@@ -162,6 +172,8 @@ export interface ProjectSummary {
   host: string | null;
   hasNodeModules: boolean;
   devCommand: string | null;
+  /** The Electron app (the project itself, or Capacitor's Electron platform), which runs on the Mac's desktop. */
+  electron: { flavor: ElectronFlavor; rel: string; name: string; electronRange: string | null } | null;
 }
 
 export interface HealthReport {
@@ -196,6 +208,7 @@ export interface MethodResults {
   'sessions.stop': void;
   'sessions.rebuild': void;
   'sessions.relaunch': void;
+  'sessions.reload': void;
   'builds.ipa': { sessionId: string };
   'xcode.open': void;
   'logs.buildLog': { text: string };
@@ -270,6 +283,26 @@ export const inputEventSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('touch2'), phase: z.enum(['down', 'move', 'up']), x1: unit, y1: unit, x2: unit, y2: unit }).strict(),
   z.object({ kind: z.literal('scroll'), x: unit, y: unit, dx: points, dy: points }).strict(),
   z.object({ kind: z.literal('keypress'), usage: z.number().int().min(1).max(0xffff), modifiers: z.number().int().min(0).max(15).optional() }).strict(),
+  // An Electron app's window: the pointer, the wheel and keys, as on a Mac.
+  z.object({
+    kind: z.literal('mouse'),
+    phase: z.enum(['down', 'up', 'move', 'leave']),
+    x: unit,
+    y: unit,
+    button: z.enum(['left', 'right', 'middle']).optional(),
+    clicks: z.number().int().min(1).max(3).optional(),
+    buttons: z.number().int().min(0).max(31).optional(),
+    modifiers: z.number().int().min(0).max(15).optional(),
+  }).strict(),
+  z.object({ kind: z.literal('wheel'), x: unit, y: unit, dx: points, dy: points, modifiers: z.number().int().min(0).max(15).optional() }).strict(),
+  z.object({
+    kind: z.literal('keyboard'),
+    phase: z.enum(['down', 'up']),
+    key: z.string().min(1).max(32),
+    code: z.string().max(32),
+    modifiers: z.number().int().min(0).max(15).optional(),
+    repeat: z.boolean().optional(),
+  }).strict(),
 ]);
 
 /** Messages on a screen port, engine → renderer. Frames are ArrayBuffers sent with a transfer list. */
@@ -287,7 +320,15 @@ export type ScreenPortMessage =
   /** The Mac's clock minus this PC's (µs), for the latency readout. */
   | { type: 'clock'; offsetUs: number; rttUs: number }
   /** Smooth stream: the bitrate adaptive bitrate chose, and frames dropped to catch up (every few seconds). */
-  | { type: 'status'; bitrate: number | null; dropped: number };
+  | { type: 'status'; bitrate: number | null; dropped: number }
+  /** An Electron app: its windows, and which one is showing. */
+  | { type: 'windows'; windows: AppWindowInfo[]; watched: number | null }
+  /** An Electron app: the pointer's shape over the window (Electron's cursor type). */
+  | { type: 'cursor'; cursor: string }
+  /** An Electron app: text copied in the app, for this PC's clipboard. */
+  | { type: 'clipboard'; text: string }
+  /** An Electron app: not running (or restarting), or showing again. */
+  | { type: 'waiting'; waiting: boolean };
 
 /** Messages on a screen port, renderer → engine. */
 export type ScreenPortCommand =
@@ -300,7 +341,11 @@ export type ScreenPortCommand =
   /** Smooth stream: the video's longest side in pixels, to match the pane. */
   | { type: 'size'; maxSize: number }
   /** After a fallback: try the smooth stream again. */
-  | { type: 'retry-smooth' };
+  | { type: 'retry-smooth' }
+  /** An Electron app: show this window (null: follow the focused one). */
+  | { type: 'window'; window: number | null }
+  /** An Electron app: the window's traffic lights. */
+  | { type: 'window-action'; window: number; action: 'close' | 'minimize' | 'zoom' };
 
 // ─── App (main process) ────────────────────────────────────────────────────
 
@@ -397,7 +442,8 @@ export const appChannels = {
   'app:save-image': z.object({ data: z.union([z.instanceof(ArrayBuffer), z.instanceof(Uint8Array)]), name: text(200) }).strict(),
   'app:copy-image': z.object({ data: z.union([z.instanceof(ArrayBuffer), z.instanceof(Uint8Array)]) }).strict(),
   'app:save-text': z.object({ text: z.string().max(200 * 1024 * 1024), name: text(200) }).strict(),
-  'app:screen-open': z.object({ mac: macName, udid, maxSize: z.number().int().min(320).max(4096).optional() }).strict(),
+  /** With `projectPath` and the Mac's desktop as `udid`: the project's Electron app's windows. */
+  'app:screen-open': z.object({ mac: macName, udid, maxSize: z.number().int().min(320).max(4096).optional(), projectPath: fsPath.optional() }).strict(),
   'app:project-opened': z.object({ path: fsPath, name: z.string().max(200), appId: z.string().max(200) }).strict(),
   'app:forget-project': z.object({ path: fsPath }).strict(),
   'app:engine-call': z.object({ method: z.string().max(64), params: z.unknown() }).strict(),

@@ -85,6 +85,7 @@ export async function opSync(params: ProjectRef, io: AgentIO): Promise<SyncResul
 
     const changed = [...written.keys(), ...remove];
     if (!state.pendingFull) state.pendingChanges.push(...changed);
+    if (!state.electronPendingFull) state.electronPending.push(...changed);
     await saveState(paths, state);
 
     return {

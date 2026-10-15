@@ -16,22 +16,23 @@ import { step, type AgentIO } from '../io.js';
 import { AgentError, exists, run, which } from '../proc.js';
 import { loadState, projectPaths, saveState, withProjectLock, type ProjectState } from '../state.js';
 
-type PackageManager = 'npm' | 'yarn' | 'pnpm' | 'bun';
+export type PackageManager = 'npm' | 'yarn' | 'pnpm' | 'bun';
 
 const DEPS_BASENAMES = new Set(['package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'bun.lockb', 'bun.lock', '.npmrc', '.yarnrc', '.yarnrc.yml', '.pnpmfile.cjs']);
 
-function depsHash(state: ProjectState): string {
+/** A hash of the dependency files (package.json, lockfiles, .npmrc) in the manifest, for the paths `include` accepts. */
+export function depsHash(state: ProjectState, include: (rel: string) => boolean = () => true): string {
   const hash = createHash('sha1');
   hash.update(process.versions.node.split('.')[0]!);
   for (const rel of Object.keys(state.manifest).sort()) {
     const base = rel.slice(rel.lastIndexOf('/') + 1);
-    if (!DEPS_BASENAMES.has(base) || rel.split('/').includes('node_modules')) continue;
+    if (!DEPS_BASENAMES.has(base) || rel.split('/').includes('node_modules') || !include(rel)) continue;
     hash.update(`${rel}:${state.manifest[rel]!.h}\n`);
   }
   return hash.digest('hex');
 }
 
-async function detectPackageManager(root: string): Promise<{ pm: PackageManager; version?: string; lockfile: boolean }> {
+export async function detectPackageManager(root: string): Promise<{ pm: PackageManager; version?: string; lockfile: boolean }> {
   let declared: string | undefined;
   try {
     declared = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')).packageManager;
@@ -48,7 +49,7 @@ async function detectPackageManager(root: string): Promise<{ pm: PackageManager;
   return { pm: 'npm', lockfile: false };
 }
 
-async function installCommand(root: string, pm: PackageManager, version: string | undefined, lockfile: boolean, env: NodeJS.ProcessEnv): Promise<{ cmd: string; args: string[]; label: string }> {
+export async function installCommand(root: string, pm: PackageManager, version: string | undefined, lockfile: boolean, env: NodeJS.ProcessEnv): Promise<{ cmd: string; args: string[]; label: string }> {
   const hasNodeModules = await exists(path.join(root, 'node_modules'));
   if (pm === 'npm') {
     const npm = (await which('npm', env)) ?? 'npm';
@@ -70,7 +71,8 @@ async function installCommand(root: string, pm: PackageManager, version: string 
   return { cmd: npx, args: ['--yes', spec, ...installArgs], label: `${pm} install (npx ${spec})` };
 }
 
-function installEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+/** The environment for installing dependencies; `electron` keeps Electron's own download (the app runs on this Mac). */
+export function installEnv(env: NodeJS.ProcessEnv, options: { electron?: boolean } = {}): NodeJS.ProcessEnv {
   return {
     ...env,
     // Nothing on the Mac runs browsers or git hooks; skip the slow postinstall work.
@@ -79,7 +81,7 @@ function installEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: '1',
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
     CYPRESS_INSTALL_BINARY: '0',
-    ELECTRON_SKIP_BINARY_DOWNLOAD: '1',
+    ...(options.electron ? {} : { ELECTRON_SKIP_BINARY_DOWNLOAD: '1' }),
   };
 }
 
@@ -100,7 +102,9 @@ export async function opPrepare(params: PrepareParams, io: AgentIO): Promise<Pre
 
     // 1. JavaScript dependencies (needed for `cap sync` and native plugin sources).
     const { pm, version, lockfile } = await detectPackageManager(paths.src);
-    const wantDeps = depsHash(state);
+    // Capacitor's Electron platform has its own dependencies (see electron-prepare).
+    const electronDir = [params.projectRel, 'electron'].filter(Boolean).join('/');
+    const wantDeps = depsHash(state, (rel) => !rel.startsWith(`${electronDir}/`));
     const hasModules = (await exists(path.join(paths.src, 'node_modules'))) || (await exists(path.join(paths.project, 'node_modules')));
     let installed = false;
     if (!params.skipInstall && (Boolean(params.full) || wantDeps !== state.depsHash || !hasModules)) {

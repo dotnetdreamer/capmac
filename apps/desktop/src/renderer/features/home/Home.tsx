@@ -68,7 +68,8 @@ function ProjectCard({ recent }: { recent: RecentProject }) {
         </p>
       ) : (
         <div className="project-card__meta">
-          {summary && <Badge>{summary.iosPackageManager === 'unknown' ? (summary.hasIos ? 'iOS' : t.home.noIos) : summary.iosPackageManager}</Badge>}
+          {summary && (summary.hasIos || !summary.electron) && <Badge>{summary.iosPackageManager === 'unknown' ? (summary.hasIos ? 'iOS' : t.home.noIos) : summary.iosPackageManager}</Badge>}
+          {summary?.electron && <Badge>{t.home.electron}</Badge>}
           {entry?.size ? (
             <span className="tabular">
               {t.count.files(entry.size.files)} · {formatBytes(entry.size.bytes)}
@@ -134,28 +135,55 @@ function EmptyArt() {
   );
 }
 
-function SampleButton({ variant = 'standard' }: { variant?: 'standard' | 'subtle' }) {
+/** Copies a bundled sample to Documents, opens it and runs it. */
+async function runSample(kind: 'ios' | 'electron'): Promise<void> {
+  try {
+    const { path } = await call('projects.createSample', { kind });
+    // Without a Mac, open it: the workspace shows how to pair one.
+    if ((await openProject(path)) && useMacs.getState().macs.length > 0) void startSession(path, 'run');
+  } catch (err) {
+    toast({ tone: 'critical', title: t.home.sampleFailed, body: errorInfo(err).message });
+  }
+}
+
+function SampleButton({ variant = 'standard', kind = 'ios' }: { variant?: 'standard' | 'subtle'; kind?: 'ios' | 'electron' }) {
   const [busy, setBusy] = useState(false);
   return (
     <Button
       variant={variant}
-      icon="rocket"
+      icon={kind === 'electron' ? 'desktop' : 'rocket'}
       busy={busy}
       onClick={async () => {
         setBusy(true);
-        try {
-          const { path } = await call('projects.createSample', {});
-          // Without a Mac, open it: the workspace shows how to pair one.
-          if ((await openProject(path)) && useMacs.getState().macs.length > 0) void startSession(path, 'run');
-        } catch (err) {
-          toast({ tone: 'critical', title: t.home.sampleFailed, body: errorInfo(err).message });
-        } finally {
-          setBusy(false);
-        }
+        await runSample(kind);
+        setBusy(false);
       }}
     >
-      {t.home.trySample}
+      {kind === 'electron' ? t.home.trySampleElectron : t.home.trySample}
     </Button>
+  );
+}
+
+/** The samples, from the page header: the iOS app and the Electron app. */
+function SampleMenu() {
+  const menu = usePopover();
+  return (
+    <>
+      <button type="button" className="btn btn--subtle btn--md" aria-haspopup="menu" {...menu.triggerProps}>
+        <Icon name="rocket" size={16} />
+        <span className="btn__label">{t.home.trySampleMenu}</span>
+        <Icon name="chevronDown" size={12} className="btn__icon-right" />
+      </button>
+      <Menu
+        state={menu}
+        label={t.home.trySampleMenu}
+        width={220}
+        items={[
+          { id: 'ios', label: t.home.sampleIos, icon: 'phone', onSelect: () => void runSample('ios') },
+          { id: 'electron', label: t.home.sampleElectron, icon: 'desktop', onSelect: () => void runSample('electron') },
+        ]}
+      />
+    </>
   );
 }
 
@@ -173,7 +201,7 @@ export function Home() {
           </div>
           {recents.length > 0 && (
             <div className="page__actions">
-              <SampleButton variant="subtle" />
+              <SampleMenu />
               <Button variant="accent" icon="folderAdd" onClick={() => void pickProject()}>
                 {t.home.addProject}
               </Button>
@@ -191,6 +219,7 @@ export function Home() {
                     {t.home.chooseFolder}
                   </Button>
                   <SampleButton />
+                  <SampleButton kind="electron" />
                 </>
               }
             >

@@ -23,6 +23,8 @@ export interface HostConfig {
   /** Friendly name of the Mac (e.g. "Kabir's MacBook Pro"). */
   macName?: string;
   xcode?: string;
+  /** macOS version ("26.6.1"), as last seen. */
+  macos?: string;
   pairedAt: string;
   /** Remote access ("Reach this Mac from anywhere"), when it is on for this Mac. */
   remote?: HostRemote;
@@ -79,6 +81,17 @@ export interface ProjectConfig {
     include?: string[];
     /** Extra gitignore-style patterns to never upload. */
     exclude?: string[];
+  };
+  /** The Electron app, which runs on the Mac's desktop. */
+  electron?: {
+    /** Capacitor: the Electron platform's folder, relative to this one (default "electron"). */
+    dir?: string;
+    /** Command that builds the app on the Mac before it launches; false to skip the build. */
+    build?: string | false;
+    /** Command that launches the app on the Mac (default: Electron itself, on the app's folder). */
+    start?: string;
+    /** Command that runs the app for live reload on the Mac (default: the "dev" script when it runs Electron); false: CapMac reloads the app itself. */
+    dev?: string | false;
   };
 }
 

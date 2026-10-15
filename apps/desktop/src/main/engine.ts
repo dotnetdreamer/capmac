@@ -100,7 +100,7 @@ export class EngineProcess {
     this.post({ kind: 'prompt-response', response });
   }
 
-  openScreen(streamId: string, mac: string, udid: string, port: MessagePortMain, options: { prefer: 'smooth' | 'compatible'; maxSize?: number }): void {
+  openScreen(streamId: string, mac: string, udid: string, port: MessagePortMain, options: { prefer: 'smooth' | 'compatible'; maxSize?: number; projectPath?: string }): void {
     void this.readyPromise.then(() => this.post({ kind: 'screen-open', streamId, mac, udid, ...options }, [port]));
   }
 

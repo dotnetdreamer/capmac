@@ -918,6 +918,12 @@
 .chip--capmac::before {
   background: var(--src-capmac);
 }
+.chip--main::before {
+  background: var(--src-main);
+}
+.chip--electron::before {
+  background: var(--src-electron);
+}
 .chip--menu::before {
   display: none;
 }
@@ -1008,6 +1014,12 @@
 }
 .cl-src--capmac {
   color: var(--src-capmac);
+}
+.cl-src--main {
+  color: var(--src-main);
+}
+.cl-src--electron {
+  color: var(--src-electron);
 }
 .cl-level {
   flex: none;
@@ -1372,4 +1384,110 @@
 }
 .sim__route {
   color: var(--accent-text);
+}
+
+/* ─── An Electron app's window, as the Mac draws it ─────────────────────── */
+.appwin__window {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #000;
+  &.has-frame {
+    box-shadow:
+      var(--shadow-device),
+      0 0 0 0.5px rgb(0 0 0 / 0.28);
+  }
+}
+.appwin__titlebar {
+  --tb-bg: #e9e9eb;
+  --tb-text: rgb(0 0 0 / 0.78);
+  --tb-line: rgb(0 0 0 / 0.1);
+  flex: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  background: var(--tb-bg);
+  border-bottom: 0.5px solid var(--tb-line);
+  user-select: none;
+  .appwin__window.is-dark & {
+    --tb-bg: #2b2b2d;
+    --tb-text: rgb(255 255 255 / 0.82);
+    --tb-line: rgb(0 0 0 / 0.5);
+  }
+}
+.appwin__title {
+  position: absolute;
+  left: 76px;
+  right: 76px;
+  text-align: center;
+  font: 600 12.5px/1 var(--font-text);
+  color: var(--tb-text);
+}
+.appwin__lights {
+  display: inline-flex;
+  gap: 8px;
+  &.appwin__lights--overlay {
+    position: absolute;
+    top: 9px;
+    left: 10px;
+    z-index: 1;
+  }
+}
+.appwin__light {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: 50%;
+  border: 0.5px solid rgb(0 0 0 / 0.18);
+  display: grid;
+  place-items: center;
+  font: 700 9px/1 system-ui;
+  color: transparent;
+  cursor: default;
+  &.appwin__light--close {
+    background: #ff5f57;
+  }
+  &.appwin__light--min {
+    background: #febc2e;
+  }
+  &.appwin__light--zoom {
+    background: #28c840;
+  }
+  &::after {
+    content: "";
+  }
+  .appwin__lights:hover &,
+  &:focus-visible {
+    color: rgb(0 0 0 / 0.55);
+  }
+  &.appwin__light--close::after {
+    content: "×";
+  }
+  &.appwin__light--min::after {
+    content: "−";
+  }
+  &.appwin__light--zoom::after {
+    content: "+";
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+}
+.appwin__screen {
+  position: relative;
+  overflow: hidden;
+  background: #000;
+}
+.appwin__host.can-input {
+  cursor: default;
+}
+.appwin__picker {
+  max-width: 220px;
+  gap: var(--s-1);
+}
+.appwin__note {
+  font: var(--type-caption);
+  margin-right: var(--s-2);
 }

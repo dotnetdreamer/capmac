@@ -10,6 +10,7 @@ This document covers:
 4. The engine API.
 5. Simulator streaming v2: the plan, the spike and the recommendation.
 6. Remote access: reaching the Mac over the internet.
+7. Electron apps on the Mac: running, showing and live-reloading them without taking over the Mac.
 
 ---
 
@@ -927,3 +928,64 @@ WebRTC with our own server won: everything stays TypeScript, and the user's own 
 - The test between two real networks (a phone's hotspot) once the server is deployed, and coturn if some network needs TURN over UDP.
 - If a big sync holds up the stream over the internet (SSH sends everything in order), give the screen its own SSH connection over a second data channel: SCTP streams don't block each other.
 - Tailscale: list a tailnet's Macs when pairing.
+
+---
+
+## 7. Electron apps on the Mac
+
+**Goal:** an Electron app (plain Electron, electron-vite, Electron Forge, or Capacitor's Electron platform) builds, runs, live-reloads and shows on the paired Mac exactly like an iOS app on a simulator, from the CLI and CapMac Studio, without disturbing whoever is using the Mac.
+
+**Status:** shipped in the CLI (`capmac run`, `dev`, `screen --electron`, `screenshot --electron`, `targets --electron`) and Studio (the *Mac desktop (Electron)* target, the window pane, the Electron sample). Verified on the real Mac (macOS 26.6, Electron 44) with the two samples and an electron-vite app.
+
+### How it works
+
+- **The target** is the Mac's desktop (`mac-desktop`). An Electron project always runs there; a Capacitor project does with `--electron`, `--target mac`, or when Electron is its only platform.
+- **Prepare** (`electron-prepare`): the agent installs the app's dependencies on the Mac, fetches Electron's macOS build when Windows installed only its own, copies the web app into Capacitor's platform, and builds (`npm run build`, never a packaging script).
+- **CapMac's module in the app** (`src/electron-hook/hook.ts`). The agent launches the app, or its dev command, with `NODE_OPTIONS=--require <module>`. The module turns itself on only in Electron's main process, and only when the agent asked for it.
+  - **Output:** it marks the main process's lines, and reports windows and every page's console as marked lines on stdout. The CLI and Studio tell main, page, Chromium and dev-tool output apart.
+  - **The windows:** a Unix socket in `~/.capmac/run` serves frames from the app's own compositor (`beginFrameSubscription`, JPEG), input (`sendInputEvent`), screenshots (`capturePage`) and reloads. None of this needs Screen Recording or Accessibility permission, which SSH sessions can't get anyway.
+  - **Input:** Ctrl on the PC is ⌘. Menu shortcuts run the menu item, the way macOS does, matched by the letter the PC's layout types. Text arrives as characters in order. Copying in the app sends the text to the PC's clipboard.
+- **Capacitor live reload:** Vite runs on the PC behind an SSH reverse tunnel. The module sends the app's `capacitor-electron://` loads to the dev server, drops the page's Content-Security-Policy for that origin only, and lets the dev server's own reloads through the template's navigation guard.
+
+### Live reload, by flavor
+
+| Flavor | Live reload | A main-process change |
+|---|---|---|
+| Plain Electron | CapMac syncs and reloads the window | restart, when the main process loaded the file (CapMac asks the app) |
+| electron-vite | `electron-vite dev --watch` on the Mac | rebuilt and restarted by electron-vite |
+| Electron Forge | `electron-forge start` on the Mac | `rs`, typed into Forge |
+| Capacitor Electron | the dev server on the PC, HMR through the tunnel | the platform is rebuilt and restarted |
+
+`capmac.json`'s `electron` section (`dir`, `build`, `start`, `dev`) overrides any of it.
+
+### The Mac's focus
+
+Someone may be working on the Mac, so the app must not take their keyboard or cover their work. Without CapMac, a new `BrowserWindow` activates the app (`activateIgnoringOtherApps`), and so do `show()`, `focus()`, `webContents.focus()` and `app.focus()`. While the app is not the active app, the module changes that:
+
+- **Windows open behind every other window**, without activating the app (`showInactive()` and `blur()`). `show()` does the same, and a window still streams and takes input from there.
+- **Focus requests only give the page focus** (`focusOnWebView()`): it gets a caret and focus events, but not the Mac's keyboard. CapMac's view follows the window the app brought forward, and `isFocused()` and `getFocusedWindow()` report it.
+- **DevTools and full screen wait** until someone switches to the app; the CLI and Studio say so once. Links open in the Mac's browser without bringing it forward.
+- **It installs before the app opens anything:** it watches Node.js's loader for the app's first `require('electron')`, and redirects an ES module app's `import … from 'electron'` with `module.registerHooks`. Either way the app gets window classes that open windows the guarded way.
+- **Someone at the Mac comes first.** Once the app is active (a click on it or its Dock icon), or just after a click on its menu bar icon or a global shortcut, the app behaves as usual. A sheet stays on its window as always.
+- **Restarts:** the module remembers whether the app was in front (`<socket>.front`). A live-reload restart comes back in front only if someone was using the app; a new launch never does.
+
+Elsewhere: `--show-simulator` opens Simulator in the background (`open -g`). When the engine needs an answer (a password, say), Studio waits for the user instead of jumping to the front: its taskbar button flashes and a notification says so.
+
+### Results
+
+Measured on 2026-10-15 on the paired M1 (macOS 26.6.1), over home Wi-Fi. Someone was working on the Mac during the plain and Capacitor runs, and its front app (`lsappinfo front`, sampled every 100 ms) never changed; the Mac was locked by the electron-vite run:
+
+| | Time |
+|---|---|
+| `capmac run` of the plain sample, up to date | running in 1.6 s |
+| Plain Electron: a page edit → the new code runs | 0.4 s |
+| Plain Electron: a main-process edit → the new main runs | 0.9 s |
+| Capacitor Electron: a web edit → HMR in the app | 0.18 s |
+| electron-vite: a renderer edit / a main-process edit | 0.6 s / 0.56 s |
+
+Input through the stream (clicks, typing, paste, ⌘A, a menu shortcut, the wheel) works on a window behind other apps and without focus. Unit tests drive the guard with a fake Electron for the parts that would need someone to switch apps on the Mac.
+
+### Next
+
+- Native dialogs (`dialog.showMessageBox`, file pickers) are not in the window's frames: show them in the CLI and Studio, and answer them from there.
+- Open links the app opens on the PC instead of the Mac.

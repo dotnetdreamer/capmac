@@ -62,6 +62,7 @@ export function chooseTarget(all: TargetsResult, query: TargetQuery): Target {
 }
 
 export function describeTarget(t: Target): string {
+  if (t.kind === 'mac') return `${t.name} (${t.os})`;
   const where = t.kind === 'simulator' ? 'Simulator' : t.connection === 'network' ? 'Wi-Fi' : 'USB';
   return `${t.name} (${t.os}, ${where})`;
 }

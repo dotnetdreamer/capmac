@@ -3,8 +3,9 @@ import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ScreenStream, type AppLogEntry, type MacLink } from '@capmac/core/engine';
-import type { InputEvent, Target } from '@capmac/core/shared/protocol';
+import { AppScreenStream, ScreenStream, takeAppScreenshot, type AppLogEntry, type MacLink } from '@capmac/core/engine';
+import type { AppWindowInfo } from '@capmac/core/shared/electron';
+import type { InputEvent, ScreenInfo, Target } from '@capmac/core/shared/protocol';
 import { log, pc } from '../ui.js';
 
 const BOUNDARY = 'capmacframe';
@@ -36,35 +37,70 @@ interface StreamClient {
   busy: boolean;
 }
 
+/** What the viewer shows: a simulator, or an Electron app's windows on the Mac's desktop. */
+export type ViewerSource = { kind: 'simulator'; target: Target } | { kind: 'app'; projectId: string; label: string };
+
+/** What both streams offer the viewer. */
+interface Stream {
+  info: ScreenInfo | null;
+  start(): Promise<void>;
+  stop(): void;
+  dispose(): void;
+  input(event: InputEvent): void;
+}
+
 /**
- * Remote simulator screen, like Xamarin's "Remoted iOS Simulator": a local
- * web page that shows the Mac's simulator and forwards taps, swipes and text.
+ * Remote screen, like Xamarin's "Remoted iOS Simulator": a local web page
+ * that shows the Mac's simulator (taps, swipes and text) or an Electron app's
+ * window (pointer, wheel and keyboard).
  */
 export class ScreenViewer {
   private readonly clients = new Set<StreamClient>();
   private readonly logClients = new Set<http.ServerResponse>();
+  private readonly eventClients = new Set<http.ServerResponse>();
   private readonly logBacklog: AppLogEntry[] = [];
-  private readonly stream: ScreenStream;
+  private readonly stream: Stream;
+  private readonly app: AppScreenStream | null = null;
   private latest: Buffer | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private readonly page = loadPage();
+  private cursor = 'pointer';
   url = '';
 
-  private constructor(link: MacLink, private readonly target: Target, private readonly title: string, private readonly server: http.Server) {
-    this.stream = new ScreenStream(link, target.udid, { fps: 12, quality: 70 }, {
-      onFrame: (jpeg) => this.broadcast(jpeg),
-      onLog: (_level, message) => log.dim(`  screen: ${message}`),
-      onEnd: (error) => {
-        if (error) log.warn(`Screen stream stopped: ${error.message}`);
-        for (const client of this.clients) client.res.end();
-        this.clients.clear();
-      },
-    });
+  private constructor(private readonly link: MacLink, private readonly source: ViewerSource, private readonly title: string, private readonly server: http.Server) {
+    const onEnd = (error?: { message: string }) => {
+      if (error) log.warn(`Screen stream stopped: ${error.message}`);
+      for (const client of this.clients) client.res.end();
+      this.clients.clear();
+    };
+    if (source.kind === 'app') {
+      this.app = new AppScreenStream(link, source.projectId, { fps: 20, quality: 72 }, {
+        onFrame: (jpeg) => this.broadcast(jpeg),
+        onWindows: (windows, watched) => this.event({ type: 'windows', windows, watched }),
+        onCursor: (cursor) => {
+          this.cursor = cursor;
+          this.event({ type: 'cursor', cursor });
+        },
+        onClipboard: (text) => this.event({ type: 'clipboard', text }),
+        onWaiting: (waiting) => this.event({ type: 'waiting', waiting }),
+        onInfo: (info) => this.event({ type: 'info', screen: info }),
+        onEnd,
+      });
+      this.stream = this.app;
+    } else {
+      this.stream = new ScreenStream(link, source.target.udid, { fps: 12, quality: 70 }, {
+        onFrame: (jpeg) => this.broadcast(jpeg),
+        onLog: (_level, message) => log.dim(`  screen: ${message}`),
+        onEnd,
+      });
+    }
   }
 
-  static async start(link: MacLink, target: Target, options: { title: string; port?: number }): Promise<ScreenViewer> {
+  static async start(link: MacLink, source: ViewerSource | Target, options: { title: string; port?: number }): Promise<ScreenViewer> {
     const server = http.createServer();
-    const viewer = new ScreenViewer(link, target, options.title, server);
+    // A Target (a simulator) is the usual case; the app's windows come as a ViewerSource.
+    const what: ViewerSource = 'target' in source || source.kind === 'app' ? (source as ViewerSource) : { kind: 'simulator', target: source };
+    const viewer = new ScreenViewer(link, what, options.title, server);
     server.on('request', (req, res) => void viewer.handle(req, res));
     const port = await new Promise<number>((resolve, reject) => {
       const tryPort = (p: number, attemptsLeft: number) => {
@@ -92,6 +128,12 @@ export class ScreenViewer {
     if (this.logBacklog.length > 500) this.logBacklog.shift();
     const payload = `data: ${JSON.stringify(line)}\n\n`;
     for (const res of this.logClients) res.write(payload);
+  }
+
+  /** Window, cursor and clipboard news for the page (app windows). */
+  private event(value: { type: string } & Record<string, unknown>): void {
+    const payload = `data: ${JSON.stringify(value)}\n\n`;
+    for (const res of this.eventClients) res.write(payload);
   }
 
   private async ensureStream(): Promise<void> {
@@ -128,19 +170,38 @@ export class ScreenViewer {
     let size = 0;
     for await (const chunk of req) {
       size += (chunk as Buffer).length;
-      if (size > 64 * 1024) throw new Error('Request too large');
+      if (size > 512 * 1024) throw new Error('Request too large');
       chunks.push(chunk as Buffer);
     }
     return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
   }
 
+  private infoBody(): object {
+    const target = this.source.kind === 'app' ? this.source.label : `${this.source.target.name} (${this.source.target.os})`;
+    const app = this.app;
+    return {
+      title: this.title,
+      target,
+      mode: this.source.kind,
+      screen: this.stream.info,
+      ...(app ? { windows: app.windows as AppWindowInfo[], watched: app.watched, waiting: app.waiting, cursor: this.cursor } : {}),
+    };
+  }
+
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
     const url = new URL(req.url ?? '/', 'http://localhost');
-    // Only pages served by this viewer may drive the simulator.
+    // Only pages served by this viewer may drive the simulator or the app.
     const host = req.headers.host ?? '';
     if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) {
       res.writeHead(403).end();
       return;
+    }
+    if (req.method === 'POST') {
+      const origin = req.headers.origin;
+      if (origin && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) {
+        res.writeHead(403).end();
+        return;
+      }
     }
     try {
       if (req.method === 'GET' && url.pathname === '/') {
@@ -165,7 +226,7 @@ export class ScreenViewer {
         return;
       }
       if (req.method === 'GET' && url.pathname === '/api/info') {
-        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ title: this.title, target: `${this.target.name} (${this.target.os})`, screen: this.stream.info }));
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(this.infoBody()));
         return;
       }
       if (req.method === 'GET' && url.pathname === '/api/frame.jpg') {
@@ -176,6 +237,11 @@ export class ScreenViewer {
         res.writeHead(200, { 'content-type': 'image/jpeg', 'content-length': this.latest.length }).end(this.latest);
         return;
       }
+      if (req.method === 'GET' && url.pathname === '/api/screenshot.png' && this.source.kind === 'app') {
+        const shot = await takeAppScreenshot(await this.link.session(), this.source.projectId, this.app?.watched ?? undefined);
+        res.writeHead(200, { 'content-type': 'image/png', 'content-length': shot.png.length }).end(shot.png);
+        return;
+      }
       if (req.method === 'GET' && url.pathname === '/api/logs') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
         for (const entry of this.logBacklog) res.write(`data: ${JSON.stringify({ kind: entry.kind, level: entry.level, text: entry.text })}\n\n`);
@@ -183,15 +249,29 @@ export class ScreenViewer {
         req.on('close', () => this.logClients.delete(res));
         return;
       }
+      if (req.method === 'GET' && url.pathname === '/api/events') {
+        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
+        res.write(`data: ${JSON.stringify({ type: 'hello', ...this.infoBody() })}\n\n`);
+        this.eventClients.add(res);
+        req.on('close', () => this.eventClients.delete(res));
+        return;
+      }
       if (req.method === 'POST' && url.pathname === '/api/input') {
-        const origin = req.headers.origin;
-        if (origin && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(origin)) {
-          res.writeHead(403).end();
-          return;
-        }
         const event = (await this.readJson(req)) as InputEvent;
         await this.ensureStream();
         this.stream.input(event);
+        res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}');
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/window' && this.app) {
+        const body = await this.readJson(req);
+        this.app.selectWindow(typeof body.window === 'number' ? body.window : null);
+        res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}');
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/window-action' && this.app) {
+        const body = await this.readJson(req);
+        if (typeof body.window === 'number' && ['close', 'minimize', 'zoom'].includes(body.action)) this.app.windowAction(body.window, body.action);
         res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}');
         return;
       }
@@ -206,6 +286,7 @@ export class ScreenViewer {
     this.stream.dispose();
     for (const client of this.clients) client.res.end();
     for (const res of this.logClients) res.end();
+    for (const res of this.eventClients) res.end();
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
   }
 }

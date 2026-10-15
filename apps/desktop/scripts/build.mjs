@@ -5,6 +5,7 @@
 //   cli/                     a standalone capmac CLI for takeover (`npx cap run ios` in a terminal)
 //   remote/<arch>/           node-datachannel, WebRTC for remote access (native, so outside app.asar)
 //   sample/                  the "Run the sample app" project, with prebuilt web assets
+//   sample-electron/         the Electron sample ("Try the Electron sample")
 import { spawnSync } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -46,5 +47,9 @@ await fs.cp(sampleSrc, out('sample'), {
   recursive: true,
   filter: (src) => !SKIP.has(path.basename(src)) && !/[\\/]App[\\/]App[\\/](public|capacitor\.config\.json|config\.xml)$/.test(src),
 });
+
+// The Electron sample: plain Electron, nothing to build (the Mac installs Electron for itself).
+const electronSampleSrc = path.join(repoDir, 'examples', 'hello-electron');
+await fs.cp(electronSampleSrc, out('sample-electron'), { recursive: true, filter: (src) => !['node_modules', '.git', 'out', 'dist', '.capmac'].includes(path.basename(src)) });
 
 console.log(`CapMac Studio ${pkg.version}: built out/ in ${((Date.now() - started) / 1000).toFixed(1)} s`);

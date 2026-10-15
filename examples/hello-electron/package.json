@@ -1,0 +1,17 @@
+{
+  "name": "hello-electron",
+  "productName": "Hello Electron",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Smallest useful Electron app for trying CapMac: a window, the main process, IPC, a menu and console logs.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^44.7.2"
+  },
+  "build": {
+    "appId": "dev.capmac.hello.electron"
+  }
+}

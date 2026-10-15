@@ -77,6 +77,8 @@
   --src-bridge: var(--text-3);
   --src-web: oklch(0.52 0.1 190);
   --src-capmac: oklch(0.52 0.12 250);
+  --src-main: oklch(0.55 0.13 60);
+  --src-electron: var(--text-2);
 
   /* Focus (Fluent focus rectangle) */
   --focus-outer: rgb(0 0 0 / 0.9);
@@ -211,6 +213,7 @@
     --src-cap: oklch(0.78 0.12 300);
     --src-web: oklch(0.8 0.1 190);
     --src-capmac: oklch(0.78 0.1 250);
+    --src-main: oklch(0.8 0.11 70);
 
     --focus-outer: #ffffff;
     --focus-inner: rgb(0 0 0 / 0.7);

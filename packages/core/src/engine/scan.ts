@@ -13,10 +13,13 @@ export interface ScanOptions {
   root: string;
   /** POSIX path from root to the Capacitor project ('' if same). */
   projectRel: string;
+  /** Capacitor's web assets folder ('' for an Electron app, which has none). */
   webDir: string;
   iosDir: string;
   /** Upload built web assets (false in live-reload mode). */
   includeWebDir: boolean;
+  /** Leave out an electron/ folder (default true: only Capacitor's Electron platform uses it, and CapMac syncs it for Electron apps). */
+  excludeElectron?: boolean;
   include?: string[];
   exclude?: string[];
   cacheFile?: string;
@@ -46,6 +49,7 @@ const GLOBAL_EXCLUDES = [
   '.cache/', '.parcel-cache/', '.eslintcache', 'coverage/', '.nyc_output/',
 ];
 const PROJECT_EXCLUDES = ['android/', 'electron/'];
+const PROJECT_EXCLUDES_WITH_ELECTRON = ['android/'];
 const IOS_EXCLUDES = [
   'App/build/', 'App/Pods/', 'App/output/', 'App/App/public/', 'App/App/capacitor.config.json', 'App/App/config.xml',
   'DerivedData/', 'build/', '.build/', '.swiftpm/', 'capacitor-cordova-ios-plugins/', 'xcuserdata/', '*.xcuserstate',
@@ -111,11 +115,14 @@ export async function scanProject(options: ScanOptions): Promise<ScanResult> {
   const started = Date.now();
   const root = path.resolve(options.root);
   const projectRel = options.projectRel.replace(/^\/+|\/+$/g, '');
-  const webRel = join(projectRel, options.webDir.replace(/^\.\/+|\/+$/g, ''));
+  const webDir = options.webDir.replace(/^\.\/+|\/+$/g, '');
+  // No web folder (an Electron app): nothing is uploaded for being web assets.
+  const webRel = webDir ? join(projectRel, webDir) : null;
+  const withWeb = options.includeWebDir && webRel !== null;
   const iosRel = join(projectRel, options.iosDir.replace(/^\.\/+|\/+$/g, ''));
 
   const globalIgnore = ignore().add(GLOBAL_EXCLUDES);
-  const projectIgnore = ignore().add(PROJECT_EXCLUDES);
+  const projectIgnore = ignore().add(options.excludeElectron === false ? PROJECT_EXCLUDES_WITH_ELECTRON : PROJECT_EXCLUDES);
   const iosIgnore = ignore().add(IOS_EXCLUDES);
   const userExclude = ignore().add(options.exclude ?? []);
   const userInclude = ignore().add(options.include ?? []);
@@ -128,10 +135,10 @@ export async function scanProject(options: ScanOptions): Promise<ScanResult> {
 
   type Level = { base: string; ig: Ignore };
 
-  const isWebPath = (rel: string) => options.includeWebDir && under(rel, webRel);
+  const isWebPath = (rel: string) => withWeb && under(rel, webRel!);
   const isAncestorOf = (rel: string, target: string) => target === rel || target.startsWith(`${rel}/`);
   // Folders on the way to the web assets / iOS project are walked even if gitignored.
-  const isWebAncestor = (rel: string) => (options.includeWebDir && isAncestorOf(rel, webRel)) || isAncestorOf(rel, iosRel);
+  const isWebAncestor = (rel: string) => (withWeb && isAncestorOf(rel, webRel!)) || isAncestorOf(rel, iosRel);
 
   /** Returns true when `rel` (a file, or a dir when isDir) should be skipped. */
   const excluded = (rel: string, isDir: boolean, levels: Level[]): boolean => {

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -173,6 +173,7 @@ export class AgentCall<T> {
 
 export class AgentClient {
   private installed = false;
+  private installing: Promise<void> | null = null;
 
   constructor(private readonly conn: MacConnection, private readonly nodePath: string, private readonly home: string) {}
 
@@ -180,15 +181,24 @@ export class AgentClient {
     return `${this.home}/.capmac/agent/${agentBundle().hash}/agent.mjs`;
   }
 
-  /** Uploads the agent if this exact version is not on the Mac yet. */
-  async ensureInstalled(): Promise<void> {
-    if (this.installed) return;
+  /** Uploads the agent if this exact version is not on the Mac yet (once, however many calls start together). */
+  ensureInstalled(): Promise<void> {
+    if (this.installed) return Promise.resolve();
+    this.installing ??= this.install().finally(() => {
+      this.installing = null;
+    });
+    return this.installing;
+  }
+
+  private async install(): Promise<void> {
     const bundle = agentBundle();
     const dir = `${this.home}/.capmac/agent/${bundle.hash}`;
     // Touching the folder marks this version as in use (see the cleanup below).
     const check = await this.conn.runScript(`[ -f ${shQuote(`${dir}/agent.mjs`)} ] && touch ${shQuote(dir)} && echo present || echo missing\n`, { timeoutMs: 30_000 });
     if (!check.stdout.includes('present')) {
-      const command = `/bin/sh -c ${shQuote(`mkdir -p ${shQuote(dir)} && cat > ${shQuote(`${dir}/agent.mjs.part`)} && mv -f ${shQuote(`${dir}/agent.mjs.part`)} ${shQuote(`${dir}/agent.mjs`)}`)}`;
+      // A temporary name of its own: the CLI and CapMac Studio may upload the same version at once.
+      const part = `${dir}/agent.mjs.${randomBytes(4).toString('hex')}.part`;
+      const command = `/bin/sh -c ${shQuote(`mkdir -p ${shQuote(dir)} && cat > ${shQuote(part)} && mv -f ${shQuote(part)} ${shQuote(`${dir}/agent.mjs`)}`)}`;
       const upload = await this.conn.pipeTo(command, bundle.code);
       if (upload.code !== 0) throw new Error(`Could not install the CapMac agent on the Mac: ${upload.stderr.trim()}`);
       // Old agent versions are tiny but would pile up across upgrades. Versions used

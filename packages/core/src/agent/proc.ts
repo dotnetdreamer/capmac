@@ -22,6 +22,14 @@ export interface RunOptions {
   tailLines?: number;
   /** Keep the child's stdin open instead of closing it right away (for `script`-wrapped tools). */
   keepStdinOpen?: boolean;
+  /** Called with the child once it started (to write to its stdin later). */
+  onSpawn?: (child: ChildProcess) => void;
+  /**
+   * Stopping asks the child alone to quit (SIGTERM), so it can shut down what
+   * it started itself (an app's helper processes); the whole group is killed
+   * only if it is still there after a few seconds.
+   */
+  quitChildFirst?: boolean;
 }
 
 export interface RunResult {
@@ -88,6 +96,7 @@ export function run(command: string, args: string[], options: RunOptions = {}): 
       return;
     }
     live.add(child);
+    options.onSpawn?.(child);
     const capture = options.capture ?? true;
     const tailMax = options.tailLines ?? 60;
     const tail: string[] = [];
@@ -123,6 +132,24 @@ export function run(command: string, args: string[], options: RunOptions = {}): 
 
     let killTimer: NodeJS.Timeout | undefined;
     const terminate = () => {
+      if (options.quitChildFirst && child.pid && process.platform !== 'win32') {
+        try {
+          child.kill('SIGTERM');
+        } catch {
+          // gone already
+        }
+        // Whatever is left of the group (the child may be gone, its helpers not): until 'close' clears this.
+        const group = child.pid;
+        killTimer = setTimeout(() => {
+          try {
+            process.kill(-group, 'SIGKILL');
+          } catch {
+            // nothing left
+          }
+        }, 5000);
+        killTimer.unref();
+        return;
+      }
       killTree(child, 'SIGTERM');
       killTimer = setTimeout(() => killTree(child, 'SIGKILL'), 4000);
       killTimer.unref();

@@ -1,7 +1,7 @@
 /**
  * The capmac skill: what an AI coding agent (Claude Code, Codex, Copilot, …)
- * needs to know to build, run and check a Capacitor app's iOS side with the
- * capmac CLI. Agent Skills format (agentskills.io): SKILL.md stays short; the
+ * needs to know to build, run and check a Capacitor app's iOS side, or an
+ * Electron app on the Mac, with the capmac CLI. Agent Skills format (agentskills.io): SKILL.md stays short; the
  * full command list is in references/, read only when needed.
  */
 
@@ -11,8 +11,8 @@ export const SKILL_NAME = 'capmac';
 export const SKILL_MARKER = 'capmac-skill-version:';
 
 const DESCRIPTION =
-  'Build, run and check the iOS side of a Capacitor or Ionic app from Windows, on a Mac paired with the CapMac CLI. ' +
-  'Use when asked to run or test an app on an iOS simulator or iPhone, read its console logs, take a screenshot of it, ' +
+  'Build, run and check the iOS side of a Capacitor or Ionic app, or an Electron app, from Windows, on a Mac paired with the CapMac CLI. ' +
+  'Use when asked to run or test an app on an iOS simulator or iPhone, or an Electron app on a Mac, read its console logs, take a screenshot of it, ' +
   'fix Xcode or Swift build errors, export an .ipa, or when `npx cap run ios` or `ionic capacitor run ios` comes up on Windows.';
 
 function skillMd(version: string): string {
@@ -22,9 +22,9 @@ description: ${DESCRIPTION}
 ---
 <!-- ${SKILL_MARKER} ${version} -->
 
-# CapMac: iOS for Capacitor apps, from Windows
+# CapMac: iOS for Capacitor apps, and Electron apps on a Mac, from Windows
 
-CapMac drives a Mac over SSH. It syncs the project, builds it with Xcode on the Mac, runs the app on a simulator or iPhone, and brings build errors, console logs and screenshots back to this PC. Run every command from the app's folder (the one with \`capacitor.config.*\`). Edit files on this PC only: the Mac's copy is overwritten on every sync.
+CapMac drives a Mac over SSH. It syncs the project, builds it with Xcode on the Mac, runs the app on a simulator or iPhone, and brings build errors, console logs and screenshots back to this PC. It runs Electron apps on the Mac's desktop the same way (see below). Run every command from the app's folder (the one with \`capacitor.config.*\`, or an Electron app's \`package.json\`). Edit files on this PC only: the Mac's copy is overwritten on every sync.
 
 ## First, check the setup
 
@@ -53,6 +53,10 @@ A typical check after changing code: \`capmac run --for 15\`, read the console f
 
 \`capmac run\` (without \`--no-logs\` or \`--for\`), \`capmac dev\` (live reload), \`capmac logs\` and \`capmac screen\` run until they are stopped. Start them only as a background process that you can read and stop. Otherwise use the commands above.
 
+## Electron apps
+
+In an Electron app's folder (plain Electron, electron-vite or Electron Forge), the same commands run the app on the Mac's desktop: \`capmac run --for 20\` or \`capmac run --no-logs\`, then \`capmac screenshot --electron\` for a PNG of its window. In a Capacitor project, add \`--electron\` to use its Electron platform instead of iOS. Console lines start with \`main\` (the main process) or \`js\` (the pages). The app opens behind the windows of whoever is using the Mac and never takes their keyboard, so running it does not disturb them.
+
 ## Reading the output
 
 - Exit code 0 means success. A failure prints \`✖ what went wrong\`, then \`→ how to fix it\`. Follow that hint.
@@ -78,11 +82,13 @@ Every command and option is listed in [references/commands.md](references/comman
 
 const COMMANDS_MD = `# capmac commands
 
-Every command accepts \`--mac <name>\` (which paired Mac) and \`--verbose\`; the ones that talk to the Mac also take \`--route auto|lan|internet\` (how to reach it this time). Options can also be set per project in \`capmac.json\`, next to \`capacitor.config.*\`:
+Every command accepts \`--mac <name>\` (which paired Mac) and \`--verbose\`; the ones that talk to the Mac also take \`--route auto|lan|internet\` (how to reach it this time). Options can also be set per project in \`capmac.json\`, next to \`capacitor.config.*\` (or an Electron app's \`package.json\`):
 
 \`\`\`json
 { "host": "studio", "ios": { "target": "iPhone 17 Pro", "team": "ABCDE12345", "scheme": "App" }, "web": { "build": "npm run build", "dev": "npm run dev" } }
 \`\`\`
+
+An Electron app's commands go in \`"electron": { "build": "npm run build", "start": "npm start", "dev": "npm run dev" }\`, with \`"dir"\` for a Capacitor project's Electron platform folder (\`electron\` by default).
 
 ## Running
 
@@ -100,7 +106,8 @@ Options shared by \`run\`, \`dev\` and \`build\`:
 
 | Option | Meaning |
 |---|---|
-| \`-t, --target <name\\|udid>\` | Simulator or device (see \`capmac targets\`). |
+| \`-t, --target <name\\|udid>\` | Simulator or device (see \`capmac targets\`); \`mac\` for the Electron app. |
+| \`-e, --electron\` | The Electron app, on the Mac's desktop (needed only in a Capacitor project that has iOS too). |
 | \`-d, --device\` | A connected iPhone/iPad instead of a simulator. |
 | \`-c, --configuration <name>\` / \`--release\` | Xcode configuration (Debug by default). |
 | \`--scheme <name>\` | Xcode scheme (App by default). |
@@ -118,9 +125,10 @@ Options shared by \`run\`, \`dev\` and \`build\`:
 | Command | What it does |
 |---|---|
 | \`capmac screenshot [file] [-t <simulator>]\` | Saves a PNG of a running simulator and prints its path (a temp file unless you give one). |
+| \`capmac screenshot --electron [file]\` | The same for the running Electron app's window. |
 | \`capmac logs [-t <simulator>]\` | Streams the app's system log. Runs until stopped. |
-| \`capmac screen\` | The simulator in a browser, with touch input (for people, not agents). |
-| \`capmac targets [--json]\` | Simulators and devices on the Mac, with their state. |
+| \`capmac screen [--electron]\` | The simulator, or the Electron app's window, in a browser, with input (for people, not agents). |
+| \`capmac targets [--json] [--electron]\` | Simulators and devices on the Mac, with their state; \`--electron\` adds the Mac's desktop. |
 
 ## The Mac and the project
 

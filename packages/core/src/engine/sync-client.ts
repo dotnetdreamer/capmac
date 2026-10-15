@@ -6,7 +6,7 @@ import { log, startStep, type EngineContext } from './context.js';
 import { isCancelled } from './errors.js';
 import { formatBytes, plural } from './format.js';
 import type { ProjectInfo } from './project.js';
-import { scanProject } from './scan.js';
+import { scanProject, type ScanOptions } from './scan.js';
 import type { MacSession } from './session.js';
 
 export interface SyncOptions {
@@ -25,19 +25,26 @@ export function scanCacheFile(project: ProjectInfo): string {
   return path.join(capmacDir(), 'cache', `${project.projectId}.json`);
 }
 
+/** What a sync of `project` uploads (the same for iOS and Electron runs, so switching never re-uploads). */
+export function scanOptionsFor(project: ProjectInfo, includeWebDir: boolean): ScanOptions {
+  return {
+    root: project.syncRoot,
+    projectRel: project.projectRel,
+    webDir: project.webDir,
+    iosDir: project.iosDir,
+    includeWebDir: includeWebDir && Boolean(project.webDir),
+    // An electron/ folder is Capacitor's Electron platform (synced when present), or part of an Electron app.
+    excludeElectron: project.kind === 'capacitor' && !project.electron,
+    include: project.config.sync?.include,
+    exclude: project.config.sync?.exclude,
+    cacheFile: scanCacheFile(project),
+  };
+}
+
 export async function syncToMac(session: MacSession, project: ProjectInfo, options: SyncOptions, ctx: EngineContext): Promise<SyncSummary> {
   const s = startStep(ctx, `Syncing ${project.appName} to ${session.label}`, 'sync');
   try {
-    const scan = await scanProject({
-      root: project.syncRoot,
-      projectRel: project.projectRel,
-      webDir: project.webDir,
-      iosDir: project.iosDir,
-      includeWebDir: options.includeWebDir,
-      include: project.config.sync?.include,
-      exclude: project.config.sync?.exclude,
-      cacheFile: scanCacheFile(project),
-    });
+    const scan = await scanProject(scanOptionsFor(project, options.includeWebDir));
     s.update(`${plural(scan.files.length, 'file')} scanned`);
     const call = await session.agent.start<SyncResult>('sync', { projectId: project.projectId, projectRel: project.projectRel }, { signal: options.signal });
     call.send({ t: 'manifest', entries: scan.files.map((f) => ({ p: f.rel, h: f.hash, s: f.size, m: f.mode })) });

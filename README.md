@@ -6,12 +6,13 @@ Build and run Capacitor iOS apps from Windows with a paired Mac
 
 Your editor, web build and dev server stay on Windows, while the Mac builds with Xcode and runs the app on a simulator or iPhone
 CapMac brings back build errors, console logs and the simulator screen, and works with Ionic projects too
+Electron apps run on the Mac's desktop the same way, including Capacitor's Electron platform
 
 https://github.com/user-attachments/assets/d55fac9f-92fc-4e6e-953a-574a824a5ecb
 
 </div>
 
-[Quick start](#quick-start) | [CapMac Studio](#capmac-studio) | [Commands](#commands) | [AI coding agents](#ai-coding-agents) | [Development](#developing-capmac)
+[Quick start](#quick-start) | [CapMac Studio](#capmac-studio) | [Commands](#commands) | [Electron apps](#electron-apps) | [AI coding agents](#ai-coding-agents) | [Development](#developing-capmac)
 
 ## Quick start
 
@@ -139,6 +140,38 @@ capmac run --device --team "<TEAM_ID>" --api-key C:/keys/AuthKey_ABC123XYZ9.p8 -
 You can also set `ios.apiKey` in `capmac.json`, or use `CAPMAC_ASC_KEY_PATH`, `CAPMAC_ASC_KEY_ID` and `CAPMAC_ASC_ISSUER_ID`
 The same key works for IPA exports and uploads
 
+## Electron apps
+
+CapMac runs plain Electron, electron-vite and Electron Forge apps, and Capacitor's Electron platform (`@capacitor-community/electron`), on the Mac's desktop
+
+```powershell
+cd my-electron-app
+capmac run
+capmac dev
+capmac screen --electron
+```
+
+`capmac run` syncs the app, installs its dependencies and Electron for the Mac, builds it and launches it, with the main process and page consoles in your terminal
+`capmac dev` reloads the window when you save a page and restarts the app when main-process code changes
+electron-vite and Forge projects reload through their own dev command
+In a Capacitor project, add `--electron` or `--target mac` to run the Electron platform, which loads your dev server in live reload
+
+`capmac screen --electron` shows the app's window in your browser, where you can click, scroll, type and use the app's menu shortcuts with Ctrl as ⌘
+`capmac screenshot --electron` saves a PNG of the window
+The Mac needs no Screen Recording or Accessibility permission for this
+
+Someone may be using the Mac while you work, so the app opens behind their windows and never takes their keyboard
+DevTools and full screen wait until someone switches to the app on the Mac
+After a restart, the app comes back to the front only if someone was using it there
+
+In Studio, Electron apps run on **Mac desktop (Electron)** in the target picker and show in a window pane with the Mac's title bar
+**Try a sample** on the home screen creates a small Electron app to start with
+Change how the app is found, built or started in `capmac.json`
+
+```json
+{ "electron": { "dir": "electron", "build": "npm run build", "start": "npm start", "dev": "npm run dev" } }
+```
+
 ## Configuration
 
 Optional `capmac.json` beside `capacitor.config.*`
@@ -203,6 +236,7 @@ Studio has the same setup under **Settings › Terminal commands › AI coding a
 | Signing requires a development team | Pass `--team <TEAM_ID>` or set `ios.team` |
 | Familiar Capacitor commands are still local | Check `capmac takeover` and open a new terminal or restart VS Code |
 | Remote Mac is offline | Check that it is awake, logged in and has remote access enabled |
+| No Electron window or page console | The app must start from source; a packaged app or a launcher that drops `NODE_OPTIONS` keeps CapMac out |
 
 ## Developing CapMac
 
@@ -223,7 +257,8 @@ npm run desktop:build
 | `packages/cli` | CLI commands and browser simulator viewer |
 | `apps/desktop` | CapMac Studio |
 | `services/signal` | Signaling and relay server for remote access |
-| `examples/hello-capacitor` | Minimal Vite and Capacitor app |
+| `examples/hello-capacitor` | Minimal Vite and Capacitor app, with Capacitor's Electron platform |
+| `examples/hello-electron` | Minimal Electron app |
 
 See the [desktop design](docs/desktop-design.md) for architecture and simulator streaming details
 

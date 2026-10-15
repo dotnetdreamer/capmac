@@ -7,11 +7,22 @@ import type { Diagnostic, Envelope, ErrorInfo, HostEvent, Target } from '../../s
 import { t } from '../../shared/i18n';
 import { projectKey } from './projects';
 
-export type TimelinePhase = 'web' | 'sync' | 'deps' | 'cap' | 'build' | 'boot' | 'install' | 'launch' | 'archive' | 'export' | 'download';
+export type TimelinePhase = 'web' | 'sync' | 'deps' | 'electron' | 'cap' | 'build' | 'boot' | 'install' | 'launch' | 'archive' | 'export' | 'download';
 
 export const RUN_PHASES: TimelinePhase[] = ['web', 'sync', 'deps', 'cap', 'build', 'boot', 'install', 'launch'];
 export const IPA_PHASES: TimelinePhase[] = ['web', 'sync', 'deps', 'cap', 'archive', 'export', 'download'];
+/** An Electron app on the Mac's desktop; Capacitor's adds its web build and `cap copy`. */
+export const ELECTRON_PHASES: TimelinePhase[] = ['sync', 'deps', 'electron', 'build', 'launch'];
+export const CAP_ELECTRON_PHASES: TimelinePhase[] = ['web', 'sync', 'deps', 'electron', 'cap', 'build', 'launch'];
 export const PHASE_LABELS: Record<TimelinePhase, string> = t.phases;
+
+/** A step's name: some read differently for an Electron app ("Build", not "Xcode build"). */
+export function phaseLabel(phase: TimelinePhase, onMac: boolean): string {
+  return (onMac ? (t.phasesMac as Partial<Record<TimelinePhase, string>>)[phase] : undefined) ?? PHASE_LABELS[phase];
+}
+
+/** The target id of the Mac's desktop (where Electron apps run); see core's MAC_TARGET_ID. */
+export const MAC_TARGET_ID = 'mac-desktop';
 
 export interface PhaseState {
   status: 'pending' | 'running' | 'done' | 'skipped' | 'failed' | 'cancelled';
@@ -60,6 +71,8 @@ export interface RunState {
   notes: Note[];
   app: { state: 'launching' | 'running' | 'exited' | 'stopped'; name?: string; target?: string; exitCode?: number | null; at: number } | null;
   target: Target | null;
+  /** The app runs on the Mac's desktop (an Electron app). */
+  onMac: boolean;
   mac: string | null;
   live: LiveState | null;
   buildLogPath: string | null;
@@ -84,6 +97,7 @@ export function emptyRun(path: string): RunState {
     notes: [],
     app: null,
     target: null,
+    onMac: false,
     mac: null,
     live: null,
     buildLogPath: null,
@@ -95,7 +109,7 @@ export function emptyRun(path: string): RunState {
 export const isActive = (run: RunState | undefined) => Boolean(run && run.sessionId && !['stopped', 'done'].includes(run.status));
 export const isBusy = (run: RunState | undefined) => Boolean(run && (run.status === 'starting' || run.status === 'building' || run.status === 'stopping'));
 
-const TIMELINE = new Set<string>([...RUN_PHASES, ...IPA_PHASES]);
+const TIMELINE = new Set<string>([...RUN_PHASES, ...IPA_PHASES, ...CAP_ELECTRON_PHASES]);
 let noteId = 1;
 
 interface RunsState {
@@ -138,7 +152,7 @@ function reduce(run: RunState, event: HostEvent, sessionId: string | undefined, 
   const now = Date.now();
   switch (event.type) {
     case 'session-started': {
-      const next = newRun({ ...run, sessionId: sessionId ?? null, mac: event.mac, app: null }, event.mode === 'build' ? 'run' : event.mode);
+      const next = newRun({ ...run, sessionId: sessionId ?? null, mac: event.mac, app: null, onMac: event.target === MAC_TARGET_ID }, event.mode === 'build' ? 'run' : event.mode);
       next.status = 'starting';
       next.live = event.mode === 'live'
         ? { devServerUrl: null, external: false, command: null, tunnel: 'pending', liveUrl: null, localUrl: null, hmr: 'waiting', hmrUpdatedAt: null, lastNativeChange: null }
@@ -216,7 +230,7 @@ function reduce(run: RunState, event: HostEvent, sessionId: string | undefined, 
         endedAt: event.state === 'running' ? now : run.endedAt,
       };
     case 'target': {
-      const next = { ...run, target: event.target };
+      const next = { ...run, target: event.target, onMac: event.target.kind === 'mac' };
       if (event.target.kind === 'device' && !next.phases.boot) next.phases = { ...next.phases, boot: { status: 'skipped', detail: 'not needed on a device' } };
       return next;
     }

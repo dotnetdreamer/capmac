@@ -4,7 +4,7 @@ import { emitWorkspace } from '../../app/commands';
 import { macStatusText } from '../../app/Sidebar';
 import { forgetProject, openInXcode, rebuild, setProjectPrefs, startSession, stopSession } from '../../state/actions';
 import { useApp } from '../../state/app';
-import { isActive, isBusy, PHASE_LABELS, type RunState } from '../../state/runs';
+import { isActive, isBusy, phaseLabel, type RunState, type TimelinePhase } from '../../state/runs';
 import { AppIcon } from '../../ui/AppIcon';
 import { Button, IconButton } from '../../ui/Button';
 import { StatusDot, type Tone } from '../../ui/Feedback';
@@ -50,12 +50,12 @@ function MacPicker({ macs, mac, path }: { macs: MacSummary[]; mac: MacSummary | 
 function currentPhase(run: RunState | undefined): string | null {
   if (!run) return null;
   for (const [phase, state] of Object.entries(run.phases)) {
-    if (state?.status === 'running') return t.phaseNow[phase as keyof typeof t.phases] ?? PHASE_LABELS[phase as keyof typeof PHASE_LABELS];
+    if (state?.status === 'running') return t.phaseNow[phase as keyof typeof t.phaseNow] ?? phaseLabel(phase as TimelinePhase, run.onMac);
   }
   return run.status === 'starting' ? t.phaseNow.starting : null;
 }
 
-export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, autoTarget, targetsLoading }: {
+export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, autoTarget, targetsLoading, macDesktop = null, onlyMac = false }: {
   path: string;
   summary: ProjectSummary | null;
   icon: string | null;
@@ -66,6 +66,10 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
   target: Target | null;
   autoTarget: boolean;
   targetsLoading: boolean;
+  /** The Mac's desktop as a target (the project has an Electron app). */
+  macDesktop?: Target | null;
+  /** The project's only target is the Mac's desktop. */
+  onlyMac?: boolean;
 }) {
   const more = usePopover();
   const active = isActive(run);
@@ -74,8 +78,10 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
   const running = active && run?.mode === 'run';
   const phase = busy ? currentPhase(run) : null;
   const name = summary?.appName ?? path.split(/[\\/]/).pop() ?? path;
-  const canRun = Boolean(summary?.hasIos && mac);
-  const runHint = !mac ? t.toolbar.pairFirst : summary && !summary.hasIos ? t.toolbar.addIosFirst : undefined;
+  const canRun = Boolean((summary?.hasIos || summary?.electron) && mac);
+  const runHint = !mac ? t.toolbar.pairFirst : summary && !summary.hasIos && !summary.electron ? t.toolbar.addIosFirst : undefined;
+  // IPA builds and Xcode are for the iOS app.
+  const canIos = Boolean(summary?.hasIos && mac);
 
   return (
     <div className="ws-toolbar" role="toolbar" aria-label={t.toolbar.label}>
@@ -89,7 +95,7 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
       <div className="ws-toolbar__pickers">
         <MacPicker macs={macs} mac={mac} path={path} />
         <Icon name="chevronRight" size={12} className="ws-toolbar__arrow" />
-        <TargetPicker targets={targets} selected={target} auto={autoTarget} loading={targetsLoading} onSelect={(picked) => setProjectPrefs(path, { target: picked?.udid ?? undefined })} />
+        <TargetPicker targets={targets} selected={target} auto={autoTarget} loading={targetsLoading} mac={macDesktop} onlyMac={onlyMac} onSelect={(picked) => setProjectPrefs(path, { target: picked?.udid ?? undefined })} />
       </div>
       <div className="ws-toolbar__spacer" />
       <div className="ws-toolbar__session" aria-live="polite">
@@ -114,8 +120,12 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
       </div>
       <div className="ws-toolbar__divider" role="separator" />
       <div className="ws-toolbar__actions">
-        <IconButton icon="box" label={t.toolbar.buildIpa} disabled={!canRun} onClick={() => emitWorkspace('build-ipa')} />
-        <IconButton icon="code" label={t.toolbar.openXcode} disabled={!canRun} onClick={() => void openInXcode(path)} />
+        {!onlyMac && (
+          <>
+            <IconButton icon="box" label={canIos || !mac ? t.toolbar.buildIpa : `${t.toolbar.buildIpa} (${t.toolbar.iosOnly.toLowerCase()})`} disabled={!canIos} onClick={() => emitWorkspace('build-ipa')} />
+            <IconButton icon="code" label={canIos || !mac ? t.toolbar.openXcode : `${t.toolbar.openXcode} (${t.toolbar.iosOnly.toLowerCase()})`} disabled={!canIos} onClick={() => void openInXcode(path)} />
+          </>
+        )}
         <button type="button" className="icon-btn" aria-label={t.common.moreActions} aria-haspopup="menu" {...more.triggerProps}>
           <Icon name="more" size={16} />
         </button>

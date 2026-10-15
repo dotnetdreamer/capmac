@@ -41,6 +41,16 @@ export interface ProjectState {
   lastTarget?: string;
   /** What capmac added to the Mac's copy of Info.plist for live reload (ATS exception). */
   atsPatch?: 'dict' | 'key' | null;
+  /** Electron: changed paths not yet handled by `electron-prepare` (iOS's `prepare` keeps its own list). */
+  electronPending: string[];
+  /** Electron: too many changes to track: treat as a full refresh. */
+  electronPendingFull: boolean;
+  /** Electron: the dependencies' hash per folder (POSIX from the synced root, '' for the root) at the last install. */
+  electronDeps: Record<string, string>;
+  /** Electron: the app was built after the last change to its sources. */
+  electronBuilt: boolean;
+  /** Electron (Capacitor): the web assets were copied into the app after the last change to them. */
+  electronCopied: boolean;
 }
 
 export interface ProjectPaths {
@@ -84,6 +94,11 @@ export function emptyState(): ProjectState {
     nativeGen: 1,
     webGen: 1,
     builds: {},
+    electronPending: [],
+    electronPendingFull: true,
+    electronDeps: {},
+    electronBuilt: false,
+    electronCopied: false,
   };
 }
 
@@ -101,6 +116,10 @@ export async function saveState(paths: ProjectPaths, state: ProjectState): Promi
   if (state.pendingChanges.length > MAX_PENDING) {
     state.pendingChanges = [];
     state.pendingFull = true;
+  }
+  if (state.electronPending.length > MAX_PENDING) {
+    state.electronPending = [];
+    state.electronPendingFull = true;
   }
   await fs.mkdir(paths.base, { recursive: true });
   const tmp = `${paths.stateFile}.${process.pid}.tmp`;

@@ -3,10 +3,12 @@ import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { hasInstalledDependencies, loadProject, type ProjectInfo } from './project.js';
 import { scanProject } from './scan.js';
-import { scanCacheFile } from './sync-client.js';
+import { scanOptionsFor } from './sync-client.js';
 
 export interface ProjectSummary {
-  /** Folder with capacitor.config.* */
+  /** A Capacitor app, or an Electron app on its own. */
+  kind: ProjectInfo['kind'];
+  /** Folder with capacitor.config.* (or the Electron app's package.json). */
   path: string;
   appName: string;
   appId: string;
@@ -15,7 +17,7 @@ export interface ProjectSummary {
   hasIos: boolean;
   webDir: string;
   packageManager: ProjectInfo['packageManager'];
-  /** Largest app icon PNG in AppIcon.appiconset, if any. */
+  /** Largest app icon PNG in AppIcon.appiconset (or the Electron app's icon), if any. */
   iconPath: string | null;
   /** The Mac this project is pinned to in capmac.json. */
   host: string | null;
@@ -23,6 +25,14 @@ export interface ProjectSummary {
   hasNodeModules: boolean;
   /** The dev server command or URL live reload would use, if any. */
   devCommand: string | null;
+  /** The Electron app (the project itself, or Capacitor's Electron platform), which runs on the Mac's desktop. */
+  electron: {
+    flavor: NonNullable<ProjectInfo['electron']>['flavor'];
+    /** POSIX path from the project to the app ('' when it is the project). */
+    rel: string;
+    name: string;
+    electronRange: string | null;
+  } | null;
 }
 
 export async function findAppIcon(project: Pick<ProjectInfo, 'capDir' | 'iosDir'>): Promise<string | null> {
@@ -52,8 +62,13 @@ export async function findAppIcon(project: Pick<ProjectInfo, 'capDir' | 'iosDir'
 
 export async function inspectProject(dir: string): Promise<ProjectSummary> {
   const project = await loadProject(dir);
-  const devCommand = project.config.web?.devUrl ?? project.config.web?.dev ?? (project.scripts.dev ? 'dev' : project.scripts.start ? 'start' : project.scripts.serve ? 'serve' : null);
+  const electron = project.electron;
+  // An Electron app's dev command runs on the Mac: nothing to install on this PC for it.
+  const devCommand = project.kind === 'electron'
+    ? null
+    : project.config.web?.devUrl ?? project.config.web?.dev ?? (project.scripts.dev ? 'dev' : project.scripts.start ? 'start' : project.scripts.serve ? 'serve' : null);
   return {
+    kind: project.kind,
     path: project.capDir,
     appName: project.appName,
     appId: project.appId,
@@ -62,24 +77,16 @@ export async function inspectProject(dir: string): Promise<ProjectSummary> {
     hasIos: project.hasIos,
     webDir: project.webDir,
     packageManager: project.packageManager,
-    iconPath: await findAppIcon(project),
+    iconPath: (project.hasIos ? await findAppIcon(project) : null) ?? electron?.icon ?? null,
     host: project.config.host ?? null,
     hasNodeModules: hasInstalledDependencies(project),
     devCommand,
+    electron: electron ? { flavor: electron.flavor, rel: electron.rel, name: electron.name, electronRange: electron.electronRange } : null,
   };
 }
 
 /** How much `capmac run` would sync: file count and bytes (uses the hash cache, so it is fast after the first run). */
 export async function syncSize(project: ProjectInfo, includeWebDir = true): Promise<{ files: number; bytes: number }> {
-  const scan = await scanProject({
-    root: project.syncRoot,
-    projectRel: project.projectRel,
-    webDir: project.webDir,
-    iosDir: project.iosDir,
-    includeWebDir,
-    include: project.config.sync?.include,
-    exclude: project.config.sync?.exclude,
-    cacheFile: scanCacheFile(project),
-  });
+  const scan = await scanProject(scanOptionsFor(project, includeWebDir));
   return { files: scan.files.length, bytes: scan.files.reduce((sum, f) => sum + f.size, 0) };
 }
