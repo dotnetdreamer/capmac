@@ -1,18 +1,24 @@
 /**
- * An Electron app's windows, live, from the Mac (agent op `electron-screen`):
- * JPEG frames straight from the app's compositor, through CapMac's module in
- * the app, and mouse, wheel and keyboard input back. It waits while the app
- * is not running and follows it across restarts and reconnects. Used by
- * CapMac Studio's window pane and the CLI's browser viewer.
+ * An Electron app's windows, live, from the Mac (agent op `electron-screen`),
+ * through CapMac's module in the app: the smooth stream (H.264 the app
+ * encodes, in the simulator stream's format, with the same pacing and
+ * adaptive bitrate) or the compatible one (JPEG frames from the app's
+ * compositor), and mouse, wheel and keyboard input back. The app falls back
+ * to JPEG by itself when it cannot send video, and says why. It waits while
+ * the app is not running and follows it across restarts and reconnects. Used
+ * by CapMac Studio's window pane and the CLI's browser viewer.
  */
-import type { AppDialog, AppDialogAnswer, AppDialogClosed, AppWindowInfo, MacFolder, SoundMode } from '../shared/electron.js';
-import type { InputEvent, ScreenInfo } from '../shared/protocol.js';
+import type { AppCodec, AppDialog, AppDialogAnswer, AppDialogClosed, AppWindowInfo, MacFolder, SoundMode } from '../shared/electron.js';
+import type { InputEvent, ScreenInfo, StreamFallback } from '../shared/protocol.js';
+import { parseStreamHeader, STREAM_FRAME } from '../shared/stream.js';
 import type { AgentCall } from './agent-client.js';
 import { toErrorInfo, type ErrorInfo } from './errors.js';
 import type { MacLink } from './link.js';
-import { ClockSync, nowUs } from './screen.js';
+import { bitratesFor, ClockSync, nowUs, type StreamPreference, type VideoPacket } from './screen.js';
 
 export interface AppScreenOptions {
+  /** 'smooth' asks for video, 'compatible' for JPEG frames (default 'compatible'). */
+  prefer?: StreamPreference;
   fps?: number;
   /** JPEG quality 30-95. */
   quality?: number;
@@ -25,7 +31,14 @@ export interface AppScreenOptions {
 }
 
 export interface AppScreenHandlers {
+  /** A JPEG frame (compatible stream). */
   onFrame(jpeg: Buffer): void;
+  /** A config or frame message (smooth stream). */
+  onVideo?(packet: VideoPacket): void;
+  /** Which stream is on, and why it is the compatible one when the smooth one was wanted. */
+  onCodec?(codec: AppCodec, fallback: StreamFallback | null): void;
+  /** Smooth stream, every few seconds: the frames sent, those dropped to catch up, and the bitrate adaptive bitrate chose. */
+  onStatus?(status: { fps: number; dropped: number; bitrate?: number }): void;
   /** The window showing: its size in points and the display's scale. */
   onInfo?(info: ScreenInfo): void;
   onWindows?(windows: AppWindowInfo[], watched: number | null): void;
@@ -53,7 +66,15 @@ export class AppScreenStream {
   waiting = true;
   dialogs: AppDialog[] = [];
   sound: { mode: SoundMode; toPc: boolean } | null = null;
+  /** The stream showing (null before the app said), and why it is the compatible one when the smooth one was wanted. */
+  codec: AppCodec | null = null;
+  fallback: StreamFallback | null = null;
   private call: AgentCall<unknown> | null = null;
+  /** Video: the newest frame here, and the newest acknowledged to the agent. */
+  private lastSeq = 0;
+  private ackedSeq = 0;
+  private ackTimer: NodeJS.Timeout | null = null;
+  private keyRequestedAt = 0;
   private audio: boolean;
   private nextReq = 1;
   private readonly replies = new Map<number, { resolve: (data: unknown) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }>();
@@ -84,6 +105,11 @@ export class AppScreenStream {
     return this.call !== null;
   }
 
+  /** The stream showing now (null before the app said). */
+  get currentCodec(): AppCodec | null {
+    return this.codec;
+  }
+
   async start(): Promise<void> {
     this.active = true;
     await this.ensure();
@@ -95,6 +121,9 @@ export class AppScreenStream {
     this.starting = (async () => {
       const session = await this.link.session();
       if (!this.active || this.call) return;
+      this.lastSeq = 0;
+      this.ackedSeq = 0;
+      const smooth = this.options.prefer === 'smooth';
       const call: AgentCall<unknown> = await session.agent.start('electron-screen', {
         projectId: this.projectId,
         maxSize: this.maxSize,
@@ -102,6 +131,8 @@ export class AppScreenStream {
         quality: this.options.quality ?? 72,
         window: this.window,
         audio: this.audio,
+        // The smooth stream starts at the rate the way to the Mac allows (as a simulator's does).
+        ...(smooth ? { codec: 'h264', ...bitratesFor(session.route) } : {}),
       }, {
         onEvent: (event) => {
           if (this.call !== call) return;
@@ -109,6 +140,14 @@ export class AppScreenStream {
             case 'screen':
               this.info = event;
               this.handlers.onInfo?.(event);
+              break;
+            case 'app-codec':
+              this.codec = event.codec;
+              this.fallback = event.fallback;
+              this.handlers.onCodec?.(event.codec, event.fallback);
+              break;
+            case 'stream-status':
+              this.handlers.onStatus?.({ fps: event.fps, dropped: event.dropped, bitrate: event.bitrate });
               break;
             case 'app-windows':
               this.windows = event.windows;
@@ -150,8 +189,20 @@ export class AppScreenStream {
               break;
           }
         },
-        onBinary: (jpeg) => {
-          if (this.call === call) this.handlers.onFrame(jpeg);
+        onBinary: (data) => {
+          if (this.call !== call) return;
+          // A JPEG starts with FF D8; a video message with its type (shared/stream.ts).
+          if (data[0] === 0xff) {
+            this.handlers.onFrame(data);
+            return;
+          }
+          const header = parseStreamHeader(data);
+          if (!header) return;
+          if (header.type === STREAM_FRAME) {
+            this.lastSeq = header.seq;
+            if (header.key) this.keyRequestedAt = 0;
+          }
+          this.handlers.onVideo?.({ data, header });
         },
       });
       if (!this.active) {
@@ -183,11 +234,20 @@ export class AppScreenStream {
     };
     ping();
     this.pingTimer = setInterval(ping, 2000);
+    // Video frames that made it here: the agent keeps no more than a few hundred ms in flight.
+    this.ackTimer = setInterval(() => {
+      if (this.lastSeq > this.ackedSeq) {
+        this.ackedSeq = this.lastSeq;
+        call.send({ t: 'ack', seq: this.lastSeq });
+      }
+    }, 40);
   }
 
   private stopPings(): void {
     if (this.pingTimer) clearInterval(this.pingTimer);
+    if (this.ackTimer) clearInterval(this.ackTimer);
     this.pingTimer = null;
+    this.ackTimer = null;
   }
 
   private onPong(id: number, macUs: number): void {
@@ -271,6 +331,23 @@ export class AppScreenStream {
   /** Sends input to the window showing. */
   input(event: InputEvent): void {
     void this.ensure().then(() => this.call?.send({ t: 'input', event }), () => undefined);
+  }
+
+  /** Smooth stream: asks for a keyframe (a decoder reset, frames dropped). */
+  requestKeyframe(): void {
+    if (this.codec !== 'h264' || !this.call) return;
+    // One request at a time: several parts of the pipeline may ask for the same keyframe.
+    const now = Date.now();
+    if (now - this.keyRequestedAt < 500) return;
+    this.keyRequestedAt = now;
+    this.call.send({ t: 'keyframe' });
+  }
+
+  /** After a fallback: tries the smooth stream again. */
+  retrySmooth(): void {
+    if (this.options.prefer !== 'smooth' || !this.fallback) return;
+    this.fallback = null;
+    this.call?.send({ t: 'retry-smooth' });
   }
 
   /** The frames' longest side in pixels (follow the pane's size). */

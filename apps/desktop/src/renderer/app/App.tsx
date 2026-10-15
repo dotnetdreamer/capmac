@@ -2,12 +2,13 @@ import { lazy, Suspense, useEffect } from 'react';
 import type { AppCommand } from '../../shared/contract';
 import { t } from '../../shared/i18n';
 import { useApp, usePrompts } from '../state/app';
-import { openProject, startSession, stopAll } from '../state/actions';
+import { addProject, startSession, stopAll } from '../state/actions';
 import { setConsoleLimit } from '../state/console';
 import { handleBatch } from '../state/dispatch';
 import { call } from '../state/engine';
 import { resolveMac, useMacs } from '../state/macs';
 import { startUpdates } from '../state/updates';
+import { AppChooserHost } from './AppChooser';
 import { CommandPalette } from './CommandPalette';
 import { DropOverlay } from './DropOverlay';
 import { EngineBanner } from './EngineBanner';
@@ -35,7 +36,8 @@ function onCommand(command: AppCommand) {
   const app = useApp.getState();
   switch (command.type) {
     case 'open-project':
-      void openProject(command.path);
+      // A folder from the command line may hold several apps, or be new: like adding it.
+      void addProject(command.path);
       break;
     case 'start': {
       const path = command.projectPath ?? app.settings?.lastProject;
@@ -127,6 +129,7 @@ export function App() {
           <Onboarding />
         </Suspense>
         <PromptHost />
+        <AppChooserHost />
         <Toaster />
       </div>
     );
@@ -151,6 +154,7 @@ export function App() {
       </div>
       <CommandPalette />
       <PromptHost />
+      <AppChooserHost />
       <Toaster />
       <DropOverlay />
     </div>

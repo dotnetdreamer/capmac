@@ -6,6 +6,7 @@
 export * from './agent-client.js';
 export * from './agent-skills.js';
 export * from './app-screen.js';
+export * from './apps.js';
 export * from './capmac-command.js';
 export * from './config.js';
 export * from './context.js';

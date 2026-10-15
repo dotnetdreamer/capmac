@@ -154,7 +154,7 @@ export const en = {
 
   drop: {
     title: 'Drop to add your app',
-    text: 'The folder with your capacitor.config file or Electron app, or any folder inside it',
+    text: 'Your app’s folder, any folder inside it, or a folder with several apps',
   },
 
   engine: {
@@ -334,7 +334,11 @@ export const en = {
   /** Toasts and errors from actions anywhere in the app. */
   actions: {
     notCapacitor: 'That folder isn’t a Capacitor or Electron app',
-    notCapacitorBody: 'There’s no capacitor.config file, or package.json that uses Electron, in it or the folders above it',
+    notCapacitorBody: 'There’s no capacitor.config file, or package.json that uses Electron, in it, above it or in the folders inside it',
+    cantRunYet: (found: string[]) =>
+      found.length === 1
+        ? `It’s ${/^[aeiox]/i.test(found[0]!) ? 'an' : 'a'} ${found[0]} app. CapMac runs Capacitor, Ionic and Electron apps for now`
+        : `CapMac found ${found.slice(0, -1).join(', ')} and ${found.at(-1)} apps here. It runs Capacitor, Ionic and Electron apps for now`,
     pairFirst: 'Pair a Mac first',
     pairFirstBody: 'CapMac Studio needs a Mac to build and run your app',
     reloadFailed: 'Couldn’t reload the app',
@@ -571,6 +575,65 @@ export const en = {
     },
   },
 
+  /** A folder with more than one app (an iOS app and an Electron app, or a monorepo): which one CapMac works on. */
+  apps: {
+    title: (project: string, n: number) => `${project} has ${n === 2 ? 'two' : n} apps`,
+    titleFound: (n: number) => `CapMac found ${n === 2 ? 'two' : n} apps in this folder`,
+    subtitle: 'Which one do you want to work on? You can switch any time in the toolbar',
+    subtitleFound: 'Pick the one to add. You can add the others the same way later',
+    list: 'Apps in this folder',
+    open: (app: string) => `Open ${app}`,
+    kind: { ios: 'iOS app', electron: 'Electron app', macos: 'Mac app' } as Record<string, string>,
+    where: {
+      ios: 'Runs in the iPhone and iPad simulators and on your iPhone',
+      electron: 'Runs on the Mac’s desktop',
+    } as Record<string, string>,
+    whereShort: { ios: 'iPhone and iPad', electron: 'Mac desktop' } as Record<string, string>,
+    flavor: {
+      SPM: 'Swift packages',
+      CocoaPods: 'CocoaPods',
+      capacitor: 'Capacitor’s Electron platform',
+      'electron-vite': 'electron-vite',
+      forge: 'Electron Forge',
+      plain: 'Electron',
+    } as Record<string, string>,
+    framework: {
+      capacitor: 'Capacitor',
+      electron: 'Electron',
+      flutter: 'Flutter',
+      'react-native': 'React Native',
+      expo: 'Expo',
+      tauri: 'Tauri',
+      maui: '.NET MAUI',
+      cordova: 'Cordova',
+      nativescript: 'NativeScript',
+      xcode: 'Xcode',
+    } as Record<string, string>,
+    version: (framework: string, version: string) => `${framework} ${version}`,
+    foundFrom: (files: string[]) => `CapMac knows it from ${files.join(' and ')}`,
+    setup: 'Needs setup',
+    lastUsed: 'Last used',
+    added: 'In your projects',
+    thisFolder: 'This folder',
+    notYet: 'CapMac can’t run these yet',
+    notYetHint: 'It runs Capacitor, Ionic and Electron apps today',
+    notYetApp: (framework: string, platforms: string) => `${framework} app${platforms ? ` for ${platforms}` : ''}`,
+    platforms: { ios: 'iPhone and iPad', mac: 'Mac', both: 'iPhone, iPad and Mac' },
+    more: 'There may be more apps deeper in this folder. Pick a folder closer to the one you want to see them',
+    // The toolbar's app picker
+    label: (detail: string) => `App: ${detail}`,
+    choose: 'Choose the app to work on',
+    lookAgain: 'Look for apps again',
+    switchTitle: (app: string) => `Switch to the ${app}?`,
+    switchBody: (running: string) => `The ${running} is running. CapMac stops it first`,
+    switch: 'Switch',
+    switchTo: (app: string) => `Switch to the ${app}`,
+    switchFailed: 'Couldn’t switch apps',
+    // Home
+    count: (n: number) => `${n} apps`,
+    current: (app: string) => `Run and Live use the ${app}`,
+  },
+
   problems: {
     label: 'Problems',
     copied: (what: string) => `Copied ${what}`,
@@ -748,7 +811,9 @@ export const en = {
     typePlaceholder: 'Text to type in the app',
     copied: 'Copied from the app',
     shotName: (stamp: string) => `App ${stamp}.png`,
-    framesTip: (fps: number, kbps: string) => `${fps} fps, ${kbps}, straight from the app`,
+    streamSmooth: 'Smooth stream (video)',
+    streamCompatible: 'Compatible stream (pictures)',
+    clickResponse: (ms: number) => `Click response ${ms} ms`,
     still: 'Nothing is sent while the window is still',
     sound: 'Sound',
     soundOff: 'Sound off',
@@ -844,8 +909,8 @@ export const en = {
     themes: { system: 'System', light: 'Light', dark: 'Dark' },
     frame: 'Device frame',
     frameDesc: 'Show a phone outline around the simulator',
-    stream: 'Simulator stream',
-    streamDesc: 'Smooth sends video at up to 60 frames a second. Compatible sends a few pictures a second, and CapMac switches to it when Smooth can’t run',
+    stream: 'Screen stream',
+    streamDesc: 'For simulators and app windows, here and in the capmac command. Smooth sends video and uses far less data. Compatible sends pictures, and CapMac switches to it when Smooth can’t run',
     streams: { smooth: 'Smooth', compatible: 'Compatible' },
     editorSection: 'Editor',
     editor: 'Open errors in',

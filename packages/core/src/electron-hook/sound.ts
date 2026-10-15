@@ -3,24 +3,19 @@
  * on the Mac, or on the PC.
  *
  * Off and PC mute the app's pages on the Mac (webContents.setAudioMuted; the
- * app's own muting still counts). For the PC, a hidden page of CapMac's own
- * captures each window's sound the way Chromium captures a tab (no macOS
- * permission involved: getMediaSourceId, then getUserMedia with the "tab"
- * source; muting the page leaves the capture alone), mixes the windows,
- * encodes Opus with WebCodecs and hands the packets over by IPC. The page is
- * a WebContentsView in a session of its own, so it is not one of the app's
- * windows and none of the app's handlers see it.
+ * app's own muting still counts). For the PC, CapMac's capture page
+ * (capture.ts) captures each window's sound the way Chromium captures a tab
+ * (muting the page leaves the capture alone), mixes the windows, encodes Opus
+ * with WebCodecs and hands the packets over by IPC.
  */
-import { randomBytes } from 'node:crypto';
-import http from 'node:http';
 import { APP_AUDIO, type SoundMode } from '../shared/electron.js';
+import { CapturePage } from './capture.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- Electron is loaded at run time from the app's own copy. */
 
-/** The capture page: tab sound in, Opus packets out (`capmac-audio`, a batch of packets). */
-function capturePage(): string {
-  return `<!doctype html><meta charset="utf-8"><title>CapMac sound</title><script>
-const { ipcRenderer } = require('electron');
+/** The capture page's sound part: tab sound in, Opus packets out (`capmac-audio`, a batch of packets). */
+export function soundPageScript(): string {
+  return `{
 const config = ${JSON.stringify(APP_AUDIO)};
 let ctx = null, dest = null, encoder = null, reader = null, batch = [], flushTimer = null;
 const sources = new Map();
@@ -45,43 +40,62 @@ async function start() {
     error: (e) => ipcRenderer.send('capmac-audio-error', String(e && e.message || e)),
   });
   encoder.configure({ codec: config.codec, sampleRate: config.sampleRate, numberOfChannels: config.numberOfChannels, bitrate: 96000 });
-  reader = new MediaStreamTrackProcessor({ track: dest.stream.getAudioTracks()[0] }).readable.getReader();
+  const own = reader = new MediaStreamTrackProcessor({ track: dest.stream.getAudioTracks()[0] }).readable.getReader();
   (async () => {
     for (;;) {
-      const { value, done } = await reader.read();
+      const { value, done } = await own.read();
       if (done) break;
       if (encoder && encoder.state === 'configured') encoder.encode(value);
       value.close();
     }
   })().catch(() => undefined);
 }
+function remove(key) {
+  const source = sources.get(key);
+  if (!source) return;
+  source.node.disconnect();
+  for (const track of source.stream.getTracks()) track.stop();
+  sources.delete(key);
+}
+/** Nothing to capture any more (the page may stay open for the video). */
+function stopAll() {
+  for (const key of [...sources.keys()]) remove(key);
+  if (reader) reader.cancel().catch(() => undefined);
+  if (encoder && encoder.state !== 'closed') encoder.close();
+  if (ctx) ctx.close().catch(() => undefined);
+  if (flushTimer) clearTimeout(flushTimer);
+  ctx = dest = encoder = reader = flushTimer = null;
+  batch = [];
+}
 ipcRenderer.on('capmac-sound', async (_e, command) => {
   try {
     if (command.t === 'add') {
       await start();
       // The source id may be taken before the page is ready for it: a fresh one if this hangs.
-      const stream = await Promise.race([
-        navigator.mediaDevices.getUserMedia({ audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: command.source } }, video: false }),
-        new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 2500)),
-      ]);
-      if (sources.has(command.key)) for (const track of sources.get(command.key).stream.getTracks()) track.stop();
+      const asked = navigator.mediaDevices.getUserMedia({ audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId: command.source } }, video: false });
+      const stream = await Promise.race([asked, new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 2500))]).catch((e) => {
+        asked.then((late) => { for (const track of late.getTracks()) track.stop(); }, () => undefined);
+        throw e;
+      });
+      if (!ctx) {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
+      remove(command.key);
       const node = ctx.createMediaStreamSource(stream);
       node.connect(dest);
       sources.set(command.key, { stream, node });
       ipcRenderer.send('capmac-audio-added', command.key);
     } else if (command.t === 'remove') {
-      const source = sources.get(command.key);
-      if (source) {
-        source.node.disconnect();
-        for (const track of source.stream.getTracks()) track.stop();
-        sources.delete(command.key);
-      }
+      remove(command.key);
+    } else if (command.t === 'stop') {
+      stopAll();
     }
   } catch (e) {
     ipcRenderer.send('capmac-audio-retry', command.key, String(e && e.message || e));
   }
 });
-</script>`;
+}`;
 }
 
 export interface SoundHost {
@@ -103,19 +117,41 @@ let current: SoundControl | null = null;
 export class SoundControl {
   mode: SoundMode;
   private listeners = 0;
-  private view: any = null;
-  private server: http.Server | null = null;
   private readonly capturing = new Map<number, any>();
   private readonly retries = new Map<number, number>();
+  /** Holding the capture page (see capture.ts). */
+  private holding = false;
+  private readonly page: CapturePage;
 
-  constructor(private readonly electron: any, initial: SoundMode, private readonly host: SoundHost) {
+  /** `page`: the capture page, shared with the video (one of its own when there is none). */
+  constructor(electron: any, initial: SoundMode, private readonly host: SoundHost, page?: CapturePage) {
     this.mode = initial;
     current = this;
+    this.page = page ?? new CapturePage(electron, [soundPageScript()]);
+    this.page.on('capmac-audio', (_e: unknown, packets: Uint8Array[]) => {
+      if (this.mode === 'pc' && Array.isArray(packets)) this.host.onPackets(packets.map((p) => Buffer.from(p.buffer, p.byteOffset, p.byteLength)));
+    });
+    this.page.on('capmac-audio-retry', (_e: unknown, key: number) => {
+      // A hung or refused capture: a fresh source, a few times.
+      const tries = (this.retries.get(key) ?? 0) + 1;
+      this.retries.set(key, tries);
+      const wc = this.capturing.get(key);
+      if (!wc || tries > 4) return;
+      setTimeout(() => {
+        try {
+          const contents = this.page.contents;
+          if (contents && this.capturing.get(key) === wc && !wc.isDestroyed()) this.page.send('capmac-sound', { t: 'add', key, source: wc.getMediaSourceId(contents) });
+        } catch {
+          // gone
+        }
+      }, 300);
+    });
+    this.page.on('capmac-audio-added', (_e: unknown, key: number) => this.retries.delete(key));
   }
 
   /** The PC can get the sound: this Electron has what the capture needs (Electron 30 and later). */
   get canSendToPc(): boolean {
-    return typeof this.electron.WebContentsView === 'function' && typeof this.electron.session?.fromPartition === 'function';
+    return this.page.available;
   }
 
   /** Keeps the app's own muting apart from CapMac's (installed once, with the first page). */
@@ -179,7 +215,7 @@ export class SoundControl {
     const key = wc?.id;
     if (typeof key !== 'number' || !this.capturing.has(key)) return;
     this.capturing.delete(key);
-    this.send({ t: 'remove', key });
+    this.page.send('capmac-sound', { t: 'remove', key });
   }
 
   private update(): void {
@@ -190,112 +226,34 @@ export class SoundControl {
     }
   }
 
-  private send(command: Record<string, unknown>): void {
-    try {
-      if (this.view && !this.view.webContents.isDestroyed()) this.view.webContents.send('capmac-sound', command);
-    } catch {
-      // closing
-    }
-  }
-
   /** Starts capturing a page's sound (the capture page first, once). */
   private capture(wc: any): void {
     if (!wc || wc.isDestroyed?.() || this.capturing.has(wc.id)) return;
     this.capturing.set(wc.id, wc);
-    void this.ensureView().then((view) => {
-      if (!view || this.capturing.get(wc.id) !== wc || wc.isDestroyed()) return;
-      try {
-        this.send({ t: 'add', key: wc.id, source: wc.getMediaSourceId(view.webContents) });
-      } catch {
-        this.capturing.delete(wc.id);
-      }
-    });
-  }
-
-  private viewReady: Promise<any> | null = null;
-  /** Bumped when capturing stops: a capture page still loading then closes. */
-  private generation = 0;
-
-  private ensureView(): Promise<any> {
-    if (!this.viewReady) {
-      const generation = this.generation;
-      this.viewReady = this.makeView().then((view) => {
-        if (generation === this.generation) return view;
+    this.holding = true;
+    this.page.hold(this).then(
+      (contents) => {
+        if (!contents || this.capturing.get(wc.id) !== wc || wc.isDestroyed()) return;
         try {
-          view.webContents.close?.();
+          this.page.send('capmac-sound', { t: 'add', key: wc.id, source: wc.getMediaSourceId(contents) });
         } catch {
-          // closing
+          this.capturing.delete(wc.id);
         }
-        return null;
-      }, () => {
-        this.viewReady = null;
-        this.host.note('CapMac could not send the app’s sound to the PC: the sound is off');
-        return null;
-      });
-    }
-    return this.viewReady;
-  }
-
-  private async makeView(): Promise<any> {
-    const { WebContentsView, session } = this.electron;
-    // Served on this Mac's loopback: a page there may capture sound (a secure context, a real origin).
-    const token = randomBytes(12).toString('hex');
-    const page = capturePage();
-    const server = http.createServer((req, res) => {
-      if (req.url !== `/${token}`) return void res.writeHead(404).end();
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(page);
-    });
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', () => resolve());
-    });
-    server.unref();
-    this.server = server;
-    const ses = session.fromPartition('capmac-sound');
-    ses.setPermissionRequestHandler((_wc: unknown, permission: string, callback: (ok: boolean) => void) => callback(permission === 'media'));
-    ses.setPermissionCheckHandler((_wc: unknown, permission: string) => permission === 'media');
-    const view = new WebContentsView({ webPreferences: { session: ses, nodeIntegration: true, contextIsolation: false, sandbox: false, autoplayPolicy: 'no-user-gesture-required', backgroundThrottling: false, devTools: false } });
-    const wc = view.webContents;
-    // CapMac's page only.
-    wc.on('will-navigate', (e: { preventDefault(): void }) => e.preventDefault());
-    wc.setWindowOpenHandler?.(() => ({ action: 'deny' }));
-    wc.ipc.on('capmac-audio', (_e: unknown, packets: Uint8Array[]) => {
-      if (this.mode === 'pc' && Array.isArray(packets)) this.host.onPackets(packets.map((p) => Buffer.from(p.buffer, p.byteOffset, p.byteLength)));
-    });
-    wc.ipc.on('capmac-audio-retry', (_e: unknown, key: number) => {
-      // A hung or refused capture: a fresh source, a few times.
-      const tries = (this.retries.get(key) ?? 0) + 1;
-      this.retries.set(key, tries);
-      const page2 = this.capturing.get(key);
-      if (!page2 || tries > 4) return;
-      setTimeout(() => {
-        try {
-          if (this.capturing.get(key) === page2 && !page2.isDestroyed()) this.send({ t: 'add', key, source: page2.getMediaSourceId(wc) });
-        } catch {
-          // gone
-        }
-      }, 300);
-    });
-    wc.ipc.on('capmac-audio-added', (_e: unknown, key: number) => this.retries.delete(key));
-    await wc.loadURL(`http://127.0.0.1:${(server.address() as { port: number }).port}/${token}`);
-    this.view = view;
-    return view;
+      },
+      () => {
+        if (this.capturing.get(wc.id) === wc) this.host.note('CapMac could not send the app’s sound to the PC: the sound is off');
+      },
+    );
   }
 
   private stopCapture(): void {
-    this.generation += 1;
     this.capturing.clear();
     this.retries.clear();
-    const view = this.view;
-    this.view = null;
-    this.viewReady = null;
-    try {
-      if (view && !view.webContents.isDestroyed()) view.webContents.close?.();
-    } catch {
-      // closing
-    }
-    this.server?.close();
-    this.server = null;
+    if (!this.holding) return;
+    this.holding = false;
+    // The page may stay open for the video: its sound part lets go of everything.
+    this.page.send('capmac-sound', { t: 'stop' });
+    this.page.drop(this);
   }
 
   stop(): void {

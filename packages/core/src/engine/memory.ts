@@ -2,13 +2,16 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { isSoundMode, type SoundMode } from '../shared/electron.js';
 import { capmacDir } from './config.js';
+import type { RunnableApp } from './project.js';
 
 /** Small per-project memory on the Windows side (last target used, etc), shared by the CLI and CapMac Studio. */
-interface ProjectMemory {
+export interface ProjectMemory {
   lastTarget?: string;
   lastDevice?: string;
   /** Where an Electron app's sound plays (see SoundMode). */
   sound?: SoundMode;
+  /** The app CapMac works on, when the project has more than one (see apps.ts). */
+  app?: RunnableApp;
 }
 
 const file = () => path.join(capmacDir(), 'projects.json');
@@ -23,6 +26,11 @@ async function readAll(): Promise<Record<string, ProjectMemory>> {
 
 export async function recall(projectId: string): Promise<ProjectMemory> {
   return (await readAll())[projectId] ?? {};
+}
+
+/** Everything remembered, by project id. */
+export function recallAll(): Promise<Record<string, ProjectMemory>> {
+  return readAll();
 }
 
 export async function remember(projectId: string, patch: ProjectMemory): Promise<void> {

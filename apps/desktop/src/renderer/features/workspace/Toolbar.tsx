@@ -1,12 +1,16 @@
-import type { MacSummary, ProjectSummary, Target, TargetsResult } from '../../../shared/contract';
+import { useState } from 'react';
+import type { MacSummary, ProjectSummary, RunnableApp, Target, TargetsResult } from '../../../shared/contract';
 import { t } from '../../../shared/i18n';
 import { emitWorkspace } from '../../app/commands';
 import { macStatusText } from '../../app/Sidebar';
-import { forgetProject, openInXcode, rebuild, setProjectPrefs, startSession, stopSession } from '../../state/actions';
+import { appGlyph, appKind, appTech, appTechShort, canRun as runnable } from '../../lib/apps';
+import { forgetProject, openInXcode, rebuild, setApp, setProjectPrefs, startSession, stopSession } from '../../state/actions';
 import { useApp } from '../../state/app';
+import { useProjects } from '../../state/projects';
 import { isActive, isBusy, phaseLabel, type RunState, type TimelinePhase } from '../../state/runs';
 import { AppIcon } from '../../ui/AppIcon';
 import { Button, IconButton } from '../../ui/Button';
+import { Dialog } from '../../ui/Dialog';
 import { StatusDot, type Tone } from '../../ui/Feedback';
 import { Icon } from '../../ui/Icon';
 import { Menu, usePopover } from '../../ui/Popover';
@@ -46,6 +50,70 @@ function MacPicker({ macs, mac, path }: { macs: MacSummary[]; mac: MacSummary | 
   );
 }
 
+/** Which of the project's apps Run and Live use (like Xcode's scheme): shown when it has more than one. */
+function AppPicker({ path, summary, app, run }: { path: string; summary: ProjectSummary; app: RunnableApp; run: RunState | undefined }) {
+  const menu = usePopover();
+  const [switchTo, setSwitchTo] = useState<RunnableApp | null>(null);
+  const apps = summary.apps.filter(runnable);
+  const current = apps.find((a) => a.id === app) ?? apps[0]!;
+  const pick = (id: RunnableApp) => {
+    if (id === app) return;
+    // A running app is the one being switched away from: stop it first, after asking.
+    if (isActive(run)) setSwitchTo(id);
+    else void setApp(path, id);
+  };
+  const target = switchTo ? apps.find((a) => a.id === switchTo) : undefined;
+  return (
+    <>
+      <button type="button" className="tb-picker tb-picker--app" aria-haspopup="menu" aria-label={t.apps.label(`${appKind(current)}, ${appTech(current)}`)} {...menu.triggerProps}>
+        <span className="tb-picker__icon">
+          <Icon name={appGlyph(current)} size={16} />
+        </span>
+        <span className="tb-picker__text">
+          <span className="tb-picker__title truncate">{appKind(current)}</span>
+          <span className="tb-picker__sub truncate">{appTechShort(current)}</span>
+        </span>
+        <Icon name="chevronDown" size={12} />
+      </button>
+      <Menu
+        state={menu}
+        label={t.apps.choose}
+        placement="bottom-start"
+        width={300}
+        items={[
+          ...apps.map((a) => ({ id: a.id, label: appKind(a), icon: appGlyph(a), hint: a.status === 'setup' ? t.apps.setup : t.apps.whereShort[a.id], checked: a.id === app, onSelect: () => pick(a.id as RunnableApp) })),
+          { id: 'look', label: t.apps.lookAgain, icon: 'refresh' as const, separatorBefore: true, onSelect: () => void useProjects.getState().inspect(path, true) },
+        ]}
+      />
+      {target && (
+        <Dialog
+          open
+          size="sm"
+          title={t.apps.switchTitle(appKind(target))}
+          onClose={() => setSwitchTo(null)}
+          footer={
+            <>
+              <Button
+                variant="accent"
+                onClick={async () => {
+                  setSwitchTo(null);
+                  await stopSession(path);
+                  await setApp(path, target.id as RunnableApp);
+                }}
+              >
+                {t.apps.switch}
+              </Button>
+              <Button onClick={() => setSwitchTo(null)}>{t.common.cancel}</Button>
+            </>
+          }
+        >
+          <p className="muted">{t.apps.switchBody(appKind(current))}</p>
+        </Dialog>
+      )}
+    </>
+  );
+}
+
 /** What is happening right now, as a verb ("Building", …). */
 function currentPhase(run: RunState | undefined): string | null {
   if (!run) return null;
@@ -55,7 +123,7 @@ function currentPhase(run: RunState | undefined): string | null {
   return run.status === 'starting' ? t.phaseNow.starting : null;
 }
 
-export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, autoTarget, targetsLoading, macDesktop = null, onlyMac = false }: {
+export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, autoTarget, targetsLoading, macDesktop = null, onlyMac = false, app = 'ios' }: {
   path: string;
   summary: ProjectSummary | null;
   icon: string | null;
@@ -70,6 +138,8 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
   macDesktop?: Target | null;
   /** The project's only target is the Mac's desktop. */
   onlyMac?: boolean;
+  /** The app Run and Live use. */
+  app?: RunnableApp;
 }) {
   const more = usePopover();
   const active = isActive(run);
@@ -78,8 +148,10 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
   const running = active && run?.mode === 'run';
   const phase = busy ? currentPhase(run) : null;
   const name = summary?.appName ?? path.split(/[\\/]/).pop() ?? path;
-  const canRun = Boolean((summary?.hasIos || summary?.electron) && mac);
-  const runHint = !mac ? t.toolbar.pairFirst : summary && !summary.hasIos && !summary.electron ? t.toolbar.addIosFirst : undefined;
+  // The app picked must be there to run: an iOS app once iOS is added.
+  const appReady = app === 'electron' ? Boolean(summary?.electron) : Boolean(summary?.hasIos);
+  const canRun = appReady && Boolean(mac);
+  const runHint = !mac ? t.toolbar.pairFirst : summary && !appReady && app === 'ios' ? t.toolbar.addIosFirst : undefined;
   // IPA builds and Xcode are for the iOS app.
   const canIos = Boolean(summary?.hasIos && mac);
 
@@ -93,6 +165,12 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
         </div>
       </div>
       <div className="ws-toolbar__pickers">
+        {summary && summary.apps.filter(runnable).length > 1 && (
+          <>
+            <AppPicker path={path} summary={summary} app={app} run={run} />
+            <span className="ws-toolbar__pickers-divider" role="separator" />
+          </>
+        )}
         <MacPicker macs={macs} mac={mac} path={path} />
         <Icon name="chevronRight" size={12} className="ws-toolbar__arrow" />
         <TargetPicker targets={targets} selected={target} auto={autoTarget} loading={targetsLoading} mac={macDesktop} onlyMac={onlyMac} onSelect={(picked) => setProjectPrefs(path, { target: picked?.udid ?? undefined })} />

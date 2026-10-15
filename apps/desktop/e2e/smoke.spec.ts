@@ -47,9 +47,19 @@ test('launches, shows Home and opens a project', async () => {
   }, sampleDir);
   await page.getByRole('button', { name: 'Choose a folder…' }).click();
 
-  // The project workspace.
+  // The sample has two apps, its iOS app and its Electron app: CapMac asks which one, the iOS app first.
+  const chooser = page.getByRole('dialog', { name: 'Hello CapMac has two apps' });
+  await expect(chooser).toBeVisible();
+  await expect(chooser.getByRole('radio', { name: 'iOS app' })).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('ArrowDown');
+  await expect(chooser.getByRole('radio', { name: 'Electron app' })).toHaveAttribute('aria-checked', 'true');
+  await page.keyboard.press('ArrowUp');
+  await chooser.getByRole('button', { name: 'Open iOS app' }).click();
+
+  // The project workspace, with the app picker to switch apps later.
   await expect(page.getByRole('heading', { name: 'Hello CapMac', level: 1 })).toBeVisible();
   await expect(page.getByText('dev.capmac.hello')).toBeVisible();
+  await expect(page.getByRole('button', { name: /^App: iOS app/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /^Run/ })).toBeVisible();
 
   // Back home, the project is listed.

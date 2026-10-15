@@ -1,8 +1,8 @@
 /**
  * The agent's side of an Electron app's socket (served by CapMac's module in
  * the app, see src/electron-hook): JSON requests out, JSON messages back, and
- * the binary frame that follows a `frame` or `screenshot` message delivered
- * with it.
+ * the binary frame that follows a `frame`, `video` or `screenshot` message
+ * delivered with it.
  */
 import net from 'node:net';
 import { encodeJson, FrameDecoder } from '../shared/frames.js';
@@ -41,7 +41,7 @@ export class HookConnection {
           continue;
         }
         const message = frame.value as HookMessage;
-        if (message?.t === 'frame' || message?.t === 'screenshot') this.header = message;
+        if (message?.t === 'frame' || message?.t === 'video' || message?.t === 'screenshot') this.header = message;
         else this.deliver(message);
       }
     });

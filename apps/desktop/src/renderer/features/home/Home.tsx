@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { RecentProject } from '../../../shared/contract';
-import { forgetProject, openProject, pickProject, startSession, stopSession } from '../../state/actions';
+import { appKind, canRun } from '../../lib/apps';
+import { appOf, forgetProject, openProject, pickProject, startSession, stopSession } from '../../state/actions';
 import { useApp } from '../../state/app';
 import { call, errorInfo } from '../../state/engine';
 import { resolveMac, useMacs } from '../../state/macs';
@@ -22,6 +23,7 @@ function ProjectCard({ recent }: { recent: RecentProject }) {
   const inspect = useProjects((s) => s.inspect);
   const loadSize = useProjects((s) => s.loadSize);
   const navigate = useApp((s) => s.navigate);
+  const prefs = useApp((s) => s.settings?.projectPrefs[projectKey(recent.path)]);
   const menu = usePopover();
   useEffect(() => {
     void inspect(recent.path).then((summary) => summary && loadSize(recent.path));
@@ -33,6 +35,11 @@ function ProjectCard({ recent }: { recent: RecentProject }) {
   const busy = isBusy(run);
   const missing = entry?.error && !summary;
   const last = recent.lastRun;
+  // With more than one app, the one Run and Live use stands out.
+  const app = appOf(summary, prefs ?? {});
+  const several = (summary?.apps.filter(canRun).length ?? 0) > 1;
+  const appTone = (id: string) => (several && app === id ? 'accent' : 'neutral');
+  const current = several ? summary?.apps.find((a) => a.id === app) : undefined;
 
   let status: React.ReactNode = null;
   if (active) {
@@ -67,9 +74,17 @@ function ProjectCard({ recent }: { recent: RecentProject }) {
           <Icon name="warning" size={14} filled /> {t.home.missing}
         </p>
       ) : (
-        <div className="project-card__meta">
-          {summary && (summary.hasIos || !summary.electron) && <Badge>{summary.iosPackageManager === 'unknown' ? (summary.hasIos ? 'iOS' : t.home.noIos) : summary.iosPackageManager}</Badge>}
-          {summary?.electron && <Badge>{t.home.electron}</Badge>}
+        <div className="project-card__meta" title={current ? t.apps.current(appKind(current)) : undefined}>
+          {summary && (summary.hasIos || !summary.electron) && (
+            <Badge tone={appTone('ios')} icon={several ? 'phone' : undefined}>
+              {summary.iosPackageManager === 'unknown' ? (summary.hasIos ? 'iOS' : t.home.noIos) : summary.iosPackageManager}
+            </Badge>
+          )}
+          {summary?.electron && (
+            <Badge tone={appTone('electron')} icon={several ? 'desktop' : undefined}>
+              {t.home.electron}
+            </Badge>
+          )}
           {entry?.size ? (
             <span className="tabular">
               {t.count.files(entry.size.files)} · {formatBytes(entry.size.bytes)}

@@ -16,6 +16,9 @@ function normalize(s: string): string {
   return s.toLowerCase().replace(/[’']/g, "'").replace(/\s+/g, ' ').trim();
 }
 
+/** Names someone might try for running the iOS app on the Mac itself — which CapMac can't do (see below). */
+const THIS_MAC = /^(mac-ipad|ipad-on-mac|my mac|my mac \(designed for ipad\)|designed for ipad)$/;
+
 /**
  * Chooses where to run: an explicit name/UDID, else the last target used,
  * else a connected device (when --device), else a booted simulator, else the
@@ -30,6 +33,10 @@ export function chooseTarget(all: TargetsResult, query: TargetQuery): Target {
     const w = normalize(query.wanted);
     const byUdid = [...all.simulators, ...all.devices].find((t) => t.udid.toLowerCase() === w);
     if (byUdid) return byUdid;
+    // CapMac can't run iOS apps directly on the Mac itself (only Xcode's private install service can): point elsewhere.
+    if (THIS_MAC.test(w)) {
+      throw new UserError('CapMac can’t run iOS apps directly on this Mac.', 'Apple only allows that through Xcode. Run on a simulator, or on an iPhone plugged into the Mac (--device).');
+    }
     // "iPhone 16 Pro" or "iPhone 16 Pro (18.2)" / "iPhone 16 Pro 18.2"
     const versioned = w.match(/^(.*?)[\s(]+(\d+(?:\.\d+)*)\)?$/);
     const candidates = pool.length ? pool : [...sims, ...devices];

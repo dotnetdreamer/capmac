@@ -24,6 +24,18 @@ describe('IPC validation', () => {
     expect(start.safeParse({ projectPath: 'C:\\apps\\hello', mode: 'run', target: 'booted; rm -rf ~' }).success).toBe(false);
   });
 
+  it('accepts only the apps CapMac runs', () => {
+    const setApp = engineMethods['projects.setApp'];
+    expect(setApp.safeParse({ path: 'C:\\apps\\ludo', app: 'electron' }).success).toBe(true);
+    expect(setApp.safeParse({ path: 'C:\\apps\\ludo', app: 'ios' }).success).toBe(true);
+    expect(setApp.safeParse({ path: 'C:\\apps\\ludo', app: 'android' }).success).toBe(false);
+    expect(setApp.safeParse({ path: '', app: 'ios' }).success).toBe(false);
+    expect(engineMethods['projects.detect'].safeParse({ path: 'C:\\apps' }).success).toBe(true);
+    const start = engineMethods['sessions.start'];
+    expect(start.safeParse({ projectPath: 'C:\\apps\\ludo', mode: 'run', app: 'electron' }).success).toBe(true);
+    expect(start.safeParse({ projectPath: 'C:\\apps\\ludo', mode: 'run', app: 'macos' }).success).toBe(false);
+  });
+
   it('keeps simulator input in range', () => {
     expect(inputEventSchema.safeParse({ kind: 'tap', x: 0.5, y: 0.25 }).success).toBe(true);
     expect(inputEventSchema.safeParse({ kind: 'tap', x: 1.5, y: 0.25 }).success).toBe(false);

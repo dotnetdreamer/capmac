@@ -3,7 +3,7 @@ import { ConsoleBuffer, ConsoleView, DEFAULT_FILTER, jsonPayload, type ConsoleFi
 
 beforeAll(() => {
   // The buffer notifies subscribers once per animation frame.
-  globalThis.requestAnimationFrame ??= ((cb: FrameRequestCallback) => setTimeout(() => cb(0), 0)) as typeof requestAnimationFrame;
+  globalThis.requestAnimationFrame ??= ((cb: FrameRequestCallback) => setTimeout(() => cb(0), 0)) as unknown as typeof requestAnimationFrame;
 });
 
 const all: ConsoleFilter = {

@@ -1,11 +1,13 @@
 /** What the UI (buttons, palette, tray, shortcuts) can do. */
-import type { ErrorInfo } from '../../shared/contract';
+import type { AppSearch, ErrorInfo, ProjectSummary, RunnableApp } from '../../shared/contract';
 import { t, tidy } from '../../shared/i18n';
+import { canRun } from '../lib/apps';
 import { toast, useApp, useToasts } from './app';
+import { useChooser } from './chooser';
 import { call, errorInfo } from './engine';
 import { resolveMac, useMacs } from './macs';
 import { projectKey, useProjects } from './projects';
-import { emptyRun, isActive, useRuns } from './runs';
+import { emptyRun, isActive, MAC_TARGET_ID, useRuns } from './runs';
 
 export function projectPrefs(path: string): { mac?: string; target?: string } {
   return useApp.getState().settings?.projectPrefs[projectKey(path)] ?? {};
@@ -35,9 +37,9 @@ function failStart(path: string, error: ErrorInfo): void {
   useRuns.setState((s) => ({ byKey: { ...s.byKey, [key]: { ...run, status: 'failed', error, sessionId: null, endedAt: Date.now() } } }));
 }
 
-/** Adds a folder as a project (validates it is a Capacitor app) and opens it. */
-export async function openProject(path: string): Promise<boolean> {
-  const summary = await useProjects.getState().inspect(path, true);
+/** Adds a folder as a project (validates it is a Capacitor app) and opens it; `known`: its summary, just made. */
+export async function openProject(path: string, known?: ProjectSummary): Promise<boolean> {
+  const summary = known ?? (await useProjects.getState().inspect(path, true));
   if (!summary) {
     const error = useProjects.getState().byKey[projectKey(path)]?.error;
     toast({ tone: 'critical', title: t.actions.notCapacitor, body: error ? both(error) : t.actions.notCapacitorBody });
@@ -48,13 +50,68 @@ export async function openProject(path: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Adds a folder: finds the apps in it (and in the folders inside it), asks
+ * which one to work on when there are several, then opens that project.
+ * A project already in the list just opens (its app is switched in the toolbar).
+ */
+export async function addProject(path: string): Promise<boolean> {
+  let search: AppSearch;
+  try {
+    search = await call('projects.detect', { path });
+  } catch (err) {
+    toast({ tone: 'critical', title: t.actions.notCapacitor, body: both(errorInfo(err)) });
+    return false;
+  }
+  const runnable = search.projects.filter((p) => p.apps.some(canRun));
+  if (runnable.length === 0) {
+    const found = [...new Set(search.projects.map((p) => t.apps.framework[p.framework] ?? p.framework))];
+    toast({ tone: 'critical', title: t.actions.notCapacitor, body: found.length ? t.actions.cantRunYet(found) : t.actions.notCapacitorBody });
+    return false;
+  }
+  const only = runnable.length === 1 ? runnable[0]! : null;
+  const known = (dir: string) => useApp.getState().settings?.recentProjects.some((r) => projectKey(r.path) === projectKey(dir)) ?? false;
+  if (only && (only.apps.filter(canRun).length === 1 || only.chosen || known(only.dir))) return openProject(only.dir);
+  const choice = await useChooser.getState().ask(search);
+  if (!choice) return false;
+  const summary = await setApp(choice.dir, choice.app);
+  return summary ? openProject(choice.dir, summary) : false;
+}
+
 export async function pickProject(): Promise<void> {
   const folder = await window.capmac.invoke('app:pick-folder');
-  if (folder) await openProject(folder);
+  if (folder) await addProject(folder);
+}
+
+/**
+ * The app a project works on: the one picked, else the Mac's desktop when it
+ * was picked as the target (before projects had apps to pick), else the
+ * project's own default.
+ */
+export function appOf(summary: ProjectSummary | null | undefined, prefs: { target?: string } = {}): RunnableApp | undefined {
+  if (!summary) return undefined;
+  if (!summary.appChosen && prefs.target === MAC_TARGET_ID && summary.apps.some((a) => a.id === 'electron')) return 'electron';
+  return summary.app;
+}
+
+/** Makes `app` the one CapMac works on in this project (the CLI too); resolves with the project as it is now. */
+export async function setApp(path: string, app: RunnableApp): Promise<ProjectSummary | null> {
+  let summary: ProjectSummary;
+  try {
+    summary = await call('projects.setApp', { path, app });
+  } catch (err) {
+    toast({ tone: 'critical', title: t.apps.switchFailed, body: both(errorInfo(err)) });
+    return null;
+  }
+  // The Mac's desktop was how the Electron app used to be picked: targets are the iOS app's now.
+  if (projectPrefs(path).target === MAC_TARGET_ID) setProjectPrefs(path, { target: undefined });
+  await useProjects.getState().put(path, summary);
+  return summary;
 }
 
 export async function startSession(path: string, mode: 'run' | 'live', options: { clean?: boolean; full?: boolean } = {}): Promise<void> {
   const prefs = projectPrefs(path);
+  const app = appOf(useProjects.getState().byKey[projectKey(path)]?.summary, prefs);
   const mac = macFor(path);
   if (!mac) {
     if (useMacs.getState().macs.length === 0) {
@@ -67,7 +124,7 @@ export async function startSession(path: string, mode: 'run' | 'live', options: 
   }
   const settings = useApp.getState().settings;
   try {
-    await call('sessions.start', { projectPath: path, mode, mac, target: prefs.target, options: { ...options, osLogs: settings?.osLogs } });
+    await call('sessions.start', { projectPath: path, mode, mac, app, target: app === 'electron' || prefs.target === MAC_TARGET_ID ? undefined : prefs.target, options: { ...options, osLogs: settings?.osLogs } });
   } catch (err) {
     failStart(path, errorInfo(err));
   }

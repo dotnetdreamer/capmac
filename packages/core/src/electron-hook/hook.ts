@@ -7,10 +7,11 @@
  * In the app it:
  *  - marks what the main process prints, and reports windows and the pages'
  *    console on stdout (marked lines, see shared/electron.ts);
- *  - serves the windows on a Unix socket: frames from the app's own
- *    compositor (no Screen Recording permission needed), input through
- *    sendInputEvent (no Accessibility permission, no focus stealing), menu
- *    shortcuts the way macOS runs them, screenshots, reloads;
+ *  - serves the windows on a Unix socket: H.264 video captured the way
+ *    Chromium captures a tab (video.ts), or JPEG frames from the app's own
+ *    compositor (no Screen Recording permission needed either way), input
+ *    through sendInputEvent (no Accessibility permission, no focus stealing),
+ *    menu shortcuts the way macOS runs them, screenshots, reloads;
  *  - keeps the app from taking the Mac's focus: someone may be working there
  *    (see "The Mac's focus");
  *  - for Capacitor live reload, loads the dev server instead of the bundled
@@ -27,8 +28,11 @@ import net from 'node:net';
 import os from 'node:os';
 import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { encodeBinary, encodeJson, FrameDecoder } from '../shared/frames.js';
+import { STREAM_CONFIG } from '../shared/stream.js';
+import { CapturePage } from './capture.js';
 import { DialogService, runDialogWorker } from './dialogs.js';
-import { SoundControl } from './sound.js';
+import { SoundControl, soundPageScript } from './sound.js';
+import { VideoCapture, videoPageScript, videoSize } from './video.js';
 import {
   dialogSocket,
   ENV_LIVE_SCHEME,
@@ -516,10 +520,14 @@ function start(electron: Electron, socketPath: string): void {
   const { app, BrowserWindow, Menu, clipboard, nativeTheme, powerSaveBlocker, screen } = electron;
   const windows = new Map<number, BrowserWindow>();
   const clients = new Set<Client>();
+  const clientsById = new Map<number, Client>();
   let focusOrder: number[] = [];
 
-  // ─── Sound ─────────────────────────────────────────────────────────────
+  // ─── Sound and video ───────────────────────────────────────────────────
+  //
+  // One hidden page of CapMac's captures the windows for both (capture.ts).
 
+  const capture = new CapturePage(electron, [soundPageScript(), videoPageScript()]);
   const sound = new SoundControl(electron, initialSound, {
     pages: () => [...windows.values()].filter((w) => w && !w.isDestroyed()).map((w) => w.webContents),
     onPackets: (packets) => {
@@ -527,7 +535,17 @@ function start(electron: Electron, socketPath: string): void {
       for (const client of clients) if (client.wantsAudio) client.send({ t: 'audio', packets: data });
     },
     note: (message) => report({ e: 'note', message }),
+  }, capture);
+  const video = new VideoCapture(capture, {
+    onMessage: (key, message) => clientsById.get(key)?.sendVideo(message),
+    onFailed: (key, reason) => clientsById.get(key)?.videoFailed(reason),
   });
+  /** Why a client asking for video gets JPEG frames (null: it gets video). */
+  function noVideoReason(failure: string | null): string | null {
+    if (!capture.available) return `Electron ${process.versions.electron} can’t send its windows as video (that needs Electron 30 or later)`;
+    const why = failure ?? video.broken;
+    return why ? `The window couldn’t be sent as video: ${why}` : null;
+  }
   /** The clients watching with sound, for the capture. */
   function listenersChanged(): void {
     let count = 0;
@@ -576,6 +594,12 @@ function start(electron: Electron, socketPath: string): void {
 
   function listWindows(): AppWindowInfo[] {
     return [...windows.values()].filter(alive).map(infoOf);
+  }
+
+  /** The size of a window's video, its longest side at most `maxSize` (see videoSize). */
+  function videoSizeOf(win: BrowserWindow, maxSize: number): { width: number; height: number } {
+    const info = infoOf(win);
+    return videoSize(info.width, info.height, info.scale, maxSize);
   }
 
   /** The window to show when nobody picked one: the focused one, else the last focused, else the first visible. */
@@ -635,6 +659,8 @@ function start(electron: Electron, socketPath: string): void {
       if (virtualFocus === win) virtualFocus = null;
       windows.delete(id);
       focusOrder = focusOrder.filter((other) => other !== id);
+      // Nothing to give back to a window that is gone, but App Nap may come back.
+      if (subscriptions.delete(id)) updatePowerBlocker();
       for (const client of clients) client.windowClosed(id);
       report({ e: 'window-closed', id });
       changed();
@@ -766,7 +792,10 @@ function start(electron: Electron, socketPath: string): void {
     latest: NativeImage | null;
     /** Bumped on every paint. */
     version: number;
+    /** The clients showing the window: it keeps painting while there are any. */
     clients: Set<Client>;
+    /** Those taking JPEG frames: the app's compositor hands them over while there are any (video comes from the capture page). */
+    jpeg: Set<Client>;
     throttling: boolean | null;
   }
 
@@ -787,7 +816,8 @@ function start(electron: Electron, socketPath: string): void {
     }
   }
 
-  function subscribe(win: BrowserWindow, client: Client): Subscription {
+  /** `client` shows the window, with JPEG frames (`jpeg`) or video. */
+  function subscribe(win: BrowserWindow, client: Client, jpeg: boolean): Subscription {
     let sub = subscriptions.get(win.id);
     if (!sub) {
       const wc = win.webContents;
@@ -797,47 +827,64 @@ function start(electron: Electron, socketPath: string): void {
       } catch {
         throttling = null;
       }
-      const created: Subscription = { win, latest: null, version: 0, clients: new Set(), throttling };
+      const created: Subscription = { win, latest: null, version: 0, clients: new Set(), jpeg: new Set(), throttling };
       sub = created;
       subscriptions.set(win.id, created);
       // A covered, minimized or hidden window keeps painting while CapMac shows it.
       wc.setBackgroundThrottling(false);
-      wc.beginFrameSubscription(false, (image: NativeImage) => {
-        created.latest = image;
-        created.version += 1;
-        for (const c of created.clients) c.offer();
-      });
       updatePowerBlocker();
     }
     sub.clients.add(client);
-    // Paint now, so the first frame does not wait for the page to change.
-    try {
-      win.webContents.invalidate();
-    } catch {
-      // closing
-    }
-    const current = sub;
-    setTimeout(() => {
-      if (current.version === 0 && current.clients.has(client) && alive(win)) {
-        win.webContents.capturePage().then((image: NativeImage) => {
-          if (current.version === 0) {
-            current.latest = image;
-            current.version = 1;
-            for (const c of current.clients) c.offer();
-          }
-        }, () => undefined);
-      }
-    }, 400);
+    if (jpeg) takeFrames(sub, client, true);
     return sub;
   }
 
+  /** Whether `client` takes JPEG frames of the window from now on. */
+  function takeFrames(sub: Subscription, client: Client, on: boolean): void {
+    if (!on) {
+      if (!sub.jpeg.delete(client) || sub.jpeg.size > 0) return;
+      sub.latest = null;
+      try {
+        if (alive(sub.win)) sub.win.webContents.endFrameSubscription();
+      } catch {
+        // closing
+      }
+      return;
+    }
+    if (sub.jpeg.has(client) || !alive(sub.win)) return;
+    sub.jpeg.add(client);
+    try {
+      if (sub.jpeg.size === 1) {
+        sub.win.webContents.beginFrameSubscription(false, (image: NativeImage) => {
+          sub.latest = image;
+          sub.version += 1;
+          for (const c of sub.jpeg) c.offer();
+        });
+      }
+      // Paint now, so the first frame does not wait for the page to change; a window that does not paint gets a capture.
+      sub.win.webContents.invalidate();
+    } catch {
+      // closing
+    }
+    const before = sub.version;
+    setTimeout(() => {
+      if (sub.version !== before || !sub.jpeg.has(client) || !alive(sub.win)) return;
+      sub.win.webContents.capturePage().then((image: NativeImage) => {
+        if (sub.version !== before || sub.jpeg.size === 0) return;
+        sub.latest = image;
+        sub.version += 1;
+        for (const c of sub.jpeg) c.offer();
+      }, () => undefined);
+    }, 400);
+  }
+
   function unsubscribe(sub: Subscription, client: Client): void {
+    takeFrames(sub, client, false);
     sub.clients.delete(client);
-    if (sub.clients.size > 0) return;
+    if (sub.clients.size > 0 || subscriptions.get(sub.win.id) !== sub) return;
     subscriptions.delete(sub.win.id);
     if (alive(sub.win)) {
       try {
-        sub.win.webContents.endFrameSubscription();
         if (sub.throttling !== null) sub.win.webContents.setBackgroundThrottling(sub.throttling);
       } catch {
         // closing
@@ -1060,7 +1107,12 @@ function start(electron: Electron, socketPath: string): void {
 
   // ─── Socket clients ────────────────────────────────────────────────────
 
+  /** Video waiting on a client's socket beyond this is a reader that fell behind: skip to a keyframe. */
+  const VIDEO_BACKLOG = 2 * 1024 * 1024;
+  let nextClientId = 1;
+
   class Client {
+    readonly id = nextClientId++;
     role: 'screen' | 'control' = 'control';
     watching: Subscription | null = null;
     /** Wants the app's sound when it plays on the PC. */
@@ -1075,12 +1127,24 @@ function start(electron: Electron, socketPath: string): void {
     private lastSent = 0;
     private timer: NodeJS.Timeout | null = null;
     private seq = 0;
+    /** Asked for video (H.264), and whether the watched window comes as video now. */
+    private wantsVideo = false;
+    private videoOn = false;
+    /** Why video gave up for this client: it gets JPEG frames until asked to try again. */
+    private videoFailure: string | null = null;
+    private bitrate = 4_000_000;
+    /** Video waits for its next keyframe: the socket was full. */
+    private videoBlocked = false;
+    /** The number of this client's last video frame. */
+    private videoSeq = 0;
+    private sentCodec = '';
     private readonly decoder = new FrameDecoder();
     private closed = false;
     private inputs: Promise<void> = Promise.resolve();
 
     constructor(private readonly socket: net.Socket) {
       clients.add(this);
+      clientsById.set(this.id, this);
       socket.on('data', (chunk) => {
         let frames;
         try {
@@ -1120,17 +1184,36 @@ function start(electron: Electron, socketPath: string): void {
             this.role = request.role === 'screen' ? 'screen' : 'control';
             this.send({ t: 'hello', app: appInfo(), windows: listWindows() });
             break;
-          case 'watch':
-            this.maxSize = Math.min(4096, Math.max(320, Number(request.maxSize) || 1400));
+          case 'watch': {
+            const maxSize = Math.min(4096, Math.max(320, Number(request.maxSize) || 1400));
+            const resized = maxSize !== this.maxSize;
+            this.maxSize = maxSize;
             this.fps = Math.min(60, Math.max(1, Number(request.fps) || 30));
             this.quality = Math.min(95, Math.max(30, Number(request.quality) || 70));
             this.pinned = typeof request.window === 'number' ? request.window : null;
-            this.follow();
+            this.wantsVideo = this.role === 'screen' && request.codec === 'h264';
+            if (typeof request.bitrate === 'number' && Number.isFinite(request.bitrate)) this.bitrate = Math.min(50_000_000, Math.max(100_000, Math.round(request.bitrate)));
+            this.follow(resized);
             if (this.wantsAudio !== (this.role === 'screen' && Boolean(request.audio))) {
               this.wantsAudio = !this.wantsAudio;
               listenersChanged();
             }
             this.send({ t: 'sound', mode: sound.mode, toPc: sound.canSendToPc });
+            break;
+          }
+          case 'keyframe':
+            if (this.videoOn) video.keyframe(this.id);
+            break;
+          case 'bitrate':
+            if (typeof request.bitrate !== 'number' || !Number.isFinite(request.bitrate)) break;
+            this.bitrate = Math.min(50_000_000, Math.max(100_000, Math.round(request.bitrate)));
+            if (this.videoOn) video.setBitrate(this.id, this.bitrate);
+            break;
+          case 'retry-video':
+            // Asked to try video again (after it gave up).
+            this.videoFailure = null;
+            video.broken = null;
+            this.follow();
             break;
           case 'sound':
             if (isSoundMode(request.mode)) {
@@ -1198,32 +1281,116 @@ function start(electron: Electron, socketPath: string): void {
       }
     }
 
-    /** Watches the pinned window, or the one to follow. */
-    follow(): void {
+    /** Watches the pinned window, or the one to follow (`resized`: the longest side changed). */
+    follow(resized = false): void {
       const pinned = this.pinned !== null ? windows.get(this.pinned) : null;
       const win = alive(pinned) ? pinned : autoWindow();
-      if (this.watching?.win === win) {
-        // New size or quality: paint again so the next frame shows it.
-        try {
-          win.webContents.invalidate();
-        } catch {
-          // closing
+      const wantsVideo = this.wantsVideo && noVideoReason(this.videoFailure) === null;
+      if (win && this.watching?.win === win) {
+        if (wantsVideo !== this.videoOn) {
+          this.switchTo(wantsVideo);
+        } else if (this.videoOn) {
+          if (resized) video.setSize(this.id, videoSizeOf(win, this.maxSize));
+        } else {
+          // New size or quality: paint again so the next frame shows it.
+          try {
+            win.webContents.invalidate();
+          } catch {
+            // closing
+          }
         }
+        this.codecChanged();
         this.windowsChanged();
         return;
       }
       this.stopWatching();
       if (win) {
-        this.watching = subscribe(win, this);
+        this.watching = subscribe(win, this, !wantsVideo);
         this.sentVersion = -1;
         this.inFlight = 0;
+        if (wantsVideo) this.startVideo(win);
       }
+      this.codecChanged();
       this.windowsChanged();
+    }
+
+    private startVideo(win: BrowserWindow): void {
+      this.videoOn = true;
+      this.videoBlocked = false;
+      video.start(this.id, win.webContents, { ...videoSizeOf(win, this.maxSize), fps: this.fps, bitrate: this.bitrate });
+    }
+
+    private stopVideo(): void {
+      if (!this.videoOn) return;
+      this.videoOn = false;
+      video.stop(this.id);
+    }
+
+    /** The same window, as video or as JPEG frames from now on. */
+    private switchTo(asVideo: boolean): void {
+      const sub = this.watching!;
+      if (asVideo) {
+        takeFrames(sub, this, false);
+        this.startVideo(sub.win);
+      } else {
+        this.stopVideo();
+        this.sentVersion = -1;
+        this.inFlight = 0;
+        takeFrames(sub, this, true);
+      }
+    }
+
+    /** Video gave up for this client (the session stopped already): JPEG frames from now on, and why. */
+    videoFailed(reason: string): void {
+      this.videoOn = false;
+      this.videoFailure = reason;
+      if (this.watching) {
+        this.sentVersion = -1;
+        this.inFlight = 0;
+        takeFrames(this.watching, this, true);
+      }
+      this.codecChanged();
+    }
+
+    /** Tells the client how the watched window's pictures come (when that changed). */
+    private codecChanged(): void {
+      if (this.role !== 'screen' || !this.watching) return;
+      const codec = this.videoOn ? 'h264' : 'jpeg';
+      const reason = codec === 'jpeg' && this.wantsVideo ? noVideoReason(this.videoFailure) : null;
+      const key = `${codec} ${reason ?? ''}`;
+      if (key === this.sentCodec) return;
+      this.sentCodec = key;
+      this.send({ t: 'codec', codec, reason: reason ?? undefined });
+    }
+
+    /** One message of this client's video (shared/stream.ts). A reader that fell behind skips to the next keyframe. */
+    sendVideo(message: Buffer): void {
+      if (this.closed || !this.videoOn || message.length < 16) return;
+      if (message[0] !== STREAM_CONFIG) {
+        const key = ((message[1] ?? 0) & 1) === 1;
+        if (!key) {
+          if (this.videoBlocked) return;
+          if (this.socket.writableLength > VIDEO_BACKLOG) {
+            this.videoBlocked = true;
+            this.socket.once('drain', () => {
+              if (this.videoOn) video.keyframe(this.id);
+            });
+            return;
+          }
+        }
+        this.videoBlocked = false;
+        this.videoSeq += 1;
+      }
+      // Numbered here, not by the capture: they keep counting up when the capture starts over
+      // (a new size, another window), and frames are acknowledged by the highest number that came.
+      message.writeUInt32BE(this.videoSeq >>> 0, 12);
+      this.send({ t: 'video' }, message);
     }
 
     private stopWatching(): void {
       if (this.timer) clearTimeout(this.timer);
       this.timer = null;
+      this.stopVideo();
       if (this.watching) unsubscribe(this.watching, this);
       this.watching = null;
     }
@@ -1234,6 +1401,10 @@ function start(electron: Electron, socketPath: string): void {
 
     windowClosed(id: number): void {
       if (this.watching?.win.id === id) {
+        // Its subscription went with it (see track).
+        this.stopVideo();
+        if (this.timer) clearTimeout(this.timer);
+        this.timer = null;
         this.watching = null;
         if (this.pinned === id) this.pinned = null;
         this.follow();
@@ -1241,13 +1412,16 @@ function start(electron: Electron, socketPath: string): void {
     }
 
     windowsChanged(): void {
-      if (this.role === 'screen') this.send({ t: 'windows', windows: listWindows(), watched: this.watching?.win.id ?? null });
+      if (this.role !== 'screen') return;
+      this.send({ t: 'windows', windows: listWindows(), watched: this.watching?.win.id ?? null });
+      // The window was resized (or moved to another display): the video follows its shape.
+      if (this.videoOn && this.watching && alive(this.watching.win)) video.setSize(this.id, videoSizeOf(this.watching.win, this.maxSize));
     }
 
     /** Sends the newest frame when the client can take one (two in flight, at most `fps` a second). */
     offer(): void {
       const sub = this.watching;
-      if (!sub || this.closed || this.timer || this.inFlight >= 2 || sub.version === this.sentVersion || !sub.latest) return;
+      if (!sub || !sub.jpeg.has(this) || this.closed || this.timer || this.inFlight >= 2 || sub.version === this.sentVersion || !sub.latest) return;
       const due = this.lastSent + 1000 / this.fps;
       const now = Date.now();
       if (now < due) {
@@ -1281,6 +1455,7 @@ function start(electron: Electron, socketPath: string): void {
       this.closed = true;
       this.stopWatching();
       clients.delete(this);
+      clientsById.delete(this.id);
       if (this.wantsAudio) listenersChanged();
       this.socket.destroy();
     }
@@ -1375,6 +1550,7 @@ function start(electron: Electron, socketPath: string): void {
     dialogs: dialogs?.socketPath ?? null,
     sound: sound.mode,
     soundToPc: sound.canSendToPc,
+    h264: video.available,
   });
 
   // The dialogs' own socket, served by a worker thread (this same file, see the end).
@@ -1419,6 +1595,8 @@ function start(electron: Electron, socketPath: string): void {
     server.close();
     dialogs?.stop();
     sound.stop();
+    video.stopAll();
+    capture.close();
     for (const file of [socketPath, dialogPath]) {
       try {
         fs.rmSync(file, { force: true });

@@ -1,10 +1,12 @@
 /** Every action in capmac Studio, for the command palette and keyboard shortcuts. */
 import { t } from '../../shared/i18n';
 import { useApp } from '../state/app';
-import { forgetProject, macFor, openInXcode, openProject, pickProject, rebuild, relaunch, startSession, stopSession } from '../state/actions';
+import type { RunnableApp } from '../../shared/contract';
+import { appGlyph, appKind, canRun } from '../lib/apps';
+import { appOf, forgetProject, macFor, openInXcode, openProject, pickProject, projectPrefs, rebuild, relaunch, setApp, startSession, stopSession } from '../state/actions';
 import { call } from '../state/engine';
 import { resolveMac, useMacs } from '../state/macs';
-import { projectKey } from '../state/projects';
+import { projectKey, useProjects } from '../state/projects';
 import { setOptions, testConnection, turnOn, useRemote } from '../state/remote';
 import { isActive, useRuns } from '../state/runs';
 import type { IconName } from '../ui/Icon';
@@ -40,6 +42,28 @@ export function emitWorkspace(action: WorkspaceAction): void {
   workspaceBus.dispatchEvent(new CustomEvent<WorkspaceAction>('action', { detail: action }));
 }
 
+/** A project with more than one app: switch to each of the others (a running app stops first). */
+function switchAppCommands(path: string, active: boolean): Command[] {
+  const summary = useProjects.getState().byKey[projectKey(path)]?.summary;
+  const current = appOf(summary, projectPrefs(path));
+  const apps = summary?.apps.filter(canRun) ?? [];
+  if (apps.length < 2) return [];
+  return apps
+    .filter((a) => a.id !== current)
+    .map((a) => ({
+      id: `app:${a.id}`,
+      title: t.apps.switchTo(appKind(a)),
+      group: 'Project' as const,
+      icon: appGlyph(a),
+      keywords: 'app scheme ios electron mac desktop',
+      run: () =>
+        void (async () => {
+          if (active) await stopSession(path);
+          await setApp(path, a.id as RunnableApp);
+        })(),
+    }));
+}
+
 export function buildCommands(): Command[] {
   const app = useApp.getState();
   const route = app.route;
@@ -63,6 +87,7 @@ export function buildCommands(): Command[] {
       { id: 'build-ipa', title: t.commands.buildIpa, group: 'Project', icon: 'box', keywords: 'archive export testflight', run: () => emitWorkspace('build-ipa') },
       { id: 'xcode', title: t.commands.openXcode, group: 'Project', icon: 'code', run: () => void openInXcode(path) },
       { id: 'pick-target', title: t.commands.chooseTarget, group: 'Project', icon: 'phone', keywords: 'target iphone', run: () => app.openPalette('target') },
+      ...switchAppCommands(path, active),
       { id: 'pick-mac', title: t.commands.chooseMac, group: 'Project', icon: 'mac', enabled: macs.length > 1, run: () => app.openPalette('mac') },
       { id: 'build-log', title: t.commands.buildLog, group: 'Project', icon: 'document', enabled: Boolean(run?.buildLogPath), run: () => emitWorkspace('show-build-log') },
       { id: 'open-folder', title: t.commands.openFolder, group: 'Project', icon: 'folderOpen', keywords: 'explorer', run: () => void window.capmac.invoke('app:open-path', { path }) },

@@ -2,7 +2,8 @@
  * Electron apps on the Mac: prepare (dependencies, Electron itself, Capacitor's
  * web assets, the build), launch (with CapMac's module preloaded, the app's
  * output and the pages' console streamed back), the app's windows as a screen
- * (frames and input through that module), and screenshots.
+ * (H.264 video or JPEG frames, and input, through that module), and
+ * screenshots.
  */
 import type { ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -20,6 +21,7 @@ import {
   frontFile,
   isSoundMode,
   parseAppLine,
+  type AppCodec,
   type AppDialog,
   type AppDialogAnswer,
   type AppDialogClosed,
@@ -38,9 +40,11 @@ import {
 } from '../../shared/electron.js';
 import { JsDiagnosticParser } from '../../shared/js-diagnostics.js';
 import type { ScreenInfo } from '../../shared/protocol.js';
+import { parseStreamHeader, STREAM_FRAME } from '../../shared/stream.js';
 import { ELECTRON_HOOK_SOURCE } from '../electron-hook-source.js';
 import { HookConnection } from '../electron-socket.js';
 import { capmacHome, toolEnv } from '../env.js';
+import { VideoPacer } from '../helper/relay.js';
 import { findCapacitorCli } from '../ios-project.js';
 import { step, type AgentIO } from '../io.js';
 import { AgentError, exists, run, sleep, tryCapture } from '../proc.js';
@@ -557,11 +561,11 @@ export async function opElectronLaunch(params: ElectronLaunchParams, io: AgentIO
 // ─── The app's windows as a screen ────────────────────────────────────────
 
 /** What the screen shows of a window, in the shape the simulator's screen uses. */
-function screenInfoFor(window: AppWindowInfo | undefined): ScreenInfo {
+function screenInfoFor(window: AppWindowInfo | undefined, codec: AppCodec): ScreenInfo {
   return {
     t: 'screen',
     source: 'app',
-    codec: 'jpeg',
+    codec,
     points: window ? { width: window.width, height: window.height } : null,
     scale: window?.scale,
     input: Boolean(window),
@@ -570,8 +574,12 @@ function screenInfoFor(window: AppWindowInfo | undefined): ScreenInfo {
 }
 
 /**
- * Relays the app's windows (JPEG frames from the app's compositor) and input.
- * Waits for the app when it is not running, and follows it across restarts.
+ * Relays the app's windows and input. The smooth stream (codec 'h264') is
+ * video the app encodes, paced like a simulator's (VideoPacer: frames dropped
+ * on a slow network, keyframes, adaptive bitrate); the compatible one is JPEG
+ * frames from the app's compositor, at most two in flight. The app says which
+ * one comes (it falls back to JPEG by itself). Waits for the app when it is
+ * not running, and follows it across restarts.
  */
 export async function opElectronScreen(params: ElectronScreenParams, io: AgentIO): Promise<{ frames: number }> {
   const socket = socketPath(params.projectId);
@@ -580,13 +588,20 @@ export async function opElectronScreen(params: ElectronScreenParams, io: AgentIO
     fps: clampInt(params.fps, 1, 60, 30),
     quality: clampInt(params.quality, 30, 95, 72),
     audio: Boolean(params.audio),
+    codec: (params.codec === 'h264' ? 'h264' : 'jpeg') as AppCodec,
   };
+  const pacer = new VideoPacer(params);
+  /** What the app sends now (its `codec` message), and whether it can send video at all (its hello). */
+  let codec: AppCodec = 'jpeg';
+  let canVideo = false;
+  let videoSeq = 0;
   let pinned: number | null = typeof params.window === 'number' ? params.window : null;
   let conn: HookConnection | null = null;
   let frames = 0;
   let lastHeard = Date.now();
   let waiting: boolean | null = null;
   let lastInfo = '';
+  let lastWindow: AppWindowInfo | undefined;
   // Input that arrives while CapMac (re)attaches to the app goes out once it is attached, if still recent.
   let attached = false;
   let early: Array<{ event: AppInputEvent; at: number }> = [];
@@ -595,7 +610,14 @@ export async function opElectronScreen(params: ElectronScreenParams, io: AgentIO
     waiting = value;
     io.send({ t: 'app-waiting', waiting: value });
   };
-  const watch = () => conn?.send({ t: 'watch', window: pinned, ...options });
+  const watch = () => conn?.send({ t: 'watch', window: pinned, ...options, bitrate: pacer.bitrate.current });
+  const sendInfo = () => {
+    const info = screenInfoFor(lastWindow, codec);
+    const key = JSON.stringify(info);
+    if (key === lastInfo) return;
+    lastInfo = key;
+    io.send(info);
+  };
   // The app's dialogs, shown over its window and answered there.
   const dialogWatch = new DialogWatch(dialogSocket(socket), (dialogs, closed) => io.send({ t: 'app-dialogs', dialogs, closed }));
 
@@ -648,6 +670,18 @@ export async function opElectronScreen(params: ElectronScreenParams, io: AgentIO
         options.audio = Boolean(message.on);
         watch();
         break;
+      // Video: frames that reached the client, a decoder that needs a keyframe, and trying video again after a fallback.
+      case 'ack':
+        if (Number.isInteger(message.seq)) pacer.ack(message.seq);
+        break;
+      case 'keyframe':
+        conn?.send({ t: 'keyframe' });
+        break;
+      case 'retry-smooth':
+        options.codec = 'h264';
+        conn?.send({ t: 'retry-video' });
+        watch();
+        break;
     }
   });
 
@@ -659,11 +693,14 @@ export async function opElectronScreen(params: ElectronScreenParams, io: AgentIO
       continue;
     }
     const current = conn;
+    // A new app (or the same one restarted): its video starts over from a keyframe.
+    pacer.restart();
     current.onMessage = (message: HookMessage, binary?: Buffer) => {
       switch (message.t) {
         case 'hello': {
           setWaiting(false);
           attached = true;
+          canVideo = message.app.h264 === true;
           if (message.app.dialogs) void dialogWatch.connect();
           const recent = early.filter((item) => Date.now() - item.at < 5000);
           early = [];
@@ -671,22 +708,34 @@ export async function opElectronScreen(params: ElectronScreenParams, io: AgentIO
           break;
         }
         case 'windows': {
-          const window = message.windows.find((w) => w.id === message.watched);
+          lastWindow = message.windows.find((w) => w.id === message.watched);
           io.send({ t: 'app-windows', windows: message.windows, watched: message.watched });
-          const info = screenInfoFor(window);
-          const key = JSON.stringify(info);
-          if (key !== lastInfo) {
-            lastInfo = key;
-            io.send(info);
-          }
+          sendInfo();
           break;
         }
+        case 'codec':
+          codec = message.codec === 'h264' ? 'h264' : 'jpeg';
+          // An app that cannot send video at all (too old, no encoder), or a window that could not be captured this time.
+          io.send({ t: 'app-codec', codec, fallback: message.reason ? { code: canVideo ? 'error' : 'unsupported', message: message.reason } : null });
+          sendInfo();
+          break;
         case 'frame':
           if (!binary) break;
           frames += 1;
           // Taken by the SSH channel: the app may send the next one.
           void io.sendBinary(binary, true).then(() => current.send({ t: 'ack' }));
           break;
+        case 'video': {
+          const header = binary ? parseStreamHeader(binary) : null;
+          if (!binary || !header || codec !== 'h264') break;
+          // Numbered for this screen: a restarted app counts from 1 again, and the PC acknowledges by the highest number.
+          if (header.type === STREAM_FRAME) videoSeq += 1;
+          header.seq = videoSeq;
+          binary.writeUInt32BE(videoSeq >>> 0, 12);
+          // Sent as it comes, unless the way to the PC is slow (then deltas wait for the next keyframe).
+          if (pacer.offer(header, io.backlog)) io.sendLive(binary);
+          break;
+        }
         case 'cursor':
           io.send({ t: 'app-cursor', cursor: message.cursor });
           break;
@@ -708,8 +757,17 @@ export async function opElectronScreen(params: ElectronScreenParams, io: AgentIO
     const quiet = setInterval(() => {
       if (Date.now() - lastHeard > CLIENT_TIMEOUT_MS) current.close();
     }, 1000);
+    // Video: a keyframe once the way is clear after drops, adaptive bitrate, and how it goes every few seconds.
+    const pacing = setInterval(() => {
+      if (codec !== 'h264') return;
+      const pace = pacer.tick(io.backlog);
+      if (pace.keyframe) current.send({ t: 'keyframe' });
+      if (pace.bitrate) current.send({ t: 'bitrate', bitrate: pace.bitrate });
+      if (pace.status) io.send({ t: 'stream-status', footprint: 0, fps: pace.status.fps, dropped: pace.status.dropped, bitrate: pacer.bitrate.current });
+    }, 100);
     await current.done;
     clearInterval(quiet);
+    clearInterval(pacing);
     io.signal.removeEventListener('abort', stop);
     conn = null;
     attached = false;
@@ -722,7 +780,7 @@ export async function opElectronScreen(params: ElectronScreenParams, io: AgentIO
     }
   }
   dialogWatch.close();
-  return { frames };
+  return { frames: frames + pacer.frames };
 }
 
 /** A PNG of the app's window (the one showing, or `window`), at full resolution. */

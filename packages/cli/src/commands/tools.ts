@@ -1,6 +1,9 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
+  appFor,
+  appsOf,
+  canRun,
   capmacDir,
   cleanOnMac,
   commandLine,
@@ -19,10 +22,12 @@ import {
   scanOptionsFor,
   scanProject,
   streamAppLogs,
+  streamPreference,
   syncToMac,
   unlockKeychain,
   UserError,
   withStep,
+  type StreamPreference,
 } from '@capmac/core/engine';
 import type { Target, TargetsResult } from '@capmac/core/shared/protocol';
 import { cancelOnSigint, openForProject, type MacOption } from '../cli-context.js';
@@ -77,6 +82,12 @@ export async function infoCommand(options: { files?: boolean; live?: boolean }):
   const electron = project.electron;
   const plan = electron ? electronPlan(project) : null;
   const launch = plan ? ('electron' in plan.launch ? `electron ${plan.launch.electron.join(' ')}` : plan.launch.command) : '';
+  // A Capacitor project with an iOS app and an Electron app: which one `capmac run` uses.
+  const apps = (await appsOf(project)).filter(canRun);
+  const current = appFor(project);
+  const appsRows: Array<[string, string]> = apps.length > 1
+    ? [['Apps', `${apps.map((a) => (a.id === current ? pc.bold(a.id) : a.id)).join(', ')}  ${pc.dim(`(capmac run uses ${current}; switch with capmac apps use <app>)`)}`]]
+    : [];
   const electronRows: Array<[string, string]> = electron && plan
     ? [
         [project.kind === 'electron' ? 'Electron app' : 'Electron platform', `${electron.rel ? `${electron.rel}/ · ` : ''}${describeFlavor(electron.flavor)}${electron.electronRange ? ` · electron ${electron.electronRange}` : ''}`],
@@ -97,6 +108,7 @@ export async function infoCommand(options: { files?: boolean; live?: boolean }):
       ]
     : [
         ['App', `${project.appName} (${project.appId})`],
+        ...appsRows,
         ['Capacitor project', project.capDir],
         ['Synced folder', project.syncRoot + (project.projectRel ? pc.dim(`  (app in ${project.projectRel}/)`) : '')],
         ['Web assets', project.webDir],
@@ -251,17 +263,19 @@ export async function logsCommand(options: MacOption & { target?: string }): Pro
   }
 }
 
-export async function screenCommand(options: MacOption & { target?: string; device?: boolean; port?: string; open?: boolean; electron?: boolean; sound?: SoundMode }): Promise<void> {
+export async function screenCommand(options: MacOption & { target?: string; device?: boolean; port?: string; open?: boolean; electron?: boolean; sound?: SoundMode; stream?: StreamPreference }): Promise<void> {
   const { ctx } = terminalContext();
   const project = await loadProject(process.cwd());
   const link = new MacLink(options.mac ?? project.config.host, ctx, { autoReconnect: true });
+  // Smooth or compatible: what was asked for (kept for next time, CapMac Studio's too), else the last choice.
+  const prefer = await streamPreference(options.stream);
   let viewer: ScreenViewer | null = null;
   try {
     const session = await link.session();
     if (runsOnMac(project, options)) {
       // The Electron app's window: it shows once the app runs (`capmac run` or `capmac dev` in another terminal).
       const title = `${project.appName} · ${session.label}`;
-      viewer = await ScreenViewer.start(link, { kind: 'app', projectId: project.projectId, label: session.label }, { title, port: options.port ? Number(options.port) : undefined });
+      viewer = await ScreenViewer.start(link, { kind: 'app', projectId: project.projectId, label: session.label }, { title, port: options.port ? Number(options.port) : undefined, prefer });
       if (options.sound) await viewer.setSound(options.sound);
       if (options.open !== false) viewer.open();
       log.dim(`Shows ${project.appName}'s window while it runs on the Mac. Press Ctrl+C to stop.`);
@@ -272,7 +286,7 @@ export async function screenCommand(options: MacOption & { target?: string; devi
     // A simulator, or (--device, or --target naming it) an iPhone plugged into the Mac.
     const target = await pipeline.chooseTarget(options.device ? { target: options.target, device: true } : { target: options.target, simulator: !options.target });
     if (target.kind === 'simulator' && target.state !== 'Booted') await pipeline.call('boot', { target }).catch((err) => reportError(err));
-    viewer = await ScreenViewer.start(link, target, { title: `${project.appName} · ${target.name}`, port: options.port ? Number(options.port) : undefined });
+    viewer = await ScreenViewer.start(link, target, { title: `${project.appName} · ${target.name}`, port: options.port ? Number(options.port) : undefined, prefer });
     if (options.open !== false) viewer.open();
     if (target.kind === 'device') log.dim(`Shows ${target.name}'s screen while it is plugged into the Mac with a cable (view only). Press Ctrl+C to stop.`);
     else log.dim('Press Ctrl+C to stop sharing the screen.');

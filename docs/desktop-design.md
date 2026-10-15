@@ -936,7 +936,7 @@ WebRTC with our own server won: everything stays TypeScript, and the user's own 
 
 **Goal:** an Electron app (plain Electron, electron-vite, Electron Forge, or Capacitor's Electron platform) builds, runs, live-reloads and shows on the paired Mac exactly like an iOS app on a simulator, from the CLI and CapMac Studio, without disturbing whoever is using the Mac.
 
-**Status:** shipped in the CLI (`capmac run`, `dev`, `screen --electron`, `screenshot --electron`, `targets --electron`, `dialog`) and Studio (the *Mac desktop (Electron)* target, the window pane, the Electron sample). Verified on the real Mac (macOS 26.6, Electron 43 and 44) with the two samples, an electron-vite app and a real Capacitor game (Ludo Wala: a three.js app with a custom protocol handler, a CSP, `maximize()` on a hidden window and native modules).
+**Status:** shipped in the CLI (`capmac run`, `dev`, `screen --electron`, `screenshot --electron`, `targets --electron`, `dialog`) and Studio (the *Mac desktop (Electron)* target, the window pane, the Electron sample). Verified on the real Mac (macOS 26.6, Electron 43 and 44) with the two samples, an electron-vite app and a real Capacitor game (Ludo Wala: a three.js app with a custom protocol handler, a CSP, `maximize()` on a hidden window and native modules). Windows stream as H.264 video (*the smooth stream*), with JPEG pictures (*the compatible stream*) as the fallback: Ludo Wala's game plays at 30 fps for about 1 Mbps, where pictures took 22 Mbps.
 
 ### How it works
 
@@ -945,16 +945,41 @@ WebRTC with our own server won: everything stays TypeScript, and the user's own 
 - **CapMac's module in the app** (`src/electron-hook/hook.ts`). The agent launches the app, or its dev command, with `NODE_OPTIONS=--require <module>`. The module turns itself on only in Electron's main process, and only when the agent asked for it.
   - **Output:** it marks the main process's lines, and reports windows and every page's console as marked lines on stdout. The CLI and Studio tell main, page, Chromium and dev-tool output apart.
   - **The pages' console** comes through the DevTools protocol (`webContents.debugger`, `Runtime` and `Log`), so objects read as in DevTools (`dispatch {type: 'roll', value: 1}`, not `[object Object]`), format strings are filled in and `%c` styling is dropped. Messages logged before CapMac attached are not reported twice, and the page's kept console entries are discarded now and then so logged objects can be freed. When the app attaches its own debugger, CapMac lets go first and falls back to Electron's `console-message` event (its `%c` CSS is stripped there too).
-  - **The windows:** a Unix socket in `~/.capmac/run` serves frames from the app's own compositor (`beginFrameSubscription`, JPEG), input (`sendInputEvent`), screenshots (`capturePage`) and reloads. None of this needs Screen Recording or Accessibility permission, which SSH sessions can't get anyway.
+  - **The windows:** a Unix socket in `~/.capmac/run` serves the window as video (below) or as JPEG frames from the app's own compositor (`beginFrameSubscription`), input (`sendInputEvent`), screenshots (`capturePage`) and reloads. None of this needs Screen Recording or Accessibility permission, which SSH sessions can't get anyway.
   - **Input:** Ctrl on the PC is ⌘. Menu shortcuts run the menu item, the way macOS does, matched by the letter the PC's layout types. Text arrives as characters in order. Copying in the app sends the text to the PC's clipboard.
 - **Capacitor live reload:** Vite runs on the PC behind an SSH reverse tunnel. The module sends the app's `capacitor-electron://` loads to the dev server, drops the page's Content-Security-Policy for that origin only, and lets the dev server's own reloads through the template's navigation guard.
+
+### The window as video
+
+A busy window (a 3D game, a video) sent as JPEG pictures costs 10–25 Mbps, too much for most internet connections. So a window streams as H.264 video, like a simulator, and the pictures are the fallback.
+
+```
+the window's page ──tab capture──► CapMac's capture page (a hidden WebContentsView): VideoEncoder, H.264 on VideoToolbox
+                                    └─ipc─► the app's main process ──Unix socket──► agent op `electron-screen` ──SSH──► engine ──► pane / viewer
+```
+
+- **The capture** reuses the sound's hidden page (`src/electron-hook/capture.ts`: one `WebContentsView` in a session of its own, served on the Mac's loopback): `getMediaSourceId`, then `getUserMedia` with the `tab` source at exactly the frame size, at most 32 frames a second. It needs no macOS permission, works behind other windows, and never shows a window of its own. A capture that doesn't start within 2.5 s is stopped and asked for again with a fresh source, four times at most; 5 s without a picture counts the same.
+- **The size** is the window's own pixels, never scaled up: no bigger than the pane or viewer asks for, at most 4096×2304 (VideoToolbox's limit), and even. A running capture can't change size (`applyConstraints` stops its frames), so a resize restarts it at the new size, 250 ms after the last change.
+- **The encoder** is WebCodecs' `VideoEncoder` in that page: H.264 High (the level from the size and rate), `prefer-hardware` (VideoToolbox), `realtime`, variable bitrate, `avc` format (an avcC record, then AVCC frames). So the packets are the simulator's (`shared/stream.ts`), and the screen worker decodes both the same way. A keyframe comes on request and with every new size. A still window sends nothing; a new viewer gets one keyframe. When the hardware encoder fails, the software one gets one try; while more than two frames wait for the encoder, new ones are skipped.
+- **On the way:** the page hands each packet to the main process (`webContents.ipc`), and the module writes it to each viewer's socket, at most 2 MB behind (past that, it skips frames until a keyframe). The module numbers the frames per viewer and the agent per stream, so acknowledgements keep working when the capture or the app restarts.
+- **Pacing:** the agent op uses the simulator's latency cap and adaptive bitrate (`VideoPacer` in `agent/helper/relay.ts`). When the oldest unacknowledged frame is more than 350 ms old, it sends no deltas and resumes from a keyframe. The bitrate drops 30% on lag or dropped frames and rises 15% after three calm seconds, starting at 6 Mbps on the local network (1–6), 4 peer to peer (0.5–6) and 2.5 through the relay (0.4–4). Variable bitrate uses only what the picture needs: Ludo Wala's game takes about 1 Mbps of its 6.
+- **It follows the watched window:** switching to another window, or closing this one, restarts the capture on the window now shown. Page reloads keep the capture, and a restarted app streams again when the viewer reconnects.
+- **The compatible stream** (JPEG frames from the compositor, as before) takes over, and the pane or viewer says why, when:
+  - the app's Electron is older than 30 (Electron 29's early `WebContentsView` never answers), or CapMac's capture page doesn't answer within 6 s;
+  - the capture or the encoder can't start, or keeps failing;
+  - the user chose it.
+
+  *Try the smooth stream again*, in Studio's note and the CLI viewer's banner, asks for video once more.
+- **One setting** for simulators and app windows, shared by the CLI and Studio: **Settings › Screen stream**, `--stream smooth|compatible` on `capmac dev` and `capmac screen` (remembered), and `stream` in `~/.capmac/config.json`. Smooth is the default.
+- **A side effect:** while a window streams as video, Chromium's tab capture keeps the Mac's display awake (a "screen capture" power assertion, as for any shared tab). That lasts only while a pane or viewer shows the window.
+- **Found on the way:** ssh2 doesn't set `TCP_NODELAY`, so Nagle's algorithm (waiting for the Mac's delayed ACKs) held the engine's small writes back by 100–200 ms: acknowledgements, so the latency cap and the bitrate thought the network was slow, and input too. The engine now sets it on its SSH socket, for every stream.
 
 ### Sound
 
 Someone may be working at the Mac, so an app's sound is **off** by default. The CLI (`--sound off|mac|pc` on `run`, `dev` and `screen`; `s` in `dev`) and Studio (the speaker button under the window) offer the same three choices, remembered per project in `~/.capmac/projects.json`:
 
 - **Off** and **on this PC** mute the app's pages on the Mac (`webContents.setAudioMuted`). The app's own `setAudioMuted` still counts, and its `isAudioMuted()` keeps answering what the app asked for.
-- **On this PC:** a hidden page of CapMac's (a `WebContentsView` in a session of its own, served on the Mac's loopback so it is a secure context with a real origin) captures each window's sound the way Chromium captures a tab: `getMediaSourceId`, then `getUserMedia` with the `tab` source. That needs no macOS permission, and muting the page leaves the capture alone. The windows are mixed in an `AudioContext`, encoded as 96 kbps Opus with WebCodecs, and sent in batches of about 60 ms to the window pane or viewer, which decodes and plays them with a 120 ms cushion. The capture runs only while a pane or viewer listens; it needs Electron 30 or later (CapMac says so and leaves the sound off before that).
+- **On this PC:** a hidden page of CapMac's (a `WebContentsView` in a session of its own, served on the Mac's loopback so it is a secure context with a real origin; the same page sends the windows as video) captures each window's sound the way Chromium captures a tab: `getMediaSourceId`, then `getUserMedia` with the `tab` source. That needs no macOS permission, and muting the page leaves the capture alone. The windows are mixed in an `AudioContext`, encoded as 96 kbps Opus with WebCodecs, and sent in batches of about 60 ms to the window pane or viewer, which decodes and plays them with a 120 ms cushion. The capture runs only while a pane or viewer listens; it needs Electron 30 or later (CapMac says so and leaves the sound off before that).
 - **On the Mac:** the app as it would be without CapMac.
 
 Measured with Ludo Wala's background music: about 100 buffers a second reached the pane (two channels of 20 ms packets) with the music's level (RMS 0.0037), and *Sound off* stopped them at once.
@@ -1010,12 +1035,40 @@ Input through the stream (clicks, typing, paste, ⌘A, a menu shortcut, the whee
 
 Dialogs, 2026-10-15, same Mac: each kind (a sheet with a checkbox, a blocking `showMessageBoxSync`, an open dialog with two files and a type filter, a save into a new folder, `showErrorBox`) was answered from Studio's pane in light and dark, the CLI's viewer, the terminal and `capmac dialog`. The app's code had the answer within 0.2 s of the click, and the Mac's front app never changed.
 
-Ludo Wala (Capacitor Electron, Electron 43): the first sync went from 4.7 GB to 180 MB once videos and big pictures stayed on the PC (11 s over Wi-Fi); a cold `capmac run` took 57 s in Studio, most of it the web build on the PC. The three.js window streams at 19 fps in the CLI's viewer (its 20 fps cap) and 28-29 fps in Studio (about 24 Mbps at 2400 px), and the game plays through it: menus, typing a name with ⌘A, rolling and moving. Live reload: an edit reloaded the page on the Mac 0.4 s after saving; a main-process edit ran 2.3 s after saving, `tsc` included.
+Ludo Wala (Capacitor Electron, Electron 43): the first sync went from 4.7 GB to 180 MB once videos and big pictures stayed on the PC (11 s over Wi-Fi); a cold `capmac run` took 57 s in Studio, most of it the web build on the PC. The game plays through the stream: menus, typing a name with ⌘A, rolling and moving. Live reload: an edit reloaded the page on the Mac 0.4 s after saving; a main-process edit ran 2.3 s after saving, `tsc` included.
+
+The window as video, 2026-10-15, same Mac and Wi-Fi. Ludo Wala's window is 1000×768 (the Mac's display is 1×), played by a script; *pictures* is the JPEG stream as it was before (commit 4ffe886), *video* the smooth stream:
+
+| | Pictures | Video |
+|---|---|---|
+| Studio, the game | 28.9 fps, 22.4 Mbps | 30.3 fps, 0.98 Mbps |
+| Studio, the menu (animated) | 28.7 fps, 17.8 Mbps | 26.2 fps, 0.86 Mbps (Wi-Fi pings of 18–310 ms then, and the bitrate at its 1 Mbps floor) |
+| The CLI's viewer, the game | 13.4 fps, 9.3 Mbps (its cap was 20 fps); 19.5 fps, 14.3 Mbps with `--stream compatible` now | 32.8 fps, 1.04 Mbps; arriving 6 ms (p50) and 21 ms (p90) later than the quickest frame |
+| Capture on the Mac → on the PC's screen, Studio | | p50 19 ms; decoding 0.6 ms a frame (a JPEG took 4.2 ms) |
+| Hello Electron, a still window | nothing | one keyframe (29 KB) for a new viewer, then nothing |
+| A click → the new picture, Hello Electron's counter (p50 of two rounds of 12 clicks, back to back in the same build) | Studio 79 and 147 ms; the CLI's viewer 95 and 109 ms | Studio 63 and 63 ms; the CLI's viewer 91 and 94 ms |
+
+The CLI viewer's click times were read from what its page shows (a copy of the picture checked every animation frame in headless Edge), so they include about 40 ms of the browser's own drawing; Studio's come from its screen worker.
+
+Through a throttling proxy on the local route (so the bitrate's floor stayed at 1 Mbps):
+
+- **1.5 Mbps:** at a scene change the bitrate went 6 → 4.2 → 2.9 → 1.0 Mbps; the stream then used 0.3–0.75 Mbps at about 12 fps, and the game stayed playable.
+- **1.0 Mbps:** 29.4 fps at about 0.9 Mbps; frames arrived 40 ms (p50) and 183 ms (p90) later than the quickest, and about 15% were dropped.
+
+Also verified on the Mac:
+
+- a page reload keeps the video; after a main-process restart (`capmac dev`), video comes back with a new keyframe, and clicks draw new frames;
+- the video follows a new window the app brings forward, a window picked by hand (its first keyframe about 0.3 s later), and the remaining window when the watched one closes;
+- a copy of Hello Electron on Electron 29.4.6 gets pictures at once, and Studio's note and the CLI's banner say "Electron 29.4.6 can't send its windows as video (that needs Electron 30 or later)";
+- the Mac's front app (`lsappinfo front`, every 100 ms) was only ever one the person at the Mac chose, and the capture page never showed a window;
+- the CLI viewer's simulator tries the smooth stream too (it shares the setting), and falls back by itself when the simulator sends no picture.
 
 ### Next
 
 - Open links the app opens on the PC instead of the Mac.
-- The window's frames are JPEG at a fixed quality: over the internet a busy 3D app needs adaptive quality (or H.264 from the compositor's frames).
+- The window stream between two real networks, once the signaling server is on the VPS (here only through a throttling proxy).
+- Electron 29 and older: host the capture page in a `BrowserView` (they have no working `WebContentsView`), so they get video too.
+- The display stays awake while a window streams as video (Chromium's tab capture): find a way to let it sleep when nobody is at the Mac.
 - Capacitor live reload loads the dev server's origin (`http://localhost:<port>`), so the page's storage is not the run's (`capacitor-electron://-`), as on iOS. Serving the dev server under the app's own scheme would keep it.
 - Upload a file from the PC to answer an open dialog.
 
@@ -1046,3 +1099,23 @@ iPhone ──USB──► Mac: iOSScreenCaptureAssistant (CoreMediaIO, what Quic
 - **View only.** The pane and the viewer show the screen; taps and typing happen on the iPhone itself.
 - **The cable is needed.** CoreMediaIO's wireless screen capture is for Apple TV, so an iPhone on Wi-Fi alone runs the app but shows no screen. iOS 26 lists a "view device screen" CoreDevice feature for Xcode's own device window; nothing in Xcode 26.6 opens it yet.
 - **Pass-through, maybe later.** The phone already sends H.264 over USB; AVFoundation decodes it and the helper encodes it again (a few milliseconds on Apple silicon). Forwarding the phone's own stream would save that, but CapMac would lose keyframes on request and the size and bitrate control.
+
+## 9. Several apps in one folder
+
+**Goal:** a folder with more than one app (a Capacitor project's iOS app and its Electron platform, a monorepo with a phone app and a desktop app) is found as such the moment it is added, and the developer picks the app to work on, like Xcode's scheme. Other frameworks are recognized and named, ready for the day CapMac runs them.
+
+**Status:** built in core (`src/engine/apps.ts`), Studio (the chooser, the toolbar's app picker, the palette's *Switch to the … app*) and the CLI (`capmac apps`, `capmac apps use <app>`, `--app` on `run`, `dev`, `build`, `screen` and `screenshot`).
+
+### How it works
+
+- **Detectors, one per framework.** Each looks at one folder's entries and answers with its apps, or nothing: Capacitor (the iOS app from `ios/App`, the Electron app from `electron/`), Tauri, Flutter, React Native and Expo, NativeScript, Cordova, .NET MAUI, plain Electron, then Xcode last, so a framework's own Xcode project (`ios/App/App.xcodeproj`) stays the framework's. The first that answers owns the folder, and the folders its apps live in are not searched again. A new framework is one more detector.
+- **Reading, never running.** Detection reads `capacitor.config.*` literals, `package.json`, `pubspec.yaml`, `*.csproj`, `project.pbxproj` and the like. Nothing runs, so it is fast enough for the moment a folder is dropped (5 to 40 ms on real projects).
+- **Up, then down.** The project around the picked folder comes first: that folder, or the nearest one above it, up to the repository's root (an app's own folder like `electron/` or `ios/App` belongs to the project around it, and is offered first). Then the folders below it, three deep, nearest first, skipping dependencies, build output and dot folders, at most 800 folders and 24 projects.
+- **Only apps.** Below the picked folder (or above it), a `package.json` that depends on Electron must also build or start it (electron-builder, Forge, electron-vite, or a script running `electron .`): libraries depend on Electron to test with it, and a stray `package.json` in the home folder is no app. An Xcode project counts only with an application target (a plugin's builds a framework).
+- **The choice** is remembered per project in `~/.capmac/projects.json` (`app`), so the CLI and Studio share it. Which app a command is for (`appFor`): `--app`, then the project itself when it is an Electron app, then a place only one app runs (`--electron`, `--target mac`, a simulator, a device), then the app picked, then the iOS app, then the Electron app. `--app` is for one command; `capmac apps use` and Studio's picker change the choice.
+- **In Studio,** adding a folder (picking, dropping, or a folder on the command line) runs detection. One app opens at once; several open the chooser, with the suggested one selected (keyboard: arrows, 1 to 9, Enter). A project added before apps could be picked asks once, the first time it opens; one whose target was the Mac's desktop keeps the Electron app without asking. Targets follow the app: simulators and devices for the iOS app, only the Mac's desktop for the Electron app. Switching while an app runs asks first, then stops it.
+
+### Next
+
+- **The iOS app on the Mac** ("Designed for iPad", Apple silicon) — *not possible for a third-party tool.* Detection finds such a project and the build for the Mac works, but macOS only runs a locally built iOS app once it is installed through a private system service (`InstallLocalProvisioned`, a Gatekeeper bypass) that only Xcode's own helper, with Apple-private entitlements, may call; `devicectl` will not target the local Mac either. So CapMac can't start it the way Xcode's Run button does. Asking for the Mac as a run target says so and points to a simulator or a plugged-in iPhone. (Store builds run because they were installed through that same path already.)
+- **Runners for the recognized frameworks**, starting with native Xcode and SwiftPM (xtool) projects.

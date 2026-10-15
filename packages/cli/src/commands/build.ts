@@ -1,10 +1,11 @@
-import { buildApp, loadApiKey, loadProject, MacLink, requireIos, type ExportKind } from '@capmac/core/engine';
+import { appFor, buildApp, loadApiKey, loadProject, MacLink, requireIos, UserError, type ExportKind } from '@capmac/core/engine';
 import { cancelOnSigint } from '../cli-context.js';
 import { terminalContext } from '../terminal.js';
 import { log, pc } from '../ui.js';
 
 export interface BuildCommandOptions {
   mac?: string;
+  app?: string;
   target?: string;
   device?: boolean;
   simulator?: boolean;
@@ -28,6 +29,10 @@ export interface BuildCommandOptions {
 
 export async function buildCommand(options: BuildCommandOptions): Promise<void> {
   const project = await loadProject(process.cwd());
+  // `capmac build` makes the iOS app, whichever app the project works on.
+  if (options.app && appFor(project, { app: options.app }) === 'electron') {
+    throw new UserError('`capmac build` builds the iOS app.', 'Run the Electron app with `capmac run --app electron`, and package it with its own tools (electron-builder, Forge).');
+  }
   requireIos(project);
   const auth = await loadApiKey(options, project);
   const { ctx } = terminalContext({ mode: 'other', allWarnings: options.allWarnings });

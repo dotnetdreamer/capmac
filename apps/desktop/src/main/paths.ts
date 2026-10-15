@@ -29,15 +29,22 @@ export function iconsDir(): string {
   return app.isPackaged ? resources('icons') : path.join(appRoot(), 'resources', 'icons');
 }
 
-export function sampleDir(): string | null {
-  const dir = app.isPackaged ? resources('sample') : path.join(appRoot(), '..', '..', 'examples', 'hello-capacitor');
-  return existsSync(dir) ? dir : null;
+function firstExisting(dirs: string[]): string | null {
+  return dirs.find((dir) => existsSync(dir)) ?? null;
 }
 
-/** The Electron sample ("Try the Electron sample"). */
+/**
+ * The sample ("Try a sample"). Installed: next to app.asar. Otherwise the
+ * repo's examples folder, else the copy a production build put in out/ (a
+ * build copied out of the repo has no examples folder around it).
+ */
+export function sampleDir(): string | null {
+  return firstExisting(app.isPackaged ? [resources('sample')] : [path.join(appRoot(), '..', '..', 'examples', 'hello-capacitor'), outDir('sample')]);
+}
+
+/** The Electron sample ("Try the Electron sample"), found the same way. */
 export function electronSampleDir(): string | null {
-  const dir = app.isPackaged ? resources('sample-electron') : path.join(appRoot(), '..', '..', 'examples', 'hello-electron');
-  return existsSync(dir) ? dir : null;
+  return firstExisting(app.isPackaged ? [resources('sample-electron')] : [path.join(appRoot(), '..', '..', 'examples', 'hello-electron'), outDir('sample-electron')]);
 }
 
 /** node-datachannel (WebRTC for remote access), shipped next to app.asar; in development it comes from node_modules. */

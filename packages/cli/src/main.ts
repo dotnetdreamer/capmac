@@ -1,4 +1,5 @@
 import { Command, Option } from 'commander';
+import { appsCommand, appsUseCommand } from './commands/apps.js';
 import { buildCommand } from './commands/build.js';
 import { capCommand } from './commands/cap.js';
 import { devCommand } from './commands/dev.js';
@@ -71,9 +72,13 @@ program
 const mac = () => new Option('--mac <name>', 'which paired Mac to use');
 const routeOption = () => new Option('--route <how>', 'how to reach the Mac this time (default: its remote-access setting)').choices(ROUTE_CHOICES);
 const soundOption = () => new Option('--sound <where>', "an Electron app's sound: off, on the mac, or on this pc (in the window viewer); remembered for the project (default off)").choices(['off', 'mac', 'pc']);
+const streamOption = () => new Option('--stream <how>', 'how the screen viewer streams: smooth (video, far less data) or compatible (pictures); remembered, and CapMac Studio uses it too (default smooth)').choices(['smooth', 'compatible']);
+
+const appOption = () => new Option('-a, --app <app>', "which of the project's apps: ios or electron (see `capmac apps`; default: the one picked with `capmac apps use` or in CapMac Studio)");
 
 function targetOptions(cmd: Command): Command {
   return cmd
+    .addOption(appOption())
     .option('-t, --target <name|udid>', 'simulator or device to use (see `capmac targets`); "mac" for the Electron app')
     .option('-d, --device', 'run on a connected iPhone/iPad instead of a simulator')
     .option('-s, --simulator', 'only consider simulators')
@@ -147,7 +152,8 @@ buildOptions(targetOptions(
     .option('--show-simulator', 'also open the Simulator window on the Mac\'s screen')
     .option('--os-logs', 'also show NSLog/os_log output, like Xcode\'s console')
     .option('--bridge', 'show Capacitor bridge traffic in the logs')
-    .addOption(soundOption()),
+    .addOption(soundOption())
+    .addOption(streamOption()),
 )).action(wrap(devCommand));
 
 buildOptions(targetOptions(
@@ -162,6 +168,19 @@ buildOptions(targetOptions(
     .option('--upload', 'archive and upload to App Store Connect / TestFlight')
     .option('-o, --out <dir>', 'where to save the .ipa (default: build/ios)'),
 )).action(wrap(buildCommand));
+
+const apps = program
+  .command('apps')
+  .description('the apps in this folder (an iOS app and an Electron app, or the projects of a monorepo) and which one CapMac works on: list | use');
+apps
+  .command('list', { isDefault: true })
+  .description('list the apps CapMac finds here, in the folders above and in the ones inside (no Mac needed)')
+  .option('--json', 'machine-readable output')
+  .action(wrap(appsCommand));
+apps
+  .command('use <app>')
+  .description('work on this app from now on (ios or electron): capmac run, capmac dev and CapMac Studio use it')
+  .action(wrap((app: string) => appsUseCommand(app)));
 
 program
   .command('info')
@@ -182,18 +201,21 @@ program
   .command('screen')
   .description("show the Mac's simulator in your browser, with touch and keyboard input (a plugged-in iPhone: its screen; an Electron app: its window)")
   .addOption(mac()).addOption(routeOption())
+  .addOption(appOption())
   .option('-t, --target <name|udid>', 'simulator or device to show')
   .option('-d, --device', 'the iPhone or iPad plugged into the Mac with a cable (view only)')
   .option('-e, --electron', "the Electron app's window (it must be running)")
   .option('--port <port>', 'local port for the viewer (default 7373)')
   .option('--no-open', 'do not open the browser automatically')
   .addOption(soundOption())
+  .addOption(streamOption())
   .action(wrap(screenCommand));
 
 program
   .command('screenshot [file]')
   .description("save a PNG of the running simulator's screen, a plugged-in iPhone's, or the Electron app's window (default: a temp file; the path is printed)")
   .addOption(mac()).addOption(routeOption())
+  .addOption(appOption())
   .option('-t, --target <name|udid>', 'simulator or device (default: the booted simulator this app last ran on)')
   .option('-d, --device', 'the iPhone or iPad plugged into the Mac with a cable')
   .option('-e, --electron', "the Electron app's window (it must be running)")

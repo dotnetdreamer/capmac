@@ -4,8 +4,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import { BitrateController } from '../../packages/core/src/agent/helper/bitrate.js';
+import { VideoPacer } from '../../packages/core/src/agent/helper/relay.js';
 import { VideoWindow } from '../../packages/core/src/agent/helper/window.js';
 import { bitratesFor } from '../../packages/core/src/engine/screen.js';
+import { STREAM_CONFIG, STREAM_FRAME, type StreamHeader } from '../../packages/core/src/shared/stream.js';
 
 const calm = { peakLagMs: 30, dropped: 0, frames: 60, backlogBytes: 0 };
 const lagging = { peakLagMs: 400, dropped: 0, frames: 30, backlogBytes: 0 };
@@ -76,5 +78,72 @@ describe('adaptive bitrate', () => {
     window.ack(2);
     expect(window.takePeakLag()).toBe(150);
     expect(window.takePeakLag()).toBe(0);
+  });
+});
+
+/** Shared by every smooth stream: a simulator's, an iPhone's and an Electron app's window. */
+describe('video pacing', () => {
+  const frame = (seq: number, key = false): StreamHeader => ({ type: STREAM_FRAME, key, captureUs: 0, seq });
+  function pacer() {
+    let t = 0;
+    const p = new VideoPacer({ bitrate: 6_000_000, minBitrate: 1_000_000, maxBitrate: 6_000_000 }, () => t);
+    return { p, advance: (ms: number) => (t += ms) };
+  }
+
+  it('sends configs always, and frames while the client keeps up', () => {
+    const { p, advance } = pacer();
+    expect(p.offer({ type: STREAM_CONFIG, key: false, captureUs: 0, seq: 0 }, 0)).toBe(true);
+    for (let seq = 1; seq <= 30; seq++) {
+      expect(p.offer(frame(seq, seq === 1), 0)).toBe(true);
+      p.ack(seq);
+      advance(33);
+    }
+    expect(p.frames).toBe(30);
+    expect(p.tick(0)).toMatchObject({ keyframe: false, bitrate: null });
+  });
+
+  it('drops deltas when frames stop being acknowledged, asks for a keyframe once the way is clear, and backs the bitrate off', () => {
+    const { p, advance } = pacer();
+    p.offer(frame(1, true), 0);
+    advance(400);
+    // Frame 1 is 400 ms old and unacknowledged: deltas wait.
+    expect(p.offer(frame(2), 0)).toBe(false);
+    expect(p.tick(0).keyframe).toBe(false);
+    p.ack(1);
+    advance(600);
+    const pace = p.tick(0);
+    expect(pace.keyframe).toBe(true);
+    expect(pace.bitrate).toBe(4_200_000);
+    expect(p.offer(frame(3, true), 0)).toBe(true);
+    expect(p.dropped).toBe(1);
+  });
+
+  it('reports every five seconds', () => {
+    const { p, advance } = pacer();
+    const statuses: unknown[] = [];
+    for (let seq = 1; seq <= 160; seq++) {
+      p.offer(frame(seq, seq === 1), 0);
+      p.ack(seq);
+      advance(1000 / 30);
+      const pace = p.tick(0);
+      if (pace.status) statuses.push(pace.status);
+    }
+    expect(statuses).toEqual([{ fps: 30, dropped: 0 }]);
+  });
+
+  it('forgets the frames in flight when the source starts over, and keeps its bitrate', () => {
+    const { p, advance } = pacer();
+    p.offer(frame(1, true), 0);
+    advance(400);
+    p.offer(frame(2), 0);
+    advance(1000);
+    p.tick(0);
+    const bitrate = p.bitrate.current;
+    p.restart();
+    // A new app sends seq 1 again: nothing old is in the way.
+    expect(p.offer(frame(1, true), 0)).toBe(true);
+    expect(p.offer(frame(2), 0)).toBe(true);
+    expect(p.bitrate.current).toBe(bitrate);
+    expect(p.dropped).toBe(1);
   });
 });

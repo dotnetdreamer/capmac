@@ -54,8 +54,8 @@ function videoSizeFor(canvasPixels: number, devicePixels: number | null): number
   return Math.max(640, Math.min(2400, devicePixels ?? 2400, want));
 }
 
-/** The stream note in the footer: why the compatible stream is on, and the ways back. */
-function CompatibleNote({ fallback, onRetry, onRestart }: { fallback: StreamFallback; onRetry: () => void; onRestart: () => void }) {
+/** The stream note in the footer: why the compatible stream is on, and the ways back (an app's window has no simulator to restart). */
+export function CompatibleNote({ fallback, onRetry, onRestart }: { fallback: StreamFallback; onRetry: () => void; onRestart?: () => void }) {
   const pop = usePopover();
   return (
     <>
@@ -75,7 +75,7 @@ function CompatibleNote({ fallback, onRetry, onRestart }: { fallback: StreamFall
             </details>
           )}
           <div className="sim__compat-actions">
-            {fallback.restartSimulator && (
+            {fallback.restartSimulator && onRestart && (
               <Button size="sm" icon="power" onClick={() => { pop.close(); onRestart(); }}>
                 {t.simulator.restart}
               </Button>

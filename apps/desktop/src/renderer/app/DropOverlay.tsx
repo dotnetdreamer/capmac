@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { t } from '../../shared/i18n';
-import { openProject } from '../state/actions';
+import { addProject } from '../state/actions';
 import { Icon } from '../ui/Icon';
 
-/** Drop a Capacitor app folder anywhere on the window to open it. */
+/** Drop an app's folder (or a folder of apps) anywhere on the window to add it. */
 export function DropOverlay() {
   const [over, setOver] = useState(false);
   useEffect(() => {
@@ -32,7 +32,7 @@ export function DropOverlay() {
       const file = e.dataTransfer?.files[0];
       if (!file) return;
       const path = window.capmac.pathForFile(file);
-      if (path) void openProject(path);
+      if (path) void addProject(path);
     };
     window.addEventListener('dragenter', enter);
     window.addEventListener('dragleave', leave);

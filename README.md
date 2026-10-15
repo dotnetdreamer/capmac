@@ -159,15 +159,17 @@ It is not enabled automatically by a temporary `npx capmac` copy or when `CI=tru
 | `capmac build --ipa` | Export a signed IPA to `build/ios/` |
 | `capmac build --upload` | Upload to App Store Connect for TestFlight |
 | `capmac targets` | List simulators and connected devices |
-| `capmac screen` | View and control a simulator in your browser, or watch a plugged-in iPhone with `--device` |
+| `capmac screen` | View and control a simulator in your browser (use `--stream compatible` for screenshots), or watch a plugged-in iPhone with `--device` |
 | `capmac screenshot [file]` | Save a PNG of a simulator, or of a plugged-in iPhone with `--device`, and print its path |
 | `capmac doctor --fix` | Check setup and repair what it can |
 | `capmac info --files` | Show the detected project and exact sync list without connecting |
+| `capmac apps` | List the apps in this folder and the selected app; use `capmac apps use <app>` to switch |
 | `capmac exec -- <command>` | Run a command in the Mac's project copy |
 | `capmac pull <path>` | Copy files back from the Mac |
 | `capmac open` | Open the project in Xcode on the Mac |
 
 Use `--target "<name or UDID>"` to select a simulator or device and `--mac <name>` to select a paired Mac.
+For [projects with several apps](#one-folder-several-apps), use `--app ios` or `--app electron` to choose which app to run.
 For scripts, `capmac run --no-logs` returns after launch, while `capmac run --for 20` captures the console for 20 seconds and then stops the app.
 
 Build errors use Windows file paths so you can open them from your terminal.
@@ -234,6 +236,12 @@ In a Capacitor project, add `--electron` or `--target mac` to run the Electron p
 `capmac screenshot --electron` saves a PNG of the window.
 The Mac needs no Screen Recording or Accessibility permission for this.
 
+The Mac encodes and streams the window as H.264 video.
+A still window sends one frame when a viewer connects, then no more until it changes.
+On slow connections, CapMac lowers the bitrate and skips frames to keep the stream responsive.
+Electron versions older than 30 use screenshots, and `--stream compatible` selects them on newer versions too.
+CapMac remembers this choice for both the CLI and Studio, where you can change it under **Settings › Screen stream**.
+
 Someone may be using the Mac while you work, so the app opens behind their windows and never takes their keyboard.
 DevTools and full screen wait until someone switches to the app on the Mac.
 After a restart, the app comes back to the front only if someone was using it there.
@@ -251,6 +259,27 @@ Change how the app is found, built or started in `capmac.json`.
 ```json
 { "electron": { "dir": "electron", "build": "npm run build", "start": "npm start", "dev": "npm run dev" } }
 ```
+
+## One folder, several apps
+
+A folder can contain both a Capacitor iOS app and an Electron app for the Mac.
+CapMac finds the apps by reading their files, without running them.
+It also checks subfolders in a monorepo.
+
+Studio asks which app to use if you haven't already chosen one.
+Opening an app's folder, such as `electron/`, suggests that app.
+Use the toolbar's app picker to switch later.
+Targets follow your choice: simulators and connected iPhones for iOS, or the Mac desktop for Electron.
+
+The CLI uses the same saved choice:
+
+```powershell
+capmac apps                 # the apps here, and the one CapMac uses
+capmac apps use electron    # from now on, in the CLI and Studio
+capmac run --app ios        # just this once
+```
+
+CapMac also recognizes Flutter, React Native, Expo, Tauri, .NET MAUI, Cordova, NativeScript and Xcode projects, but can't run them yet.
 
 ## Configuration
 

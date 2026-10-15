@@ -3,8 +3,10 @@ import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from 'react-re
 import type { Target } from '../../../shared/contract';
 import { t, tidy } from '../../../shared/i18n';
 import { workspaceBus, type WorkspaceAction } from '../../app/commands';
-import { both, forgetProject } from '../../state/actions';
+import { canRun, searchOf } from '../../lib/apps';
+import { appOf, both, forgetProject, setApp } from '../../state/actions';
 import { toast, useApp } from '../../state/app';
+import { useChooser } from '../../state/chooser';
 import { call, errorInfo } from '../../state/engine';
 import { resolveMac, useMacs, useTargets, useWatchTargets } from '../../state/macs';
 import { projectKey, useProject, useProjects } from '../../state/projects';
@@ -42,6 +44,9 @@ function Pane({ title, sub, actions, children, className, labelledBy }: { title:
 }
 
 const storage = typeof localStorage === 'undefined' ? undefined : localStorage;
+
+/** Projects already asked which app to work on, since Studio started (a dismissed question waits for the next start). */
+const asked = new Set<string>();
 
 /** Offers `npm install` (or the project's package manager) when node_modules is missing on this PC. */
 function DepsBanner({ path, packageManager, onInstalled }: { path: string; packageManager: string; onInstalled: () => void }) {
@@ -89,9 +94,11 @@ export function Workspace({ path }: { path: string }) {
   const deviceFrame = useApp((s) => s.settings?.deviceFrame ?? true);
   const mac = resolveMac(macs, prefs?.mac ?? entry.summary?.host);
   const electron = entry.summary?.electron ?? null;
-  // An Electron app on its own (or Capacitor with Electron and no iOS) only runs on the Mac's desktop.
-  const onlyMac = Boolean(electron && (entry.summary?.kind === 'electron' || !entry.summary?.hasIos));
-  const macDesktop = useMemo(() => (mac && electron ? macDesktopTarget(mac.label, mac.macos) : null), [mac, electron]);
+  // The app Run and Live use: the Electron app only runs on the Mac's desktop, the iOS app in simulators and on devices.
+  const app = appOf(entry.summary, prefs ?? {}) ?? 'ios';
+  const onlyMac = Boolean(electron && app === 'electron');
+  // Without a Mac yet, still the Mac's desktop: the pane then says how to pair one.
+  const macDesktop = useMemo(() => (onlyMac ? macDesktopTarget(mac?.label ?? t.targets.macGroup, mac?.macos ?? null) : null), [mac, onlyMac]);
   useWatchTargets(onlyMac ? null : mac?.name);
   const targetsEntry = useTargets((s) => (mac ? s.byMac[mac.name] : undefined));
   const targets = targetsEntry?.targets ?? null;
@@ -113,16 +120,35 @@ export function Workspace({ path }: { path: string }) {
     });
   }, [inspect, path]);
 
+  // A project with more than one app, opened before one was picked: ask which, once.
+  const summaryNow = entry.summary;
+  useEffect(() => {
+    if (!summaryNow || summaryNow.appChosen || summaryNow.apps.filter(canRun).length < 2) return;
+    const key = projectKey(path);
+    if (asked.has(key)) return;
+    asked.add(key);
+    // The Mac's desktop picked as the target was how the Electron app was picked before: keep that.
+    if (prefs?.target === MAC_TARGET_ID && summaryNow.apps.some((a) => a.id === 'electron')) {
+      void setApp(path, 'electron');
+      return;
+    }
+    void useChooser
+      .getState()
+      .ask(searchOf(summaryNow))
+      .then((choice) => choice && setApp(choice.dir, choice.app));
+  }, [summaryNow, path, prefs?.target]);
+
   // The target: the toolbar pick, else the last run's, else what `capmac run` would choose. Always with live state.
   const { target, auto } = useMemo((): { target: Target | null; auto: boolean } => {
-    // The Mac's desktop when picked (Run and Live go where the picker points), or when it is the only place to run.
-    if (macDesktop && (onlyMac || prefs?.target === MAC_TARGET_ID)) return { target: macDesktop, auto: onlyMac && prefs?.target !== MAC_TARGET_ID };
+    // The Electron app runs on the Mac's desktop, and only there.
+    if (macDesktop) return { target: macDesktop, auto: false };
     const all = targets ? [...targets.simulators, ...targets.devices] : [];
-    const picked = prefs?.target ? all.find((item) => item.udid === prefs.target) : undefined;
+    const picked = prefs?.target && prefs.target !== MAC_TARGET_ID ? all.find((item) => item.udid === prefs.target) : undefined;
     if (picked) return { target: picked, auto: false };
-    if (run?.target) return { target: all.find((item) => item.udid === run.target!.udid) ?? run.target, auto: true };
+    // A Mac target left over from an Electron run is not for the iOS app (only it reaches here): ignore it.
+    if (run?.target && run.target.kind !== 'mac') return { target: all.find((item) => item.udid === run.target!.udid) ?? run.target, auto: true };
     return { target: automaticTarget(targets), auto: true };
-  }, [targets, prefs?.target, run?.target, macDesktop, onlyMac]);
+  }, [targets, prefs?.target, run?.target, macDesktop]);
 
   const errors = run?.diagnostics.filter((d) => d.severity === 'error').length ?? 0;
   // The tab counts what the Problems list shows, not the dependency warnings folded away.
@@ -200,13 +226,13 @@ export function Workspace({ path }: { path: string }) {
   }
 
   const summary = entry.summary;
-  const electronKind = summary.electron ? (summary.electron.flavor === 'capacitor' ? 'capacitor' : 'plain') : null;
+  const electronKind = summary.electron && app === 'electron' ? (summary.electron.flavor === 'capacitor' ? 'capacitor' : 'plain') : null;
   const onMacTarget = target?.kind === 'mac';
   return (
     <div className="workspace">
-      <Toolbar path={path} summary={summary} icon={entry.icon} run={run} macs={macs} mac={mac} targets={targets} target={target} autoTarget={auto} targetsLoading={Boolean(mac) && !targets && !targetsEntry?.error} macDesktop={macDesktop} onlyMac={onlyMac} />
+      <Toolbar path={path} summary={summary} icon={entry.icon} run={run} macs={macs} mac={mac} targets={targets} target={target} autoTarget={auto} targetsLoading={Boolean(mac) && !targets && !targetsEntry?.error} macDesktop={macDesktop} onlyMac={onlyMac} app={app} />
       <SessionBar path={path} run={run} mac={mac} electron={electronKind} />
-      {!summary.hasIos && !summary.electron && (
+      {app === 'ios' && !summary.hasIos && (
         <div className="session-banner">
           <InfoBar tone="caution" title={t.workspace.noIosTitle}>
             <Rich text={t.workspace.noIosBody} />

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { Target } from '../../shared/contract';
 import { t } from '../../shared/i18n';
-import { macFor, openProject, setProjectPrefs } from '../state/actions';
+import { appOf, macFor, openProject, projectPrefs, setProjectPrefs } from '../state/actions';
 import { useApp } from '../state/app';
 import { call } from '../state/engine';
 import { useMacs, useTargets } from '../state/macs';
@@ -71,11 +71,11 @@ function useItems(mode: string | null): { items: Item[]; placeholder: string } {
       };
     }
     if (mode === 'target' && path) {
-      // The Mac's desktop first when the project has an Electron app (and only it, for an Electron app alone).
+      // The app's own places: the Mac's desktop for the Electron app; simulators and devices for the iOS app.
       const macSummary = macs.find((m) => m.name === mac);
-      const desktop = summary?.electron && macSummary ? macDesktopTarget(macSummary.label, macSummary.macos) : null;
-      const onlyMac = Boolean(summary?.electron && (summary.kind === 'electron' || !summary.hasIos));
-      const list = [...(desktop ? [desktop] : []), ...(targets && !onlyMac ? [...targets.simulators, ...targets.devices] : [])];
+      const onlyMac = Boolean(summary?.electron && appOf(summary, projectPrefs(path)) === 'electron');
+      const desktop = onlyMac && macSummary ? macDesktopTarget(macSummary.label, macSummary.macos) : null;
+      const list = onlyMac ? (desktop ? [desktop] : []) : targets ? [...targets.devices, ...targets.simulators] : [];
       return {
         placeholder: targets || onlyMac ? t.palette.whichTarget : t.palette.loadingTargets,
         items: list.map((target) => ({

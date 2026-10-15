@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { RelayChoice, RouteChoice } from '../shared/remote.js';
+import type { StreamPreference } from './screen.js';
 
 export interface HostConfig {
   /** Short alias used on the command line. */
@@ -53,6 +54,8 @@ export interface GlobalConfig {
   takeover?: 'on' | 'off';
   /** The signaling server for remote access (your own; see services/signal). */
   signalUrl?: string;
+  /** How screens stream (simulators and Electron app windows) in the CLI and CapMac Studio alike; unset means smooth. */
+  stream?: StreamPreference;
 }
 
 export interface ProjectConfig {
@@ -115,6 +118,23 @@ export async function saveGlobalConfig(config: GlobalConfig): Promise<void> {
   const tmp = `${configFile()}.tmp`;
   await fs.writeFile(tmp, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
   await fs.rename(tmp, configFile());
+}
+
+/**
+ * How screens stream, shared by the CLI and CapMac Studio: `wanted` (kept for
+ * next time, in both), else the last choice, else smooth.
+ */
+export async function streamPreference(wanted?: StreamPreference): Promise<StreamPreference> {
+  if (wanted !== 'smooth' && wanted !== 'compatible') return (await loadGlobalConfig()).stream === 'compatible' ? 'compatible' : 'smooth';
+  let saved: Partial<GlobalConfig> = {};
+  try {
+    saved = JSON.parse(await fs.readFile(configFile(), 'utf8')) as Partial<GlobalConfig>;
+  } catch (err) {
+    // A file that is there but cannot be read now is not overwritten (it holds the paired Macs).
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return wanted;
+  }
+  if (saved.stream !== wanted) await saveGlobalConfig({ ...saved, version: 1, hosts: saved.hosts ?? {}, stream: wanted }).catch(() => undefined);
+  return wanted;
 }
 
 export async function updateHost(name: string, patch: Partial<HostConfig>): Promise<void> {

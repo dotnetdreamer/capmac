@@ -5,6 +5,7 @@
  * validated by the engine host.
  */
 import { z } from 'zod';
+import type { AppSearch, ProjectApp } from '@capmac/core/engine/apps';
 import type { ErrorInfo } from '@capmac/core/engine/errors';
 import type { Check, ConnectionState, EngineEvent, FixId, SessionMode } from '@capmac/core/engine/events';
 import type { ProbeResult, ScreenInfo, StreamFallback, TargetsResult } from '@capmac/core/shared/protocol';
@@ -15,6 +16,7 @@ import type { RemoteDoorStatus, RemotePc } from '@capmac/core/shared/remote-door
 import type { AgentSkillStatus, CapmacCommandStatus, SkillChange } from '@capmac/core/shared/skills';
 import type { TakeoverStatus } from '@capmac/core/shared/takeover';
 
+export type { AppFramework, AppPlatform, AppSearch, DetectedProject, ProjectApp } from '@capmac/core/engine/apps';
 export type { ErrorInfo } from '@capmac/core/engine/errors';
 export type { AppLogEntry, Check, CheckLevel, ConnectionState, EngineEvent, FixId, Phase, SessionMode, SessionState, StepStatus } from '@capmac/core/engine/events';
 export type { Diagnostic, InputEvent, ProbeResult, ScreenInfo, StreamFallback, StreamHelperState, Target, TargetsResult } from '@capmac/core/shared/protocol';
@@ -29,6 +31,9 @@ const macName = text(100);
 const fsPath = text(4096);
 const udid = z.string().regex(/^[A-Za-z0-9-]{8,64}$/, 'not a device id');
 const id = z.string().regex(/^[a-z0-9-]{1,64}$/);
+/** The apps CapMac runs, by their id in a project (see core's apps.ts). */
+const runnableApp = z.enum(['ios', 'electron']);
+export type RunnableApp = z.infer<typeof runnableApp>;
 /** Which agents get (or lose) the capmac skill, and where. */
 const skillTarget = { agents: z.array(id).min(1).max(32), scope: z.enum(['global', 'project']), projectDir: fsPath.optional() };
 const hasProject = (v: { scope: string; projectDir?: string }) => v.scope === 'global' || v.projectDir !== undefined;
@@ -70,6 +75,10 @@ export const engineMethods = {
   'simulators.boot': z.object({ mac: macName, udid }).strict(),
   'simulators.shutdown': z.object({ mac: macName, udid }).strict(),
   'projects.inspect': z.object({ path: fsPath }).strict(),
+  /** Every app in a folder: the project's own, and the ones in the folders inside it (reads files only). */
+  'projects.detect': z.object({ path: fsPath }).strict(),
+  /** The app CapMac works on in this project from now on (the CLI too). */
+  'projects.setApp': z.object({ path: fsPath, app: runnableApp }).strict(),
   'projects.syncSize': z.object({ path: fsPath }).strict(),
   /** Copies a bundled sample to Documents\CapMac Studio: the Capacitor iOS app, or the Electron app. */
   'projects.createSample': z.object({ kind: z.enum(['ios', 'electron']).optional() }).strict(),
@@ -78,6 +87,8 @@ export const engineMethods = {
     projectPath: fsPath,
     mode: z.enum(['run', 'live']),
     mac: macName.optional(),
+    /** Which of the project's apps (default: the one picked for it). */
+    app: runnableApp.optional(),
     target: udid.optional(),
     options: sessionOptionsSchema.optional(),
   }).strict(),
@@ -174,6 +185,12 @@ export interface ProjectSummary {
   devCommand: string | null;
   /** The Electron app (the project itself, or Capacitor's Electron platform), which runs on the Mac's desktop. */
   electron: { flavor: ElectronFlavor; rel: string; name: string; electronRange: string | null } | null;
+  /** Its apps: the iOS app and the Electron app, when it has them. */
+  apps: ProjectApp[];
+  /** The app Run and Live use: the one picked for the project, else the iOS app, else the Electron app. */
+  app: RunnableApp;
+  /** Whether that app was picked (in Studio, or with `capmac apps use`) rather than taken by default. */
+  appChosen: boolean;
 }
 
 export interface HealthReport {
@@ -201,6 +218,9 @@ export interface MethodResults {
   'simulators.boot': void;
   'simulators.shutdown': void;
   'projects.inspect': ProjectSummary;
+  'projects.detect': AppSearch;
+  /** The project as it is now, with the app picked. */
+  'projects.setApp': ProjectSummary;
   'projects.syncSize': { files: number; bytes: number };
   'projects.createSample': { path: string };
   'projects.installDeps': void;

@@ -14,10 +14,12 @@ import {
   bootSimulator,
   buildApp,
   CancelledError,
+  chooseApp,
   disableRemote,
   discoverMacs,
   ElectronLiveSession,
   enableRemote,
+  findApps,
   inspectProject,
   installLocalDependencies,
   LiveSession,
@@ -50,6 +52,7 @@ import {
   testRemote,
   thisPc,
   shutdownSimulator,
+  summarizeProject,
   syncSize,
   takeAppScreenshot,
   takeScreenshot,
@@ -332,8 +335,8 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
   const existing = sessionFor(params.projectPath);
   if (existing) await stopSession(existing.id);
   const project = await loadProject(params.projectPath);
-  // The Mac's desktop (the target picker's Mac, or an Electron app on its own): the Electron app.
-  const onMac = params.mode !== 'ipa' && runsOnMac(project, { target: 'target' in params && params.target === MAC_TARGET_ID ? 'mac' : undefined });
+  // The app asked for (the toolbar's app picker), else the Mac's desktop as the target, else the one picked for the project.
+  const onMac = params.mode !== 'ipa' && runsOnMac(project, { app: 'app' in params ? params.app : undefined, target: 'target' in params && params.target === MAC_TARGET_ID ? 'mac' : undefined });
   if (!onMac) requireIos(project);
   const mac = params.mac ?? project.config.host ?? (await defaultMacName());
   const id = newId('s');
@@ -342,7 +345,7 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
   const controller = new AbortController();
   const l = link(mac);
   const started = Date.now();
-  const target = 'target' in params && !onMac ? params.target : undefined;
+  const target = 'target' in params && !onMac && params.target !== MAC_TARGET_ID ? params.target : undefined;
   emit(scope, { type: 'session-started', mode: params.mode, projectPath: project.capDir, mac, target: onMac ? MAC_TARGET_ID : target ?? null });
   const end = (err?: unknown) => {
     sessions.delete(id);
@@ -403,8 +406,70 @@ const screens = new Map<string, { stream: ScreenStream | AppScreenStream; port: 
 /** Smooth stream: frames posted to the renderer and not taken yet before it counts as falling behind. */
 const VIDEO_MAX_IN_FLIGHT = 30;
 
-/** An Electron app's windows: JPEG frames from the app, mouse and keyboard back (see core's AppScreenStream). */
-async function openAppScreen(streamId: string, mac: string, projectPath: string, port: MessagePortMain, maxSize?: number): Promise<void> {
+/**
+ * Frames on their way to the renderer, for either stream. Compatible: at most
+ * two JPEGs in flight; under backpressure only the newest waiting one is kept.
+ * Smooth: every message goes on in order (a delta is useless without the ones
+ * before it); when the renderer falls behind, drop up to the next keyframe and
+ * ask for one.
+ */
+function screenFlow(post: (message: ScreenPortMessage) => void, requestKeyframe: () => void) {
+  let jpegSeq = 0;
+  let jpegInFlight = 0;
+  let jpegPending: Buffer | null = null;
+  let videoInFlight = 0;
+  let videoDropping = false;
+  const sendJpeg = (jpeg: Buffer) => {
+    if (jpegInFlight >= 2) {
+      jpegPending = jpeg;
+      return;
+    }
+    jpegInFlight += 1;
+    post({ type: 'frame', data: toArrayBuffer(jpeg), seq: ++jpegSeq });
+  };
+  return {
+    sendJpeg,
+    sendVideo({ data, header }: VideoPacket): void {
+      const config = header.type === STREAM_CONFIG;
+      if (!config) {
+        if (videoDropping) {
+          if (!header.key || videoInFlight > 4) return;
+          videoDropping = false;
+        } else if (!header.key && videoInFlight >= VIDEO_MAX_IN_FLIGHT) {
+          videoDropping = true;
+          requestKeyframe();
+          return;
+        }
+        videoInFlight += 1;
+      }
+      post({ type: 'video', data: toArrayBuffer(data), seq: header.seq, key: header.key, config, captureUs: header.captureUs });
+    },
+    /** The renderer took a frame of the stream that is on. */
+    ack(video: boolean): void {
+      if (video) {
+        videoInFlight = Math.max(0, videoInFlight - 1);
+        // Caught up after dropping: a fresh keyframe resumes the picture.
+        if (videoDropping && videoInFlight <= 4) requestKeyframe();
+        return;
+      }
+      jpegInFlight = Math.max(0, jpegInFlight - 1);
+      if (jpegPending) {
+        const next = jpegPending;
+        jpegPending = null;
+        sendJpeg(next);
+      }
+    },
+    reset(): void {
+      jpegInFlight = 0;
+      jpegPending = null;
+      videoInFlight = 0;
+      videoDropping = false;
+    },
+  };
+}
+
+/** An Electron app's windows: video (or JPEG frames) from the app, mouse and keyboard back (see core's AppScreenStream). */
+async function openAppScreen(streamId: string, mac: string, projectPath: string, port: MessagePortMain, prefer: 'smooth' | 'compatible', maxSize?: number): Promise<void> {
   const post = (message: ScreenPortMessage) => port.postMessage(message);
   let project;
   try {
@@ -413,21 +478,17 @@ async function openAppScreen(streamId: string, mac: string, projectPath: string,
     post({ type: 'state', state: 'ended', error: toErrorInfo(err) });
     return;
   }
-  // At most two frames on their way to the renderer; under backpressure only the newest waiting one is kept.
-  let seq = 0;
-  let inFlight = 0;
-  let pending: Buffer | null = null;
-  const sendFrame = (jpeg: Buffer) => {
-    if (inFlight >= 2) {
-      pending = jpeg;
-      return;
-    }
-    inFlight += 1;
-    post({ type: 'frame', data: toArrayBuffer(jpeg), seq: ++seq });
-  };
+  const flow = screenFlow(post, () => stream.requestKeyframe());
   const scope = { mac, streamId };
-  const stream = new AppScreenStream(link(mac), project.projectId, { fps: 30, quality: 75, maxSize: Math.min(2400, maxSize ?? 1400), audio: true }, {
-    onFrame: sendFrame,
+  const stream: AppScreenStream = new AppScreenStream(link(mac), project.projectId, { prefer, fps: 30, quality: 75, maxSize: Math.min(2400, maxSize ?? 1400), audio: true }, {
+    onFrame: flow.sendJpeg,
+    onVideo: flow.sendVideo,
+    onCodec: (codec, fallback) => {
+      flow.reset();
+      post({ type: 'codec', codec, fallback });
+      if (fallback) emit(scope, { type: 'log', level: 'note', message: `Window: using the compatible stream. ${fallback.message}` });
+    },
+    onStatus: (status) => post({ type: 'status', bitrate: status.bitrate ?? null, dropped: status.dropped }),
     onInfo: (info) => {
       post({ type: 'info', info });
       emit(scope, { type: 'screen-info', info });
@@ -441,10 +502,7 @@ async function openAppScreen(streamId: string, mac: string, projectPath: string,
     onWaiting: (waiting) => post({ type: 'waiting', waiting }),
     onEnd: (error) => post({ type: 'state', state: 'ended', error }),
     onState: (state) => {
-      if (state === 'streaming') {
-        inFlight = 0;
-        pending = null;
-      }
+      if (state === 'streaming') flow.reset();
       post({ type: 'state', state });
     },
     onClock: (offsetUs, rttUs) => post({ type: 'clock', offsetUs, rttUs }),
@@ -453,12 +511,14 @@ async function openAppScreen(streamId: string, mac: string, projectPath: string,
     const message = e.data as ScreenPortCommand;
     switch (message?.type) {
       case 'ack':
-        inFlight = Math.max(0, inFlight - 1);
-        if (pending) {
-          const next = pending;
-          pending = null;
-          sendFrame(next);
-        }
+        flow.ack(stream.currentCodec === 'h264');
+        break;
+      case 'keyframe':
+        stream.requestKeyframe();
+        break;
+      case 'retry-smooth':
+        flow.reset();
+        stream.retrySmooth();
         break;
       case 'input': {
         const parsed = inputEventSchema.safeParse(message.event);
@@ -497,8 +557,7 @@ async function openAppScreen(streamId: string, mac: string, projectPath: string,
         break;
       }
       case 'restart':
-        inFlight = 0;
-        pending = null;
+        flow.reset();
         void stream.start().catch((err) => post({ type: 'state', state: 'ended', error: toErrorInfo(err) }));
         break;
     }
@@ -507,7 +566,6 @@ async function openAppScreen(streamId: string, mac: string, projectPath: string,
   port.start();
   screens.set(streamId, { stream, port });
   post({ type: 'state', state: 'connecting' });
-  post({ type: 'codec', codec: 'jpeg', fallback: null });
   stream.start().then(
     () => post({ type: 'state', state: 'streaming' }),
     (err) => post({ type: 'state', state: 'ended', error: toErrorInfo(err) }),
@@ -517,47 +575,12 @@ async function openAppScreen(streamId: string, mac: string, projectPath: string,
 /** A simulator's screen, or (with `device`) the screen of an iPhone plugged into the Mac. */
 function openScreen(streamId: string, mac: string, udid: string, port: MessagePortMain, prefer: 'smooth' | 'compatible', maxSize?: number, device?: { name: string }): void {
   const post = (message: ScreenPortMessage) => port.postMessage(message);
-  // Compatible stream: at most two JPEGs in flight; under backpressure only the newest waiting one is kept.
-  let jpegSeq = 0;
-  let jpegInFlight = 0;
-  let jpegPending: Buffer | null = null;
-  const sendJpeg = (jpeg: Buffer) => {
-    if (jpegInFlight >= 2) {
-      jpegPending = jpeg;
-      return;
-    }
-    jpegInFlight += 1;
-    post({ type: 'frame', data: toArrayBuffer(jpeg), seq: ++jpegSeq });
-  };
-  // Smooth stream: every message goes on in order (a delta is useless without the ones before it).
-  // When the renderer falls behind, drop up to the next keyframe and ask for one.
-  let videoInFlight = 0;
-  let videoDropping = false;
-  const sendVideo = ({ data, header }: VideoPacket) => {
-    const config = header.type === STREAM_CONFIG;
-    if (!config) {
-      if (videoDropping) {
-        if (!header.key || videoInFlight > 4) return;
-        videoDropping = false;
-      } else if (!header.key && videoInFlight >= VIDEO_MAX_IN_FLIGHT) {
-        videoDropping = true;
-        stream.requestKeyframe();
-        return;
-      }
-      videoInFlight += 1;
-    }
-    post({ type: 'video', data: toArrayBuffer(data), seq: header.seq, key: header.key, config, captureUs: header.captureUs });
-  };
-  const resetFlow = () => {
-    jpegInFlight = 0;
-    jpegPending = null;
-    videoInFlight = 0;
-    videoDropping = false;
-  };
+  const flow = screenFlow(post, () => stream.requestKeyframe());
+  const resetFlow = () => flow.reset();
   const scope = { mac, streamId };
-  const stream = new ScreenStream(link(mac), udid, { prefer, fps: 15, quality: 72, maxSize: Math.min(1400, maxSize ?? 1400), device }, {
-    onFrame: sendJpeg,
-    onVideo: sendVideo,
+  const stream: ScreenStream = new ScreenStream(link(mac), udid, { prefer, fps: 15, quality: 72, maxSize: Math.min(1400, maxSize ?? 1400), device }, {
+    onFrame: flow.sendJpeg,
+    onVideo: flow.sendVideo,
     onInfo: (info) => {
       post({ type: 'info', info });
       emit(scope, { type: 'screen-info', info });
@@ -583,18 +606,7 @@ function openScreen(streamId: string, mac: string, udid: string, port: MessagePo
     const message = e.data as ScreenPortCommand;
     switch (message?.type) {
       case 'ack':
-        if (stream.currentCodec === 'h264') {
-          videoInFlight = Math.max(0, videoInFlight - 1);
-          // Caught up after dropping: a fresh keyframe resumes the picture.
-          if (videoDropping && videoInFlight <= 4) stream.requestKeyframe();
-        } else {
-          jpegInFlight = Math.max(0, jpegInFlight - 1);
-          if (jpegPending) {
-            const next = jpegPending;
-            jpegPending = null;
-            sendJpeg(next);
-          }
-        }
+        flow.ack(stream.currentCodec === 'h264');
         break;
       case 'input': {
         const parsed = inputEventSchema.safeParse(message.event);
@@ -732,8 +744,19 @@ const handlers: Handlers = {
     watches.get(mac)?.watch.refresh();
   },
   'projects.inspect': ({ path: dir }) => inspectProject(dir),
+  'projects.detect': ({ path: dir }) => findApps(dir),
+  'projects.setApp': async ({ path: dir, app }) => {
+    // The project as it is now, from the same load: no second look at its config.
+    const project = await loadProject(dir);
+    return summarizeProject({ ...project, chosenApp: await chooseApp(project, app) });
+  },
   'projects.syncSize': async ({ path: dir }) => syncSize(await loadProject(dir)),
-  'projects.createSample': ({ kind }) => createSample(kind),
+  'projects.createSample': async ({ kind }) => {
+    const sample = await createSample(kind);
+    // A sample is opened for one of its apps: no need to ask which.
+    await chooseApp(await loadProject(sample.path), kind ?? 'ios').catch(() => undefined);
+    return sample;
+  },
   'projects.installDeps': async ({ path: dir }) => {
     const project = await loadProject(dir);
     await installLocalDependencies(project, contextFor({ projectPath: project.capDir }));
@@ -887,7 +910,7 @@ parent.on('message', (e) => {
     }
     case 'screen-open': {
       const port = e.ports[0];
-      if (port && message.udid === MAC_TARGET_ID && message.projectPath) void openAppScreen(message.streamId, message.mac, message.projectPath, port, message.maxSize);
+      if (port && message.udid === MAC_TARGET_ID && message.projectPath) void openAppScreen(message.streamId, message.mac, message.projectPath, port, message.prefer, message.maxSize);
       else if (port) openScreen(message.streamId, message.mac, message.udid, port, message.prefer, message.maxSize, message.device);
       break;
     }

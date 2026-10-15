@@ -205,10 +205,11 @@
     }
     if (!app && info.screen && !input) {
       banner.hidden = false;
+      banner.dataset.kind = 'view-only';
       banner.textContent = phone
         ? 'View only: touch and typing work on simulators. On a real iPhone, use the iPhone itself for now'
         : 'View only — install AXe on the Mac for touch input: capmac doctor --fix';
-    } else banner.hidden = true;
+    } else if (banner.dataset.kind !== 'fallback') banner.hidden = true;
     if (next.windows) setWindows(next.windows, next.watched ?? null);
     if (next.waiting !== undefined) setWaiting(next.waiting);
     if (next.cursor) setCursor(next.cursor);
@@ -254,7 +255,7 @@
 
   const CURSORS = { pointer: 'default', hand: 'pointer', text: 'text', wait: 'wait', help: 'help', crosshair: 'crosshair', move: 'move', progress: 'progress', 'not-allowed': 'not-allowed', nodrop: 'no-drop', 'no-drop': 'no-drop', copy: 'copy', alias: 'alias', 'context-menu': 'context-menu', cell: 'cell', 'vertical-text': 'vertical-text', grab: 'grab', grabbing: 'grabbing', 'zoom-in': 'zoom-in', 'zoom-out': 'zoom-out', none: 'none', 'col-resize': 'col-resize', 'row-resize': 'row-resize', 'e-resize': 'e-resize', 'w-resize': 'w-resize', 'n-resize': 'n-resize', 's-resize': 's-resize', 'ne-resize': 'ne-resize', 'nw-resize': 'nw-resize', 'se-resize': 'se-resize', 'sw-resize': 'sw-resize', 'ns-resize': 'ns-resize', 'ew-resize': 'ew-resize', 'nesw-resize': 'nesw-resize', 'nwse-resize': 'nwse-resize', 'all-scroll': 'all-scroll' };
   function setCursor(type) {
-    img.style.cursor = app ? (CURSORS[type] || 'default') : '';
+    for (const el of [img, canvas]) el.style.cursor = app ? (CURSORS[type] || 'default') : '';
   }
 
   // The window fits the stage, title bar included.
@@ -275,16 +276,44 @@
 
   let framesTotal = 0;
   function startStream() {
+    if (playing !== 'jpeg') return;
+    img.hidden = false;
+    canvas.hidden = true;
     img.src = '/stream?ts=' + Date.now();
   }
 
-  // The source's picture: JPEG frames on /stream, or the smooth stream (H.264) on /video.
-  let started = false;
+  // The source's picture: JPEG frames on /stream, or the smooth stream (H.264) on /video. It switches
+  // when the source does (the smooth stream falling back, or trying again).
+  let started = false, playing = null;
   function startScreen() {
     if (started || !info) return;
     started = true;
-    if (info.video) startVideo();
-    else startStream();
+    play(info.video ? 'video' : 'jpeg');
+  }
+  function play(mode) {
+    if (mode === playing) return;
+    playing = mode;
+    if (mode === 'video') {
+      img.removeAttribute('src');
+      startVideo();
+    } else {
+      stopVideo();
+      startStream();
+    }
+  }
+  // Why the compatible stream shows when the smooth one was wanted, and the way back.
+  function setFallback(fallback) {
+    if (!fallback) {
+      if (banner.dataset.kind === 'fallback') { banner.hidden = true; banner.dataset.kind = ''; }
+      return;
+    }
+    banner.hidden = false;
+    banner.dataset.kind = 'fallback';
+    banner.textContent = 'Compatible stream: ' + fallback.message.replace(/\.$/, '') + ' ';
+    const retry = document.createElement('button');
+    retry.textContent = 'Try the smooth stream again';
+    retry.onclick = () => { setFallback(null); post('/api/retry-smooth').catch(() => undefined); };
+    banner.append(retry);
   }
 
   // ─── The smooth stream: H.264 on /video, decoded here with WebCodecs ────
@@ -300,13 +329,21 @@
       setOverlay('This browser can’t play the smooth stream.\nOpen this page in Chrome or Edge');
       return;
     }
-    player = { decoder: null, config: null, needsKey: true, frame: null, ctx: canvas.getContext('2d', { alpha: false, desynchronized: true }), keyAskedAt: 0 };
-    readVideo();
+    player = { decoder: null, config: null, needsKey: true, frame: null, ctx: canvas.getContext('2d', { alpha: false, desynchronized: true }), keyAskedAt: 0, abort: new AbortController() };
+    readVideo(player);
   }
-  function askForKeyframe() {
+  function stopVideo() {
+    const p = player;
+    if (!p) return;
+    player = null;
+    p.abort.abort();
+    try { if (p.decoder && p.decoder.state !== 'closed') p.decoder.close(); } catch {}
+    if (p.frame) p.frame.close();
+  }
+  function askForKeyframe(p) {
     const now = performance.now();
-    if (now - player.keyAskedAt < 500) return;
-    player.keyAskedAt = now;
+    if (now - p.keyAskedAt < 500) return;
+    p.keyAskedAt = now;
     fetch('/api/keyframe', { method: 'POST' }).catch(() => undefined);
   }
   function drawVideo() {
@@ -320,32 +357,33 @@
     // The decoder pads the picture to whole macroblocks: leave the last pixel out, or scaling shows the padding.
     player.ctx.drawImage(f, 0, 0, f.displayWidth - 1, f.displayHeight - 1, 0, 0, canvas.width, canvas.height);
   }
-  function newDecoder() {
+  function newDecoder(p) {
     return new VideoDecoder({
       output: (frame) => {
-        if (player.frame) player.frame.close();
-        player.frame = frame;
+        if (player !== p) { frame.close(); return; }
+        if (p.frame) p.frame.close();
+        p.frame = frame;
         drawVideo();
         frames++;
         framesTotal++;
-        if (!waitingFor && !ended) overlay.style.display = 'none';
+        if (!waitingFor && !ended && !(app && (waiting || windows.length === 0))) overlay.style.display = 'none';
         dot.className = 'dot live';
       },
       error: () => {
         // Start again from the next keyframe.
-        player.decoder = null;
-        player.needsKey = true;
-        askForKeyframe();
+        p.decoder = null;
+        p.needsKey = true;
+        if (player === p) askForKeyframe(p);
       },
     });
   }
-  function configureVideo(c) {
+  function configureVideo(p, c) {
     const bin = atob(c.description), description = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) description[i] = bin.charCodeAt(i);
-    if (!player.decoder || player.decoder.state === 'closed') player.decoder = newDecoder();
-    player.decoder.configure({ codec: c.codec, description, codedWidth: c.width, codedHeight: c.height, hardwareAcceleration: 'prefer-hardware', optimizeForLatency: true });
-    player.config = c;
-    player.needsKey = true;
+    if (!p.decoder || p.decoder.state === 'closed') p.decoder = newDecoder(p);
+    p.decoder.configure({ codec: c.codec, description, codedWidth: c.width, codedHeight: c.height, hardwareAcceleration: 'prefer-hardware', optimizeForLatency: true });
+    p.config = c;
+    p.needsKey = true;
     const next = c.width / c.height;
     if (Math.abs(next - ratio) > 0.002) {
       ratio = next;
@@ -353,34 +391,34 @@
       layout();
     }
   }
-  function onVideoMessage(m) {
+  function onVideoMessage(p, m) {
     const view = new DataView(m.buffer, m.byteOffset, m.byteLength);
     const type = view.getUint8(0), key = (view.getUint8(1) & 1) === 1;
     const payload = m.subarray(16);
     if (type === 1) {
-      try { configureVideo(JSON.parse(new TextDecoder().decode(payload))); } catch (err) { console.warn('video config', err); }
+      try { configureVideo(p, JSON.parse(new TextDecoder().decode(payload))); } catch (err) { console.warn('video config', err); }
       return;
     }
     if (type !== 2) return;
     // After a decoder error: the same config again, then wait for a keyframe.
-    if ((!player.decoder || player.decoder.state !== 'configured') && player.config) configureVideo(player.config);
-    if (!player.decoder || player.decoder.state !== 'configured') return;
-    if (!key && (player.needsKey || player.decoder.decodeQueueSize > 3)) {
-      player.needsKey = true;
-      askForKeyframe();
+    if ((!p.decoder || p.decoder.state !== 'configured') && p.config) configureVideo(p, p.config);
+    if (!p.decoder || p.decoder.state !== 'configured') return;
+    if (!key && (p.needsKey || p.decoder.decodeQueueSize > 3)) {
+      p.needsKey = true;
+      askForKeyframe(p);
       return;
     }
-    player.needsKey = false;
+    p.needsKey = false;
     try {
-      player.decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: Number(view.getBigUint64(4)), data: payload }));
+      p.decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: Number(view.getBigUint64(4)), data: payload }));
     } catch {
-      player.needsKey = true;
-      askForKeyframe();
+      p.needsKey = true;
+      askForKeyframe(p);
     }
   }
-  async function readVideo() {
+  async function readVideo(p) {
     try {
-      const res = await fetch('/video', { cache: 'no-store' });
+      const res = await fetch('/video', { cache: 'no-store', signal: p.abort.signal });
       if (!res.ok || !res.body) throw new Error('no video');
       const reader = res.body.getReader();
       let buf = new Uint8Array(0);
@@ -394,16 +432,17 @@
         while (joined.length - at >= 4) {
           const length = new DataView(joined.buffer, at, 4).getUint32(0);
           if (joined.length - at - 4 < length) break;
-          onVideoMessage(joined.subarray(at + 4, at + 4 + length));
+          onVideoMessage(p, joined.subarray(at + 4, at + 4 + length));
           at += 4 + length;
         }
         buf = joined.slice(at);
       }
     } catch { /* reconnects below */ }
-    if (ended) return;
+    // Stopped on purpose (the stream switched to pictures), or the screen ended.
+    if (ended || player !== p) return;
     dot.className = 'dot err';
     setOverlay('Lost the screen stream. Reconnecting…');
-    setTimeout(readVideo, 1500);
+    setTimeout(() => { if (player === p) readVideo(p); }, 1500);
   }
   // Sharp at the size it shows: the video's longest side follows the canvas (settled sizes only).
   let sizeTimer = 0, sentSize = 0;
@@ -452,10 +491,17 @@
     const now = performance.now();
     const fps = frames / ((now - lastFpsAt) / 1000);
     frames = 0; lastFpsAt = now;
-    if (info) meta.textContent = `${info.target} · ${fps.toFixed(1)} fps · ${info.screen ? (app ? 'app window' : info.video ? 'smooth stream' : info.screen.source) : '…'}`;
+    if (info) meta.textContent = `${info.target} · ${fps.toFixed(1)} fps · ${info.screen ? (playing === 'video' ? 'smooth stream' : app ? 'app window' : info.screen.source) : '…'}`;
   }, 1000);
 
+  // Input goes to the picture showing: the JPEGs, or the video's canvas.
+  const onPicture = (type, listener, options) => { for (const el of [img, canvas]) el.addEventListener(type, listener, options); };
   function point(e) {
+    if (playing === 'video') {
+      // The canvas has the video's shape: no letterbox.
+      const c = canvas.getBoundingClientRect();
+      return { x: Math.min(1, Math.max(0, (e.clientX - c.left) / c.width)), y: Math.min(1, Math.max(0, (e.clientY - c.top) / c.height)), px: e.clientX - c.left, py: e.clientY - c.top };
+    }
     const r = img.getBoundingClientRect();
     const iw = img.naturalWidth || r.width, ih = img.naturalHeight || r.height;
     const scale = Math.min(r.width / iw, r.height / ih);
@@ -481,21 +527,21 @@
 
   // ─── A simulator: taps and swipes ───────────────────────────────────────
   let down = null;
-  img.addEventListener('pointerdown', (e) => {
+  onPicture('pointerdown', (e) => {
     if (app) {
       e.preventDefault();
-      img.setPointerCapture(e.pointerId);
+      e.currentTarget.setPointerCapture(e.pointerId);
       screenEl.focus();
       const p = point(e);
       send({ kind: 'mouse', phase: 'down', x: p.x, y: p.y, button: BUTTONS[e.button] || 'left', clicks: e.detail || 1, modifiers: mods(e) });
       return;
     }
     if (e.button !== 0) return;
-    img.setPointerCapture(e.pointerId);
+    e.currentTarget.setPointerCapture(e.pointerId);
     down = { ...point(e), t: performance.now() };
     screenEl.focus();
   });
-  img.addEventListener('pointermove', (e) => {
+  onPicture('pointermove', (e) => {
     if (!app) return;
     lastMove = { ...point(e), buttons: e.buttons, modifiers: mods(e) };
     if (moveFrame) return;
@@ -505,13 +551,13 @@
       if (m) send({ kind: 'mouse', phase: 'move', x: m.x, y: m.y, buttons: m.buttons, modifiers: m.modifiers });
     });
   });
-  img.addEventListener('pointerleave', (e) => {
+  onPicture('pointerleave', (e) => {
     if (!app || e.buttons) return;
     const p = point(e);
     send({ kind: 'mouse', phase: 'leave', x: p.x, y: p.y });
   });
-  img.addEventListener('contextmenu', (e) => { if (app) e.preventDefault(); });
-  img.addEventListener('pointerup', (e) => {
+  onPicture('contextmenu', (e) => { if (app) e.preventDefault(); });
+  onPicture('pointerup', (e) => {
     if (app) {
       const p = point(e);
       send({ kind: 'mouse', phase: 'up', x: p.x, y: p.y, button: BUTTONS[e.button] || 'left', clicks: e.detail || 1, modifiers: mods(e) });
@@ -531,10 +577,10 @@
   });
   let wheelAcc = 0, wheelTimer = null, wheelPoint = null;
   let appWheel = { dx: 0, dy: 0, frame: 0, p: null, modifiers: 0 };
-  img.addEventListener('wheel', (e) => {
+  onPicture('wheel', (e) => {
     e.preventDefault();
     if (app) {
-      const lines = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? img.clientHeight : 1;
+      const lines = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? e.currentTarget.clientHeight : 1;
       appWheel.dx += e.deltaX * lines; appWheel.dy += e.deltaY * lines;
       appWheel.p = point(e); appWheel.modifiers = mods(e);
       if (!appWheel.frame) {
@@ -889,7 +935,13 @@
     if (event.type === 'dialogs') setDialogs(event.dialogs);
     else if (event.type === 'audio') { playPackets(event.packets); return; }
     else if (event.type === 'sound') setSound(event);
-    if (event.type === 'hello') { applyInfo(event); startScreen(); if (event.dialogs) setDialogs(event.dialogs); if (event.sound) setSound(event.sound); }
+    if (event.type === 'hello') { applyInfo(event); startScreen(); setFallback(event.fallback); if (event.dialogs) setDialogs(event.dialogs); if (event.sound) setSound(event.sound); }
+    else if (event.type === 'codec') {
+      // The source switched streams: so does the page.
+      if (info) info.video = event.codec === 'h264';
+      setFallback(event.fallback);
+      if (started) play(event.codec === 'h264' ? 'video' : 'jpeg');
+    }
     else if (event.type === 'device-wait') setWaitingFor(event.wait);
     else if (event.type === 'ended') { ended = true; dot.className = 'dot err'; setOverlay(event.message + (event.hint ? '\n' + event.hint : '')); }
     else if (event.type === 'windows') setWindows(event.windows, event.watched);

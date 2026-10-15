@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react';
 import { CSS_CURSORS, macModifiers } from '@capmac/core/shared/electron';
-import type { AppDialog, AppWindowInfo, ErrorInfo, InputEvent, MacSummary, ScreenInfo, SoundMode } from '../../../shared/contract';
+import type { AppDialog, AppWindowInfo, ErrorInfo, InputEvent, MacSummary, ScreenInfo, SoundMode, StreamFallback } from '../../../shared/contract';
 import { t, tidy } from '../../../shared/i18n';
 import { workspaceBus, type WorkspaceAction } from '../../app/commands';
 import { reloadApp, startSession } from '../../state/actions';
@@ -18,8 +18,19 @@ import { Menu, Popover, usePopover } from '../../ui/Popover';
 import { Rich } from '../../ui/Rich';
 import { Tooltip } from '../../ui/Tooltip';
 import { AppDialogLayer, type AppDialogCommand } from './AppDialog';
+import { CompatibleNote } from './Simulator';
 
 type StreamState = { kind: 'connecting' } | { kind: 'streaming' } | { kind: 'reconnecting' } | { kind: 'ended'; error?: ErrorInfo };
+
+interface Stats {
+  fps: number;
+  kbps: number;
+  decodeMs: number;
+  latencyMs: number | null;
+  latencyP95Ms: number | null;
+  /** The last click or key to the picture that answered it. */
+  inputMs: number | null;
+}
 
 /** The macOS title bar CapMac draws above the page (the app draws only its page). */
 const TITLE_BAR = 28;
@@ -73,7 +84,13 @@ function AppScreen({ mac, path, frame, live, label, appName }: { mac: string; pa
   const [cursor, setCursor] = useState('default');
   const [frameSize, setFrameSize] = useState<{ width: number; height: number } | null>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
-  const [stats, setStats] = useState<{ fps: number; kbps: number } | null>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
+  // The smooth stream (video) or the compatible one (pictures), why it is the compatible one, and the bitrate it adapted to.
+  const [codec, setCodec] = useState<'h264' | 'jpeg' | null>(null);
+  const [fallback, setFallback] = useState<StreamFallback | null>(null);
+  const [targetBitrate, setTargetBitrate] = useState<number | null>(null);
+  const macRoute = useMacs((s) => s.macs.find((m) => m.name === mac)?.route ?? null);
+  const macRtt = useMacs((s) => s.macs.find((m) => m.name === mac)?.rttMs ?? null);
   const [hasFrame, setHasFrame] = useState(false);
   const [epoch, setEpoch] = useState(0);
   const [typed, setTyped] = useState('');
@@ -114,10 +131,17 @@ function AppScreen({ mac, path, frame, live, label, appName }: { mac: string; pa
           setHasFrame(true);
           break;
         case 'stats':
-          setStats({ fps: m.fps, kbps: m.kbps });
+          setStats({ fps: m.fps, kbps: m.kbps, decodeMs: m.decodeMs, latencyMs: m.latencyMs, latencyP95Ms: m.latencyP95Ms, inputMs: m.inputMs });
           break;
         case 'info':
           setInfo(m.info);
+          break;
+        case 'codec':
+          setCodec(m.codec);
+          setFallback(m.fallback);
+          break;
+        case 'status':
+          setTargetBitrate(m.bitrate);
           break;
         case 'windows':
           setWindows(m.windows);
@@ -161,6 +185,8 @@ function AppScreen({ mac, path, frame, live, label, appName }: { mac: string; pa
     };
     setState({ kind: 'connecting' });
     setHasFrame(false);
+    setCodec(null);
+    setFallback(null);
     (async () => {
       try {
         const maxSize = canvasPixels.current ? frameSizeFor(canvasPixels.current) : undefined;
@@ -363,6 +389,10 @@ function AppScreen({ mac, path, frame, live, label, appName }: { mac: string; pa
     if (watched !== null) workerRef.current?.postMessage({ type: 'window-action', window: watched, action });
   };
   const pickWindow = (id: number | null) => workerRef.current?.postMessage({ type: 'window', window: id });
+  const retrySmooth = useCallback(() => {
+    setFallback(null);
+    workerRef.current?.postMessage({ type: 'retry-smooth' });
+  }, []);
 
   // Workspace command: Ctrl+Shift+S
   useEffect(() => {
@@ -378,6 +408,16 @@ function AppScreen({ mac, path, frame, live, label, appName }: { mac: string; pa
   const noWindow = !waiting && state.kind === 'streaming' && windows.length === 0;
   const title = current?.title || (current ? t.appWindow.untitled(current.id) : appName);
   const radius = frame ? 10 : 4;
+  const overInternet = macRoute === 'direct' || macRoute === 'relay';
+  const statsTip = [
+    codec === 'h264' ? t.appWindow.streamSmooth : codec === 'jpeg' ? t.appWindow.streamCompatible : null,
+    overInternet ? t.simulator.overInternetRoute(macRoute, macRtt) : null,
+    codec === 'h264' && targetBitrate ? t.simulator.upTo(formatRate(Math.round(targetBitrate / 1000))) : null,
+    stats && codec === 'h264' && stats.latencyMs !== null ? t.simulator.delay(Math.round(stats.latencyMs), Math.round(stats.latencyP95Ms ?? stats.latencyMs)) : null,
+    stats && stats.fps > 0 ? t.simulator.decode(stats.decodeMs.toFixed(1)) : null,
+    stats?.inputMs != null ? t.appWindow.clickResponse(Math.round(stats.inputMs)) : null,
+    !stats || stats.fps === 0 ? t.appWindow.still : null,
+  ].filter(Boolean).join(' · ');
   return (
     <div className="sim appwin">
       <div ref={stageRef} className="sim__stage">
@@ -509,7 +549,8 @@ function AppScreen({ mac, path, frame, live, label, appName }: { mac: string; pa
         {live && <IconButton icon="refresh" size="sm" label={t.toolbar.reloadApp} disabled={!canInput} onClick={() => void reloadApp(path)} />}
         <span className="sim__spacer" />
         {current?.minimized && <span className="faint appwin__note">{t.appWindow.minimizedOnMac}</span>}
-        <Tooltip content={stats && stats.fps > 0 ? t.appWindow.framesTip(stats.fps, formatRate(stats.kbps)) : t.appWindow.still} placement="top">
+        {fallback && codec === 'jpeg' && <CompatibleNote fallback={fallback} onRetry={retrySmooth} />}
+        <Tooltip content={statsTip} placement="top">
           <span className="sim__stats tabular" tabIndex={0} aria-live="off">
             {state.kind === 'streaming' && hasFrame && !waiting ? (
               <>

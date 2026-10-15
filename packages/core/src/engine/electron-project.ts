@@ -48,7 +48,7 @@ export function readPackageJson(dir: string): PackageJson | null {
   }
 }
 
-function allDependencies(pkg: PackageJson | null): Record<string, string> {
+export function allDependencies(pkg: PackageJson | null): Record<string, string> {
   return { ...pkg?.optionalDependencies, ...pkg?.dependencies, ...pkg?.devDependencies };
 }
 
@@ -84,19 +84,49 @@ function readText(file: string): string | null {
   }
 }
 
+const BUILDER_FILES = [
+  'electron-builder.json',
+  'electron-builder.json5',
+  'electron-builder.config.json',
+  'electron-builder.yml',
+  'electron-builder.yaml',
+  'electron-builder.config.js',
+  'electron-builder.config.cjs',
+  'electron-builder.config.mjs',
+  'electron-builder.config.ts',
+  'forge.config.js',
+  'forge.config.cjs',
+  'forge.config.mjs',
+  'forge.config.ts',
+];
+
 /** electron-builder's or Forge's settings, read without running the project's code. */
-function builderSetting(dir: string, pkg: PackageJson | null, key: 'appId' | 'icon'): string | null {
-  const inPackage = key === 'appId' ? pkg?.build?.appId ?? pkg?.config?.forge?.packagerConfig?.appBundleId : pkg?.build?.mac?.icon ?? pkg?.build?.icon ?? pkg?.config?.forge?.packagerConfig?.icon;
+function builderSetting(dir: string, pkg: PackageJson | null, key: 'appId' | 'icon' | 'productName'): string | null {
+  const inPackage =
+    key === 'appId'
+      ? pkg?.build?.appId ?? pkg?.config?.forge?.packagerConfig?.appBundleId
+      : key === 'icon'
+        ? pkg?.build?.mac?.icon ?? pkg?.build?.icon ?? pkg?.config?.forge?.packagerConfig?.icon
+        : pkg?.build?.productName ?? pkg?.config?.forge?.packagerConfig?.name;
   if (inPackage) return inPackage;
   const forgeKey = key === 'appId' ? 'appBundleId' : 'icon';
-  for (const file of ['electron-builder.json', 'electron-builder.json5', 'electron-builder.config.json', 'electron-builder.yml', 'electron-builder.yaml', 'forge.config.js', 'forge.config.cjs', 'forge.config.mjs', 'forge.config.ts']) {
+  for (const file of BUILDER_FILES) {
+    // Forge's makers have names too: its app name is only trusted from package.json.
+    if (key === 'productName' && file.startsWith('forge')) continue;
     const text = readText(path.join(dir, file));
     if (!text) continue;
     const name = file.startsWith('forge') ? forgeKey : key;
-    const value = text.match(new RegExp(`["']?\\b${name}["']?\\s*[:=]\\s*["'\`]?([^"'\`\\n,}]+)`))?.[1]?.trim();
+    // In code (not JSON or YAML), only a quoted value is the setting: `appId = process.env.X` is not.
+    const quote = /\.[cm]?[jt]s$/.test(file) ? '["\'`]' : '["\'`]?';
+    const value = text.match(new RegExp(`["']?\\b${name}["']?\\s*[:=]\\s*${quote}([^"'\`\\n,}]+)`))?.[1]?.trim();
     if (value) return value;
   }
   return null;
+}
+
+/** The Electron app's name as it shows in the Dock: its packaging settings' productName, else its package.json name. */
+export function electronProductName(app: Pick<ElectronProject, 'dir' | 'name'>): string {
+  return builderSetting(app.dir, readPackageJson(app.dir), 'productName') ?? app.name;
 }
 
 /** A PNG of the app's icon: the one the packaging tool uses, else the usual places. */

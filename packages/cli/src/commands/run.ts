@@ -1,11 +1,14 @@
 import type { SoundMode } from '@capmac/core/shared/electron';
-import { answerAppDialog, loadApiKey, loadProject, MacLink, requireElectron, requireIos, runApp, runElectronApp, runsOnMac, UserError, type ProjectInfo } from '@capmac/core/engine';
+import { answerAppDialog, appFor, loadApiKey, loadProject, MacLink, requireElectron, requireIos, runApp, runElectronApp, UserError, type ProjectInfo } from '@capmac/core/engine';
 import { cancelOnSigint } from '../cli-context.js';
+import { announceApp } from './apps.js';
 import { terminalContext } from '../terminal.js';
 import { log } from '../ui.js';
 
 export interface RunOptions {
   mac?: string;
+  /** Which of the project's apps (`ios` or `electron`); default: the one picked for it. */
+  app?: string;
   /** An Electron app's sound (remembered for the project). */
   sound?: SoundMode;
   target?: string;
@@ -42,7 +45,9 @@ function parseSeconds(value: string | undefined): number | undefined {
 
 export async function runCommand(options: RunOptions): Promise<void> {
   const project = await loadProject(process.cwd());
-  if (runsOnMac(project, options)) return runOnMac(project, options);
+  const app = appFor(project, options);
+  await announceApp(project, app);
+  if (app === 'electron') return runOnMac(project, options);
   requireIos(project);
   const auth = options.device || options.target ? await loadApiKey(options, project) : undefined;
   const { ctx } = terminalContext({ mode: 'run', bridge: options.bridge, allWarnings: options.allWarnings, attach: options.logs !== false });

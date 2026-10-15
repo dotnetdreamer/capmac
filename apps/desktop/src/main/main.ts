@@ -25,6 +25,7 @@ import { EngineProcess } from './engine.js';
 import { openInEditor } from './editor.js';
 import { installSkill, removeSkill, skillProjectRoot, skillStatus } from '@capmac/core/engine/agent-skills';
 import { capmacCommandStatus, installCapmacCommand, removeCapmacCommand } from '@capmac/core/engine/capmac-command';
+import { loadGlobalConfig, streamPreference } from '@capmac/core/engine/config';
 import { disableTakeover, enableTakeover, ensureTakeoverDefault, samePath, takeoverStatus, type TakeoverInstall } from '@capmac/core/engine/takeover';
 import { agentPath, cliDir, electronSampleDir, iconsDir, outDir, remoteModulesDir, sampleDir } from './paths.js';
 import { SettingsStore } from './settings.js';
@@ -242,6 +243,16 @@ async function takeoverInfo(): Promise<TakeoverInfo> {
   return { ...status, bundled: status.cli !== undefined && samePath(status.cli, studioCli().cli) };
 }
 
+// ─── The screen stream, shared with the capmac command ────────────────────
+
+/** Smooth or compatible, as the CLI and Studio share it (~/.capmac/config.json); Studio's setting follows it. */
+async function sharedStream(): Promise<Settings['simulatorStream']> {
+  const shared = (await loadGlobalConfig().catch(() => null))?.stream;
+  if (shared !== 'smooth' && shared !== 'compatible') return settings.get().simulatorStream;
+  if (shared !== settings.get().simulatorStream) settings.update({ simulatorStream: shared });
+  return shared;
+}
+
 function registerIpc(): void {
   handle('app:info', (): AppInfo => ({
     version: __APP_VERSION__,
@@ -294,10 +305,11 @@ function registerIpc(): void {
     await fs.writeFile(result.filePath, text);
     return result.filePath;
   });
-  handle('app:screen-open', ({ mac, udid, maxSize, projectPath, device }, event) => {
+  handle('app:screen-open', async ({ mac, udid, maxSize, projectPath, device }, event) => {
     const streamId = `scr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const prefer = await sharedStream();
     const { port1, port2 } = new MessageChannelMain();
-    engine.openScreen(streamId, mac, udid, port1, { prefer: settings.get().simulatorStream, maxSize, projectPath, device });
+    engine.openScreen(streamId, mac, udid, port1, { prefer, maxSize, projectPath, device });
     event.sender.postMessage('screen-port', { streamId }, [port2]);
     return { streamId };
   });
@@ -456,10 +468,20 @@ app.whenReady().then(async () => {
   // Takeover is on by default (Settings › Terminal commands). Development builds and
   // the e2e tests leave the user's environment alone.
   if (app.isPackaged) void ensureTakeoverDefault(studioCli()).catch(() => undefined);
+  // The screen stream is the capmac command's too: a choice made here before it was shared counts once.
+  let stream = settings.get().simulatorStream;
+  void loadGlobalConfig().then((config) => {
+    if (config.stream) void sharedStream();
+    else if (stream === 'compatible') void streamPreference(stream).catch(() => undefined);
+  }, () => undefined);
   settings.onChange((s: Settings) => {
     nativeTheme.themeSource = s.theme;
     engine.setSettings({ verbose: s.verbose, osLogs: s.osLogs });
     send('app:settings', s);
+    if (s.simulatorStream !== stream) {
+      stream = s.simulatorStream;
+      void streamPreference(stream).catch(() => undefined);
+    }
   });
   systemPreferences.on('accent-color-changed', () => send('app:accent', accentColor()));
   win = openWindow();

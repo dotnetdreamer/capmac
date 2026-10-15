@@ -6,6 +6,7 @@ import path from 'node:path';
 import { toPosixRel } from '../shared/paths.js';
 import { loadProjectConfig, type ProjectConfig } from './config.js';
 import { capacitorElectronDir, dependsOnElectron, describeElectronApp, readPackageJson, type ElectronProject } from './electron-project.js';
+import { recallAll, remember, type ProjectMemory } from './memory.js';
 
 export type { ElectronProject } from './electron-project.js';
 
@@ -16,6 +17,14 @@ export type PackageManager = 'npm' | 'yarn' | 'pnpm' | 'bun';
 
 /** A Capacitor app (capacitor.config.*), or an Electron app on its own (a package.json that depends on electron). */
 export type ProjectKind = 'capacitor' | 'electron';
+
+/**
+ * The apps CapMac runs, by the id `--app` takes: a Capacitor project's iOS
+ * app, and the Electron app (Capacitor's Electron platform, or the project
+ * itself). One project can have both.
+ */
+export type RunnableApp = 'ios' | 'electron';
+export const isRunnableApp = (value: unknown): value is RunnableApp => value === 'ios' || value === 'electron';
 
 export interface ProjectInfo {
   kind: ProjectKind;
@@ -42,6 +51,8 @@ export interface ProjectInfo {
   scripts: Record<string, string>;
   /** The Electron app: the project itself, or Capacitor's Electron platform; null when there is none. */
   electron: ElectronProject | null;
+  /** The app picked for this project (CapMac Studio's app picker, `capmac apps use`), if any. */
+  chosenApp?: RunnableApp | null;
 }
 
 export class ProjectError extends Error {
@@ -54,7 +65,7 @@ export class ProjectError extends Error {
 const hasCapacitorConfig = (dir: string) => CAP_CONFIG_FILES.some((f) => existsSync(path.join(dir, f)));
 
 /** Capacitor's Electron platform folder (it has a copy of capacitor.config, but the project is above it). */
-const isElectronPlatform = (dir: string) => path.basename(dir) === 'electron' && dependsOnElectron(readPackageJson(dir)) && hasCapacitorConfig(path.dirname(dir));
+export const isElectronPlatform = (dir: string) => path.basename(dir) === 'electron' && dependsOnElectron(readPackageJson(dir)) && hasCapacitorConfig(path.dirname(dir));
 
 export function findCapacitorDir(start: string): string | null {
   let dir = path.resolve(start);
@@ -84,7 +95,8 @@ export function findProjectDir(start: string): { dir: string; kind: ProjectKind 
   }
 }
 
-function findSyncRoot(capDir: string): string {
+/** The folder mirrored to the Mac: the lockfile's folder (a monorepo's root), else the project. */
+export function findSyncRoot(capDir: string): string {
   let dir = capDir;
   for (;;) {
     if (LOCKFILES.some((f) => existsSync(path.join(dir, f)))) return dir;
@@ -164,12 +176,11 @@ function evaluateWithCli(capDir: string): Promise<ResolvedCapConfig | null> {
   });
 }
 
-/** Fallback when the CLI is unavailable: read simple literal values from the config file. */
-async function evaluateStatically(configFile: string): Promise<ResolvedCapConfig> {
-  const text = await fs.readFile(configFile, 'utf8');
-  if (configFile.endsWith('.json')) {
-    const json = JSON.parse(text);
-    return { appId: json.appId, appName: json.appName, webDir: json.webDir, iosDir: json.ios?.path, scheme: json.ios?.scheme };
+/** Simple literal values from a Capacitor config's text (no code is run). */
+function parseCapacitorConfig(text: string, json: boolean): ResolvedCapConfig {
+  if (json) {
+    const parsed = JSON.parse(text);
+    return { appId: parsed.appId, appName: parsed.appName, webDir: parsed.webDir, iosDir: parsed.ios?.path, scheme: parsed.ios?.scheme };
   }
   const pick = (key: string) => text.match(new RegExp(`\\b${key}\\s*:\\s*['"\`]([^'"\`]+)['"\`]`))?.[1];
   const iosBlock = text.match(/\bios\s*:\s*\{([\s\S]*?)\}/)?.[1] ?? '';
@@ -177,12 +188,84 @@ async function evaluateStatically(configFile: string): Promise<ResolvedCapConfig
   return { appId: pick('appId'), appName: pick('appName'), webDir: pick('webDir'), iosDir: pickIos('path'), scheme: pickIos('scheme') };
 }
 
+/** Fallback when the CLI is unavailable: read simple literal values from the config file. */
+async function evaluateStatically(configFile: string): Promise<ResolvedCapConfig> {
+  return parseCapacitorConfig(await fs.readFile(configFile, 'utf8'), configFile.endsWith('.json'));
+}
+
+/** A Capacitor config's literal values, read without running anything (finding apps must be quick); {} when unreadable. */
+export function readCapacitorConfig(configFile: string): { appId?: string; appName?: string; webDir?: string; iosDir?: string } {
+  try {
+    return parseCapacitorConfig(readFileSync(configFile, 'utf8'), configFile.endsWith('.json'));
+  } catch {
+    return {};
+  }
+}
+
 function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'app';
 }
 
-function projectIdFor(appName: string, syncRoot: string): string {
-  return `${slug(appName)}-${createHash('sha1').update(`${os.hostname()}|${syncRoot.toLowerCase()}`).digest('hex').slice(0, 8)}`;
+/**
+ * The project's id: its folder name on the Mac, and its key in CapMac's memory
+ * of it. A readable slug of its name plus a hash of its own folder, so sibling
+ * projects that share a name and a lockfile (a monorepo's `one/mobile` and
+ * `two/mobile`) still get different ids and never share build state or memory.
+ */
+export function projectIdFor(appName: string, projectDir: string): string {
+  return `${slug(appName)}-${createHash('sha1').update(`${os.hostname()}|${projectDir.toLowerCase()}`).digest('hex').slice(0, 8)}`;
+}
+
+/**
+ * Why there is no project here, saying what is here instead when CapMac knows
+ * it: apps in the folders inside (a monorepo), or an app it can't run yet.
+ */
+async function noProjectError(cwd: string): Promise<ProjectError> {
+  // Loaded here: apps.ts builds on this module.
+  const { canRun, findApps, nothingToRun } = await import('./apps.js');
+  const search = await findApps(cwd, { depth: 2 }).catch(() => null);
+  const inside = search?.projects.find((p) => p.apps.some(canRun) && p.rel && !p.rel.startsWith('..'));
+  if (inside) {
+    return new ProjectError('There is no app in this folder itself, but there are apps in the folders inside it.', `See them with \`capmac apps\`, and run capmac in one of them (e.g. \`cd ${inside.rel.split('/').join(path.sep)}\`).`);
+  }
+  if (search?.projects.length) return nothingToRun(search);
+  return new ProjectError(
+    'No Capacitor or Electron app found here (no capacitor.config.*, or package.json that depends on electron, in this folder or its parents).',
+    'Run capmac from your app’s folder.',
+  );
+}
+
+/**
+ * What CapMac remembers about the project in `dir`: its last target, its
+ * sound, the app picked for it. Ids used to be made from the folder synced to
+ * the Mac and the name a Capacitor app's CLI evaluates (`oldNames`), so a
+ * monorepo's app, or an app with a computed name, had another id before.
+ * What it remembered under that one carries over while the new id has
+ * nothing, except the app picked when another project there had the same old
+ * id: apps with one name in one monorepo shared it, and whose pick it was
+ * can't be told. `adopt` saves it under the new id.
+ */
+export async function projectMemory(projectId: string, dir: string, oldNames: string[], adopt = false): Promise<ProjectMemory> {
+  const all = await recallAll();
+  if (all[projectId]) return all[projectId]!;
+  const syncRoot = findSyncRoot(dir);
+  const oldIds = [...new Set(oldNames.map((name) => projectIdFor(name, syncRoot)))].filter((id) => id !== projectId && all[id]);
+  if (!oldIds.length) return {};
+  const memory: ProjectMemory = Object.assign({}, ...oldIds.map((id) => all[id]));
+  const pickedUnder = [...oldIds].reverse().find((id) => all[id]!.app !== undefined);
+  if (pickedUnder) {
+    // Loaded here: apps.ts builds on this module.
+    const { onlyProjectWithId } = await import('./apps.js');
+    if (!(await onlyProjectWithId(pickedUnder, syncRoot, dir))) delete memory.app;
+  }
+  if (adopt) await remember(projectId, memory).catch(() => undefined);
+  return memory;
+}
+
+/** The app picked for the project before (in CapMac Studio or with `capmac apps use`), if it is one CapMac runs. */
+async function recallApp(projectId: string, dir: string, oldNames: string[]): Promise<RunnableApp | null> {
+  const app = (await projectMemory(projectId, dir, oldNames, true)).app;
+  return isRunnableApp(app) ? app : null;
 }
 
 /** An Electron app on its own (no Capacitor): the app is the project. */
@@ -192,6 +275,7 @@ async function loadElectronProject(dir: string): Promise<ProjectInfo> {
   const rootPackageJson = syncRoot === dir ? packageJson : readPackageJson(syncRoot) ?? packageJson;
   const config = await loadProjectConfig(dir);
   const electron = describeElectronApp(dir, '', false);
+  const projectId = projectIdFor(electron.name, dir);
   return {
     kind: 'electron',
     capDir: dir,
@@ -207,21 +291,17 @@ async function loadElectronProject(dir: string): Promise<ProjectInfo> {
     iosPackageManager: 'unknown',
     hasIos: false,
     packageManager: detectPackageManager(syncRoot, rootPackageJson),
-    projectId: projectIdFor(electron.name, syncRoot),
+    projectId,
     config,
     scripts: packageJson.scripts ?? {},
     electron,
+    chosenApp: await recallApp(projectId, dir, [electron.name]),
   };
 }
 
 export async function loadProject(cwd: string): Promise<ProjectInfo> {
   const found = findProjectDir(cwd);
-  if (!found) {
-    throw new ProjectError(
-      'No Capacitor or Electron app found here (no capacitor.config.*, or package.json that depends on electron, in this folder or its parents).',
-      'Run capmac from your app’s folder.',
-    );
-  }
+  if (!found) throw await noProjectError(cwd);
   if (found.kind === 'electron') return loadElectronProject(found.dir);
   const capDir = found.dir;
   const configFile = CAP_CONFIG_FILES.map((f) => path.join(capDir, f)).find((f) => existsSync(f))!;
@@ -249,7 +329,11 @@ export async function loadProject(cwd: string): Promise<ProjectInfo> {
       ? 'CocoaPods'
       : 'unknown';
   const appName = resolved.appName || path.basename(capDir);
-  const projectId = projectIdFor(appName, syncRoot);
+  // The id (the Mac folder, and the memory key app detection looks the project up by) must not
+  // depend on whether the Capacitor CLI is installed, so derive it from the statically-read config
+  // — the same name apps.ts computes — not the CLI-evaluated appName.
+  const idName = readCapacitorConfig(configFile).appName || path.basename(capDir);
+  const projectId = projectIdFor(idName, capDir);
   const config = await loadProjectConfig(capDir);
   const electronDir = capacitorElectronDir(capDir, config);
   return {
@@ -271,6 +355,8 @@ export async function loadProject(cwd: string): Promise<ProjectInfo> {
     config,
     scripts: packageJson.scripts ?? {},
     electron: electronDir ? describeElectronApp(electronDir, toPosixRel(capDir, electronDir), true) : null,
+    // Old ids used the name the CLI evaluates (CapMac 0.1), or the config's.
+    chosenApp: await recallApp(projectId, capDir, [appName, idName]),
   };
 }
 
@@ -307,16 +393,46 @@ export function requireElectron(project: ProjectInfo): ElectronProject {
   );
 }
 
+/** What a command says about which app it is for (its flags). */
+export interface AppOptions {
+  /** `--app`: the app's id ('ios' or 'electron'). */
+  app?: string;
+  /** `--electron`: the Electron app. */
+  electron?: boolean;
+  /** A simulator or device (the iOS app), or "mac" (the Electron app). */
+  target?: string;
+  /** A device or a simulator: places only the iOS app runs. */
+  device?: boolean;
+  simulator?: boolean;
+}
+
+const MAC_TARGET = /^(mac|macos|electron|mac-desktop|this mac)$/i;
+
 /**
- * Whether a run goes to the Mac's desktop (the Electron app) rather than a
- * simulator or device: always for an Electron app, when asked for, and for a
- * Capacitor app whose only platform here is Electron.
+ * Which of the project's apps a command is for: the one asked for (`--app`),
+ * the project itself when it is an Electron app, a place only one app runs
+ * (`--electron`, `--target mac`, a simulator or a device), else the app
+ * picked for the project, else its iOS app, else its Electron app.
  */
-export function runsOnMac(project: ProjectInfo, options: { electron?: boolean; target?: string } = {}): boolean {
-  if (project.kind === 'electron') return true;
-  if (options.electron) return true;
-  if (options.target && /^(mac|macos|electron|mac-desktop|this mac)$/i.test(options.target.trim())) return true;
-  return Boolean(project.electron && !project.hasIos);
+export function appFor(project: ProjectInfo, options: AppOptions = {}): RunnableApp {
+  if (options.app !== undefined) {
+    const wanted = options.app.trim().toLowerCase();
+    if (isRunnableApp(wanted)) return wanted;
+    const apps = project.kind === 'electron' ? 'electron' : project.electron ? 'ios, electron' : 'ios';
+    throw new ProjectError(`There is no app called "${options.app}" here.`, `This project's apps: ${apps}. See them with \`capmac apps\`.`);
+  }
+  if (project.kind === 'electron') return 'electron';
+  if (options.electron) return 'electron';
+  if (options.target) return MAC_TARGET.test(options.target.trim()) ? 'electron' : 'ios';
+  if (options.device || options.simulator) return 'ios';
+  // An app picked before still exists (a Capacitor project always has room for its iOS app).
+  if (project.chosenApp === 'ios' || (project.chosenApp === 'electron' && project.electron)) return project.chosenApp;
+  return project.electron && !project.hasIos ? 'electron' : 'ios';
+}
+
+/** Whether a command is for the Electron app, on the Mac's desktop, rather than a simulator or device (see appFor). */
+export function runsOnMac(project: ProjectInfo, options: AppOptions = {}): boolean {
+  return appFor(project, options) === 'electron';
 }
 
 /** Whether the iOS app adopts the UIScene lifecycle (required when building with the iOS 27 SDK). */

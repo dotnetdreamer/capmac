@@ -3,7 +3,7 @@
  * The first JSON frame the client sends is always `{ t: 'params', op, ... }`.
  */
 
-import type { AppDialog, AppDialogClosed, AppInputEvent, AppWindowInfo, HookEvent, SoundMode } from './electron.js';
+import type { AppCodec, AppDialog, AppDialogClosed, AppInputEvent, AppWindowInfo, HookEvent, SoundMode } from './electron.js';
 
 export const PROTOCOL_VERSION = 1;
 
@@ -319,6 +319,8 @@ export type AgentEvent =
   | { t: 'app-audio'; packets: string[] }
   /** `electron-screen`: the answer to a dialog request (`dialog-answer`, `dialog-list`, `dialog-mkdir`). */
   | { t: 'app-dialog-reply'; req: number; ok: boolean; data?: unknown; error?: string }
+  /** `electron-screen`: how the window's pictures come now, and why it is JPEG when video was asked for. */
+  | { t: 'app-codec'; codec: AppCodec; fallback: StreamFallback | null }
   | ScreenInfo
   /** `watch-targets`: the simulators and devices changed. */
   | { t: 'targets'; data: TargetsResult }

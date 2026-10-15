@@ -51,9 +51,26 @@
   gap: var(--s-1);
   margin-left: var(--s-2);
   min-width: 0;
+  /* The pickers shrink (their text truncates) before the toolbar wraps onto a second line,
+     and take the free space before the spacer does (so they truncate only when they must). */
+  flex: 99 1 320px;
 }
 .ws-toolbar__arrow {
   color: var(--text-3);
+}
+/* Between the app picker (what runs) and the Mac › target pickers (where) */
+.ws-toolbar__pickers-divider {
+  flex: none;
+  width: 1px;
+  height: 24px;
+  margin: 0 var(--s-1);
+  background: var(--stroke-divider);
+}
+.tb-picker--app {
+  max-width: 200px;
+  .tb-picker__icon {
+    color: var(--accent-text);
+  }
 }
 .ws-toolbar__spacer {
   flex: 1;

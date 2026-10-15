@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import type { ErrorInfo, ProjectSummary } from '../../shared/contract';
 import { call, errorInfo } from './engine';
@@ -16,6 +17,8 @@ export interface ProjectEntry {
 interface ProjectsState {
   byKey: Record<string, ProjectEntry>;
   inspect(path: string, force?: boolean): Promise<ProjectSummary | null>;
+  /** Keeps a summary the engine just made (after picking the app), with its icon. */
+  put(path: string, summary: ProjectSummary): Promise<void>;
   loadSize(path: string): Promise<void>;
 }
 
@@ -35,7 +38,7 @@ export const useProjects = create<ProjectsState>((set, get) => ({
     const promise = (async () => {
       try {
         const summary = await call('projects.inspect', { path });
-        const icon = summary.iconPath ? await window.capmac.invoke('app:project-icon', { path: summary.iconPath }).catch(() => null) : null;
+        const icon = summary.iconPath ? await loadIcon(summary.iconPath, force) : null;
         patch({ summary, icon, loading: false, error: null });
         return summary;
       } catch (err) {
@@ -47,6 +50,11 @@ export const useProjects = create<ProjectsState>((set, get) => ({
     })();
     inflight.set(key, promise);
     return promise;
+  },
+  put: async (path, summary) => {
+    const key = projectKey(path);
+    const icon = summary.iconPath ? await loadIcon(summary.iconPath) : null;
+    set((s) => ({ byKey: { ...s.byKey, [key]: { ...(s.byKey[key] ?? empty), summary, icon, loading: false, error: null } } }));
   },
   loadSize: async (path) => {
     const key = projectKey(path);
@@ -61,4 +69,29 @@ export const useProjects = create<ProjectsState>((set, get) => ({
 
 export function useProject(path: string | null): ProjectEntry {
   return useProjects((s) => (path ? s.byKey[projectKey(path)] ?? empty : empty));
+}
+
+const icons = new Map<string, Promise<string | null>>();
+
+/** An app icon (a PNG on this PC) as a data URL: read once, or again when `fresh`. */
+export function loadIcon(png: string, fresh = false): Promise<string | null> {
+  let icon = fresh ? undefined : icons.get(png);
+  if (!icon) {
+    icon = window.capmac.invoke('app:project-icon', { path: png }).catch(() => null);
+    icons.set(png, icon);
+  }
+  return icon;
+}
+
+export function useIcon(png: string | null | undefined): string | null {
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    setSrc(null);
+    if (png) void loadIcon(png).then((icon) => live && setSrc(icon));
+    return () => {
+      live = false;
+    };
+  }, [png]);
+  return src;
 }

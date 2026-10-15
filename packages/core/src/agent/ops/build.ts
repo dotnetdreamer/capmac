@@ -4,10 +4,11 @@ import path from 'node:path';
 import type { BuildParams, BuildResult } from '../../shared/protocol.js';
 import { hintForBuildOutput, XcodeOutputParser } from '../../shared/xcode-output.js';
 import { toolEnv, xcodeEnv } from '../env.js';
-import { locateIosProject } from '../ios-project.js';
+import { locateIosProject, type IosProject } from '../ios-project.js';
 import { step, type AgentIO } from '../io.js';
-import { AgentError, capture, exists, run } from '../proc.js';
+import { AgentError, capture, exists, run, tryCapture } from '../proc.js';
 import { loadState, projectPaths, saveState, withProjectLock, type BuildRecord } from '../state.js';
+import { signingTeamsFor } from './teams.js';
 
 export interface AppInfo {
   bundleId: string;
@@ -25,10 +26,46 @@ export async function readAppInfo(appPath: string): Promise<AppInfo> {
   };
 }
 
-async function findBuiltApp(productsDir: string, scheme: string): Promise<string> {
+/** The app a scheme runs: its target, and the product that target builds (`PhoneApp`, `PhoneApp.app`). */
+export interface SchemeApp {
+  target: string;
+  product: string;
+}
+
+const xmlText = (value: string) => value.replace(/&(quot|apos|lt|gt|amp);/g, (_, name: string) => ({ quot: '"', apos: "'", lt: '<', gt: '>', amp: '&' })[name]!);
+
+/** The app an .xcscheme's Run action launches; null when it names none. */
+export function launchedApp(schemeXml: string): SchemeApp | null {
+  const launch = /<LaunchAction\b[\s\S]*?<\/LaunchAction>/.exec(schemeXml)?.[0] ?? '';
+  const reference = /<BuildableProductRunnable\b[\s\S]*?<BuildableReference\b([^>]*)>/.exec(launch)?.[1];
+  if (!reference) return null;
+  const attribute = (name: string) => xmlText(new RegExp(`\\b${name}\\s*=\\s*"([^"]*)"`).exec(reference)?.[1] ?? '');
+  const target = attribute('BlueprintName');
+  return target ? { target, product: attribute('BuildableName') || `${target}.app` } : null;
+}
+
+/**
+ * The app `scheme` runs. A scheme can build several apps, so its file says
+ * which (shared schemes first, then the Mac user's own). A scheme with no
+ * file is one Xcode makes from the target of that name, like Capacitor's App.
+ */
+async function schemeApp(ios: IosProject, scheme: string): Promise<SchemeApp> {
+  for (const container of [ios.workspace, ios.xcodeproj]) {
+    if (!container) continue;
+    const users = await fs.readdir(path.join(container, 'xcuserdata')).catch(() => [] as string[]);
+    const files = [path.join(container, 'xcshareddata', 'xcschemes', `${scheme}.xcscheme`), ...users.map((user) => path.join(container, 'xcuserdata', user, 'xcschemes', `${scheme}.xcscheme`))];
+    for (const file of files) {
+      const xml = await fs.readFile(file, 'utf8').catch(() => null);
+      if (xml !== null) return launchedApp(xml) ?? { target: scheme, product: `${scheme}.app` };
+    }
+  }
+  return { target: scheme, product: `${scheme}.app` };
+}
+
+async function findBuiltApp(productsDir: string, app: SchemeApp, scheme: string): Promise<string> {
   const entries = await fs.readdir(productsDir).catch(() => [] as string[]);
   const apps = entries.filter((name) => name.endsWith('.app'));
-  const preferred = apps.find((name) => name === `${scheme}.app`) ?? apps[0];
+  const preferred = [app.product, `${scheme}.app`].find((name) => apps.includes(name)) ?? apps[0];
   if (!preferred) throw new AgentError(`Build succeeded but no .app was found in ${productsDir}`, 'BUILD_FAILED');
   return path.join(productsDir, preferred);
 }
@@ -68,11 +105,123 @@ function buildKey(params: BuildParams, scheme: string): string {
   return [platform, params.configuration, scheme, device, params.team ?? '', params.auth?.keyId ?? ''].join('|');
 }
 
+/** Where xcodebuild builds for a target: a simulator, or a device by its UDID. */
+export function destinationFor(target: BuildParams['target']): string {
+  if (target.kind === 'simulator') return `platform=iOS Simulator,id=${target.udid}`;
+  return `platform=iOS,id=${target.udid}`;
+}
+
 async function pruneLogs(dir: string, keep: number): Promise<void> {
   const files = (await fs.readdir(dir).catch(() => [] as string[])).filter((f) => f.startsWith('build-')).sort();
   for (const name of files.slice(0, Math.max(0, files.length - keep))) {
     await fs.rm(path.join(dir, name), { force: true }).catch(() => undefined);
   }
+}
+
+/**
+ * xcodebuild's arguments for the build settings a device build of `scheme`
+ * gets: the build's own project, configuration, derived data and extra
+ * arguments (a team given as `DEVELOPMENT_TEAM=…` or in an `-xcconfig` file
+ * counts), for any iOS device.
+ */
+export function settingsArgs(ios: Pick<IosProject, 'workspace' | 'xcodeproj'>, scheme: string, configuration: string, derivedData: string, extraArgs: string[] = []): string[] {
+  return [
+    ...(ios.workspace ? ['-workspace', ios.workspace] : ['-project', ios.xcodeproj]),
+    '-scheme', scheme,
+    '-configuration', configuration,
+    '-destination', 'generic/platform=iOS',
+    '-derivedDataPath', derivedData,
+    '-skipPackagePluginValidation',
+    '-skipMacroValidation',
+    ...extraArgs,
+    '-showBuildSettings',
+    '-json',
+  ];
+}
+
+/**
+ * The development team `xcodebuild -showBuildSettings -json` gives `app`.
+ * The output lists every target the scheme builds, other apps included, so
+ * the app is found by its target (or product), else it is the only app
+ * there. '' when it names no team; null when the output can't tell.
+ */
+export function teamOf(output: string, app: SchemeApp): string | null {
+  let entries: unknown = null;
+  for (const start of output.matchAll(/^\[/gm)) {
+    try {
+      entries = JSON.parse(output.slice(start.index));
+      break;
+    } catch {
+      // A line of xcodebuild's own output, not the settings.
+    }
+  }
+  if (!Array.isArray(entries)) return null;
+  const targets = entries as Array<{ target?: string; buildSettings?: Record<string, string> }>;
+  const apps = targets.filter((t) => t.buildSettings?.WRAPPER_EXTENSION === 'app' || t.buildSettings?.PRODUCT_TYPE === 'com.apple.product-type.application');
+  const found =
+    targets.find((t) => (t.target ?? t.buildSettings?.TARGET_NAME) === app.target) ??
+    apps.find((t) => t.buildSettings?.FULL_PRODUCT_NAME === app.product) ??
+    (apps.length === 1 ? apps[0] : undefined);
+  return found?.buildSettings ? (found.buildSettings.DEVELOPMENT_TEAM ?? '').trim() : null;
+}
+
+/**
+ * The development team the Xcode project gives the app `scheme` runs: ''
+ * when it names none, null when CapMac could not find out. Asking xcodebuild
+ * is the only way that also sees a team set in an .xcconfig or through a
+ * `$(…)` variable, not only one written in the .pbxproj.
+ */
+async function projectTeamFor(ios: IosProject, scheme: string, app: SchemeApp, params: BuildParams, derivedData: string, signal: AbortSignal): Promise<string | null> {
+  const args = settingsArgs(ios, scheme, params.configuration, derivedData, params.extraArgs);
+  // Swift packages are resolved first, into the build's own derived data: the build then reuses them.
+  const output = await tryCapture('xcodebuild', args, { cwd: ios.nativeProjectDir, env: await xcodeEnv(), timeoutMs: 120_000, signal });
+  return output === null ? null : teamOf(output, app);
+}
+
+/**
+ * The signing decision from what the project and the Mac offer. Pure, so it is
+ * tested directly: an explicit team (or a simulator) wins; else a team the
+ * Xcode project names (CapMac does not override it), or might name when
+ * CapMac could not read it (null); else the one team whose development
+ * profile covers the device; several of those and no choice is an error for
+ * the project to settle.
+ */
+export function decideSigningTeam(input: {
+  explicitTeam?: string;
+  isSimulator: boolean;
+  /** The team the Xcode project gives the app: '' none, null unknown. */
+  projectTeam: string | null;
+  coveringTeams: string[];
+  targetName: string;
+}): { team?: string; auto: boolean } | { error: { message: string; hint: string } } {
+  if (input.isSimulator || input.explicitTeam) return { team: input.explicitTeam, auto: false };
+  if (input.projectTeam !== '') return { team: undefined, auto: false };
+  if (input.coveringTeams.length > 1) {
+    return { error: { message: `Several development teams can sign for ${input.targetName}: ${input.coveringTeams.join(', ')}.`, hint: 'Pick one: set ios.team in capmac.json, or pass --team <TEAM_ID>.' } };
+  }
+  return { team: input.coveringTeams[0], auto: input.coveringTeams.length === 1 };
+}
+
+/**
+ * The team a device build signs with: the project's (capmac.json/--team, else
+ * whatever the Xcode project gives the app the scheme runs), else the one team
+ * whose development profile on this Mac covers the device. CapMac only picks
+ * when it knows the project names none, so it never overrides an explicit
+ * choice nor blocks a build a configured project could make.
+ */
+async function signingTeam(params: BuildParams, ios: IosProject, scheme: string, app: SchemeApp, derivedData: string, io: AgentIO): Promise<string | undefined> {
+  const isSimulator = params.target.kind === 'simulator';
+  let projectTeam: string | null = '';
+  let coveringTeams: string[] = [];
+  if (!isSimulator && !params.team) {
+    projectTeam = await projectTeamFor(ios, scheme, app, params, derivedData, io.signal);
+    if (projectTeam === '') coveringTeams = await signingTeamsFor(params.target.udid, await toolEnv());
+    if (projectTeam === null) io.log('debug', `Could not read the signing team of ${app.target} from the Xcode project, so CapMac leaves signing to it.`);
+  }
+  const decision = decideSigningTeam({ explicitTeam: params.team, isSimulator, projectTeam, coveringTeams, targetName: params.target.name });
+  if ('error' in decision) throw new AgentError(decision.error.message, 'BUILD_FAILED', decision.error.hint);
+  if (decision.auto && decision.team) io.log('info', `Signing with team ${decision.team}: its development profile covers ${params.target.name}.`);
+  return decision.team;
 }
 
 export async function opBuild(params: BuildParams, io: AgentIO): Promise<BuildResult> {
@@ -81,6 +230,8 @@ export async function opBuild(params: BuildParams, io: AgentIO): Promise<BuildRe
     const state = await loadState(paths);
     const ios = await locateIosProject(paths.project, params.iosDir ?? 'ios');
     const scheme = params.scheme || 'App';
+    const app = await schemeApp(ios, scheme);
+    params = { ...params, team: await signingTeam(params, ios, scheme, app, paths.derivedData, io) };
     const key = buildKey(params, scheme);
     const previous = state.builds[key];
 
@@ -101,7 +252,7 @@ export async function opBuild(params: BuildParams, io: AgentIO): Promise<BuildRe
     }
 
     const isSim = params.target.kind === 'simulator';
-    const destination = isSim ? `platform=iOS Simulator,id=${params.target.udid}` : `platform=iOS,id=${params.target.udid}`;
+    const destination = destinationFor(params.target);
     // With an App Store Connect API key xcodebuild can manage profiles and
     // register the device without an Xcode account session (unreliable over SSH).
     let keyFile: string | null = null;
@@ -122,6 +273,8 @@ export async function opBuild(params: BuildParams, io: AgentIO): Promise<BuildRe
       '-configuration', params.configuration,
       '-destination', destination,
       '-derivedDataPath', paths.derivedData,
+      // Products go under -derivedDataPath even when Xcode's settings put builds elsewhere (Locations › Custom).
+      '-IDEBuildLocationStyle=Unique',
       '-skipPackagePluginValidation',
       '-skipMacroValidation',
       ...(isSim ? [] : ['-allowProvisioningUpdates', ...authArgs]),
@@ -185,7 +338,7 @@ export async function opBuild(params: BuildParams, io: AgentIO): Promise<BuildRe
     void result;
 
     const productsDir = path.join(paths.derivedData, 'Build', 'Products', `${params.configuration}-${isSim ? 'iphonesimulator' : 'iphoneos'}`);
-    const appPath = await findBuiltApp(productsDir, scheme);
+    const appPath = await findBuiltApp(productsDir, app, scheme);
     // Xcode can leave a resource it thinks unchanged (the live-reload config): bring it in step.
     if (isSim && !(await bundledConfigMatches(appPath, ios.appDir))) await refreshWebAssets(appPath, ios.appDir);
     const info = await readAppInfo(appPath);

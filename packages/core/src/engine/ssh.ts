@@ -126,6 +126,9 @@ export class MacConnection {
         }
         settled = true;
         options.signal?.removeEventListener('abort', onAbort);
+        // Input, acks and pings are small: they leave at once instead of waiting for the Mac to
+        // acknowledge what went before (Nagle), which could hold them up to a delayed ACK (200 ms on Windows).
+        (client as unknown as { setNoDelay?(on: boolean): void }).setNoDelay?.(true);
         resolve(new MacConnection(client, options));
       });
       client.on('error', (err: any) => fail(rejectedKey ? new HostKeyMismatchError(rejectedKey) : friendlyError(err, options)));

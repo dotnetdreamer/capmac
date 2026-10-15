@@ -1,6 +1,7 @@
 import { SOUND_MODES, type SoundMode } from '@capmac/core/shared/electron';
-import { answerAppDialog, ElectronLiveSession, LiveSession, loadApiKey, loadProject, MacLink, requireElectron, requireIos, runsOnMac, soundFor, type ProjectInfo } from '@capmac/core/engine';
+import { answerAppDialog, appFor, ElectronLiveSession, LiveSession, loadApiKey, loadProject, MacLink, requireElectron, requireIos, soundFor, streamPreference, type ProjectInfo, type StreamPreference } from '@capmac/core/engine';
 import { listenForKeys } from '../keys.js';
+import { announceApp } from './apps.js';
 import { reportError } from '../report.js';
 import { terminalContext } from '../terminal.js';
 import { log, pc } from '../ui.js';
@@ -8,8 +9,12 @@ import { ScreenViewer } from '../viewer/server.js';
 
 export interface DevOptions {
   mac?: string;
+  /** Which of the project's apps (`ios` or `electron`); default: the one picked for it. */
+  app?: string;
   /** An Electron app's sound (remembered for the project). */
   sound?: SoundMode;
+  /** How the screen viewer streams (remembered, CapMac Studio's too). */
+  stream?: StreamPreference;
   target?: string;
   device?: boolean;
   simulator?: boolean;
@@ -66,13 +71,16 @@ async function untilQuit(start: () => Promise<void>, keys: Record<string, () => 
 
 export async function devCommand(options: DevOptions): Promise<void> {
   const project = await loadProject(process.cwd());
-  if (runsOnMac(project, options)) return devOnMac(project, options);
+  const app = appFor(project, options);
+  await announceApp(project, app);
+  if (app === 'electron') return devOnMac(project, options);
   requireIos(project);
   const auth = options.device || options.target ? await loadApiKey(options, project) : undefined;
   const { ctx, reporter } = terminalContext({ mode: 'dev', bridge: options.bridge, allWarnings: options.allWarnings });
   reporter.onAppRunning = printKeys;
   const link = new MacLink(options.mac ?? project.config.host, ctx, { autoReconnect: true });
   const live = new LiveSession(project, link, { ...options, auth }, ctx);
+  const prefer = await streamPreference(options.stream);
   let viewer: ScreenViewer | null = null;
   const openScreen = async () => {
     const target = live.target;
@@ -83,7 +91,7 @@ export async function devCommand(options: DevOptions): Promise<void> {
     }
     try {
       if (!viewer) {
-        viewer = await ScreenViewer.start(link, target, { title: `${project.appName} · ${target.name}` });
+        viewer = await ScreenViewer.start(link, target, { title: `${project.appName} · ${target.name}`, prefer });
         const v = viewer;
         reporter.onAppLog = (entry) => v.pushLog(entry);
       }
@@ -114,6 +122,7 @@ async function devOnMac(project: ProjectInfo, options: DevOptions): Promise<void
   const link = new MacLink(options.mac ?? project.config.host, ctx, { autoReconnect: true });
   const live = new ElectronLiveSession(project, link, { url: options.url, devCommand: options.devCommand, full: options.full || options.clean, watch: options.watch, sound: options.sound }, ctx);
   let sound = await soundFor(project.projectId, options.sound);
+  const prefer = await streamPreference(options.stream);
   const SOUND_WORDS: Record<SoundMode, string> = { off: 'off', mac: 'on the Mac', pc: 'on this PC (in the window viewer: press o)' };
   /** s: the app's sound off, on the Mac, on this PC, and round again. */
   const nextSound = () => {
@@ -129,7 +138,7 @@ async function devOnMac(project: ProjectInfo, options: DevOptions): Promise<void
     if (!target) return;
     try {
       if (!viewer) {
-        viewer = await ScreenViewer.start(link, { kind: 'app', projectId: project.projectId, label: target.name }, { title: `${project.appName} · ${target.name}` });
+        viewer = await ScreenViewer.start(link, { kind: 'app', projectId: project.projectId, label: target.name }, { title: `${project.appName} · ${target.name}`, prefer });
         const v = viewer;
         reporter.onAppLog = (entry) => v.pushLog(entry);
       }

@@ -2,9 +2,10 @@
  * The agent's half of a smooth stream, for either helper (a simulator's or a
  * plugged-in iPhone's). Frames go to the client as binary frames, unchanged;
  * acks, clock pings, keyframe and size requests and input come back. It keeps
- * latency bounded on a slow network (VideoWindow), adapts the bitrate, reports
- * every few seconds, and ends when the client stops talking, the helper stops
- * or a check fails. No orphans: the op stops the helper when this returns.
+ * latency bounded on a slow network and adapts the bitrate (VideoPacer, which
+ * an Electron app's window shares, see ops/electron.ts), reports every few
+ * seconds, and ends when the client stops talking, the helper stops or a check
+ * fails. No orphans: the op stops the helper when this returns.
  */
 import type { InputEvent, StreamParams } from '../../shared/protocol.js';
 import { STREAM_CONFIG, type StreamHeader } from '../../shared/stream.js';
@@ -25,6 +26,89 @@ export function clampInt(value: unknown, min: number, max: number, fallback: num
   return Math.min(max, Math.max(min, n));
 }
 
+/**
+ * The pacing every smooth stream shares. Each video message goes out or is
+ * dropped to keep latency bounded on a slow network (VideoWindow); every
+ * 100 ms or so `tick` says whether the source should send a keyframe (the way
+ * is clear again after drops) or change its bitrate (adaptive bitrate, once a
+ * second), and every few seconds what to report.
+ */
+export class VideoPacer {
+  window: VideoWindow;
+  readonly bitrate: BitrateController;
+  /** Frames sent since the stream started. */
+  frames = 0;
+  private droppedBefore = 0;
+  private lastKeyAsk = 0;
+  private lastTick: number;
+  private tickFrames = 0;
+  private tickDropped = 0;
+  private lastStatus: number;
+  private statusFrames = 0;
+
+  constructor(params: Pick<StreamParams, 'bitrate' | 'minBitrate' | 'maxBitrate'>, private readonly now: () => number = Date.now) {
+    this.window = new VideoWindow(now);
+    const maxBitrate = clampInt(params.maxBitrate ?? params.bitrate, 1_000_000, 20_000_000, 6_000_000);
+    this.bitrate = new BitrateController({
+      start: clampInt(params.bitrate, 300_000, maxBitrate, maxBitrate),
+      min: clampInt(params.minBitrate, 300_000, maxBitrate, 600_000),
+      max: maxBitrate,
+    }, now);
+    this.lastTick = this.lastStatus = now();
+  }
+
+  /** Frames dropped to catch up since the stream started. */
+  get dropped(): number {
+    return this.droppedBefore + this.window.dropped;
+  }
+
+  /** Whether a video message goes out now (configs always do). */
+  offer(header: StreamHeader, backlog: number): boolean {
+    if (header.type === STREAM_CONFIG) return true;
+    if (!this.window.offer(header.seq, header.key, backlog)) return false;
+    this.frames += 1;
+    return true;
+  }
+
+  /** The client got every frame up to `seq`. */
+  ack(seq: number): void {
+    this.window.ack(seq);
+  }
+
+  /** A new source (the app restarted): the frames in flight are forgotten, the bitrate stays. */
+  restart(): void {
+    this.droppedBefore += this.window.dropped;
+    this.window = new VideoWindow(this.now);
+    this.lastKeyAsk = 0;
+  }
+
+  /** What the source should do now, and (every 5 s) the numbers to report. */
+  tick(backlog: number): { keyframe: boolean; bitrate: number | null; status: { fps: number; dropped: number } | null } {
+    const now = this.now();
+    let keyframe = false;
+    // Dropped frames to catch up: once the way is clear, restart from a keyframe.
+    if (this.window.wantsKeyframe(backlog) && now - this.lastKeyAsk > 400) {
+      keyframe = true;
+      this.lastKeyAsk = now;
+    }
+    let bitrate: number | null = null;
+    // Adaptive bitrate: once a second, from how the frames got through.
+    if (now - this.lastTick >= 1000) {
+      this.lastTick = now;
+      bitrate = this.bitrate.tick({ peakLagMs: this.window.takePeakLag(), dropped: this.dropped - this.tickDropped, frames: this.frames - this.tickFrames, backlogBytes: backlog });
+      this.tickFrames = this.frames;
+      this.tickDropped = this.dropped;
+    }
+    let status: { fps: number; dropped: number } | null = null;
+    if (now - this.lastStatus >= 5000) {
+      status = { fps: Math.round(((this.frames - this.statusFrames) * 1000) / (now - this.lastStatus)), dropped: this.dropped };
+      this.lastStatus = now;
+      this.statusFrames = this.frames;
+    }
+    return { keyframe, bitrate, status };
+  }
+}
+
 export interface RelayHooks {
   /** Why the helper stopping ends the stream: an error for the client. */
   failure(exit: HelperExit): AgentError;
@@ -37,9 +121,7 @@ export interface RelayHooks {
 }
 
 export class StreamRelay {
-  readonly window = new VideoWindow();
-  readonly bitrate: BitrateController;
-  private frames = 0;
+  readonly pacer: VideoPacer;
   private footprint = 0;
   private helperDropped = 0;
   private lastHeard = Date.now();
@@ -50,12 +132,12 @@ export class StreamRelay {
   private stopping = false;
 
   constructor(private readonly io: AgentIO, params: StreamParams, private readonly watch?: StallWatch) {
-    const maxBitrate = clampInt(params.maxBitrate ?? params.bitrate, 1_000_000, 20_000_000, 6_000_000);
-    this.bitrate = new BitrateController({
-      start: clampInt(params.bitrate, 300_000, maxBitrate, maxBitrate),
-      min: clampInt(params.minBitrate, 300_000, maxBitrate, 600_000),
-      max: maxBitrate,
-    });
+    this.pacer = new VideoPacer(params);
+  }
+
+  /** Where the helper's bitrate starts, and how adaptive bitrate moves it. */
+  get bitrate(): BitrateController {
+    return this.pacer.bitrate;
   }
 
   /** The helper's video and status go here (spread them into its handlers). */
@@ -70,13 +152,7 @@ export class StreamRelay {
 
   private video(message: Buffer, header: StreamHeader): void {
     this.watch?.activity();
-    if (header.type === STREAM_CONFIG) {
-      this.io.sendLive(message);
-      return;
-    }
-    if (!this.window.offer(header.seq, header.key, this.io.backlog)) return;
-    this.frames += 1;
-    this.io.sendLive(message);
+    if (this.pacer.offer(header, this.io.backlog)) this.io.sendLive(message);
   }
 
   /** Takes the client's messages for `helper` from now on (before waiting for its hello, too). */
@@ -88,7 +164,7 @@ export class StreamRelay {
       this.lastHeard = Date.now();
       switch (message?.t) {
         case 'ack':
-          if (Number.isInteger(message.seq)) this.window.ack(message.seq);
+          if (Number.isInteger(message.seq)) this.pacer.ack(message.seq);
           break;
         case 'keyframe':
           helper.send('k');
@@ -149,29 +225,13 @@ export class StreamRelay {
   async run(): Promise<{ frames: number; dropped: number }> {
     const helper = this.helper;
     if (!helper) throw new Error('StreamRelay.run before attach');
-    let lastKeyAsk = 0;
     let lastCheck = Date.now();
-    let lastStatus = Date.now();
-    let lastFrames = 0;
-    let lastTick = Date.now();
-    let tickFrames = 0;
-    let tickDropped = 0;
     while (this.going) {
       await sleep(100, this.io.signal);
       const now = Date.now();
-      // Dropped frames to catch up: once the way is clear, restart from a keyframe.
-      if (this.window.wantsKeyframe(this.io.backlog) && now - lastKeyAsk > 400) {
-        helper.send('k');
-        lastKeyAsk = now;
-      }
-      // Adaptive bitrate: once a second, from how the frames got through.
-      if (now - lastTick >= 1000) {
-        lastTick = now;
-        const change = this.bitrate.tick({ peakLagMs: this.window.takePeakLag(), dropped: this.window.dropped - tickDropped, frames: this.frames - tickFrames, backlogBytes: this.io.backlog });
-        tickFrames = this.frames;
-        tickDropped = this.window.dropped;
-        if (change) helper.send(`r ${change}`);
-      }
+      const pace = this.pacer.tick(this.io.backlog);
+      if (pace.keyframe) helper.send('k');
+      if (pace.bitrate) helper.send(`r ${pace.bitrate}`);
       if (this.watch && this.hooks?.stalled && now - lastCheck >= 1000) {
         lastCheck = now;
         const stalled = this.hooks.stalled;
@@ -179,14 +239,10 @@ export class StreamRelay {
           if (yes) this.failure ??= stalled();
         });
       }
-      if (now - lastStatus >= 5000) {
-        this.io.send({ t: 'stream-status', footprint: this.footprint, fps: Math.round(((this.frames - lastFrames) * 1000) / (now - lastStatus)), dropped: this.window.dropped + this.helperDropped, bitrate: this.bitrate.current });
-        lastStatus = now;
-        lastFrames = this.frames;
-      }
+      if (pace.status) this.io.send({ t: 'stream-status', footprint: this.footprint, fps: pace.status.fps, dropped: pace.status.dropped + this.helperDropped, bitrate: this.pacer.bitrate.current });
     }
     if (this.failure) throw this.failure;
-    return { frames: this.frames, dropped: this.window.dropped + this.helperDropped };
+    return { frames: this.pacer.frames, dropped: this.pacer.dropped + this.helperDropped };
   }
 
   /** Stops the helper (the op is done with it): its exit is no failure then. */

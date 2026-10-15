@@ -32,7 +32,7 @@ CapMac drives a Mac over SSH. It syncs the project, builds it with Xcode on the 
 capmac doctor
 \`\`\`
 
-If it reports that no Mac is paired, stop and ask the user to run \`capmac pair\` in their own terminal. Pairing needs the Mac's password, which you must never ask for or type. \`capmac info\` shows what CapMac detected about the app (app id, web folder, iOS project) without contacting the Mac.
+If it reports that no Mac is paired, stop and ask the user to run \`capmac pair\` in their own terminal. Pairing needs the Mac's password, which you must never ask for or type. \`capmac info\` shows what CapMac detected about the app (app id, web folder, iOS project) without contacting the Mac. A folder can hold more than one app (a Capacitor project's iOS app and its Electron platform, or the apps of a monorepo): \`capmac apps\` lists them and the one CapMac uses, which the user may have picked in CapMac Studio. Add \`--app ios\` or \`--app electron\` to be sure which one a command is for.
 
 ## Commands that finish on their own
 
@@ -55,7 +55,7 @@ A typical check after changing code: \`capmac run --for 15\`, read the console f
 
 ## Electron apps
 
-In an Electron app's folder (plain Electron, electron-vite or Electron Forge), the same commands run the app on the Mac's desktop: \`capmac run --for 20\` or \`capmac run --no-logs\`, then \`capmac screenshot --electron\` for a PNG of its window. In a Capacitor project, add \`--electron\` to use its Electron platform instead of iOS. Console lines start with \`main\` (the main process) or \`js\` (the pages). The app opens behind the windows of whoever is using the Mac and never takes their keyboard, so running it does not disturb them. If the app opens a message box or file dialog, the console prints it and the app waits: answer it with \`capmac dialog <button number or label>\`, \`capmac dialog \"~/path/on/the/mac\"\` or \`capmac dialog --cancel\` (\`capmac dialog\` alone lists what is open). The app's sound is off unless \`--sound mac\` (the Mac's speakers) or \`--sound pc\` (the browser viewer) is given; the choice is remembered for the project.
+In an Electron app's folder (plain Electron, electron-vite or Electron Forge), the same commands run the app on the Mac's desktop: \`capmac run --for 20\` or \`capmac run --no-logs\`, then \`capmac screenshot --electron\` for a PNG of its window. In a Capacitor project, add \`--app electron\` (or \`--electron\`) to use its Electron platform instead of iOS; \`capmac apps use electron\` makes that the default, in CapMac Studio too. Console lines start with \`main\` (the main process) or \`js\` (the pages). The app opens behind the windows of whoever is using the Mac and never takes their keyboard, so running it does not disturb them. If the app opens a message box or file dialog, the console prints it and the app waits: answer it with \`capmac dialog <button number or label>\`, \`capmac dialog \"~/path/on/the/mac\"\` or \`capmac dialog --cancel\` (\`capmac dialog\` alone lists what is open). The app's sound is off unless \`--sound mac\` (the Mac's speakers) or \`--sound pc\` (the browser viewer) is given; the choice is remembered for the project. \`capmac screen --electron\` shows the window in the browser as video, which needs far less data; \`--stream compatible\` sends pictures instead (for an old Electron or a browser without WebCodecs), and CapMac Studio uses the same choice.
 
 ## Reading the output
 
@@ -106,6 +106,7 @@ Options shared by \`run\`, \`dev\` and \`build\`:
 
 | Option | Meaning |
 |---|---|
+| \`-a, --app <ios\\|electron>\` | Which of the project's apps (see \`capmac apps\`); default: the one picked with \`capmac apps use\` or in CapMac Studio. |
 | \`-t, --target <name\\|udid>\` | Simulator or device (see \`capmac targets\`); \`mac\` for the Electron app. |
 | \`-e, --electron\` | The Electron app, on the Mac's desktop (needed only in a Capacitor project that has iOS too). |
 | \`-d, --device\` | A connected iPhone/iPad instead of a simulator. |
@@ -138,6 +139,7 @@ Options shared by \`run\`, \`dev\` and \`build\`:
 |---|---|
 | \`capmac doctor [--fix] [-y]\` | Checks this PC, the connection and the Mac; \`--fix\` repairs what it can (may ask for the Mac password). |
 | \`capmac info [--files]\` | What CapMac detected and which files it syncs. No Mac needed. |
+| \`capmac apps [--json]\` | The apps in this folder (and in the folders inside it) and the one CapMac uses; \`capmac apps use <app>\` changes it. No Mac needed. |
 | \`capmac sync [--full]\` | Syncs files and runs \`cap sync\` on the Mac. |
 | \`capmac exec [--no-sync] [--cwd project\\|root\\|ios] -- <command>\` | Runs a command in the project on the Mac and prints its output. |
 | \`capmac pull <paths…> [-y]\` | Copies files from the Mac's copy back to this PC. |

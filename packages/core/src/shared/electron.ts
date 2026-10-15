@@ -37,6 +37,13 @@ export const isSoundMode = (value: unknown): value is SoundMode => typeof value 
 export const APP_AUDIO = { codec: 'opus', sampleRate: 48_000, numberOfChannels: 2 } as const;
 
 /**
+ * How a window's pictures travel: 'h264' is the smooth stream, video encoded
+ * on the Mac (VideoToolbox) in the simulator stream's format (shared/stream.ts);
+ * 'jpeg' is the compatible stream, one picture per repaint.
+ */
+export type AppCodec = 'h264' | 'jpeg';
+
+/**
  * Next to the socket: "1" while the app is the Mac's active app (someone is
  * using it there), so a live-reload restart brings it back in front. A new
  * launch starts without it: the app opens behind whatever the Mac shows.
@@ -86,6 +93,8 @@ export interface HookAppInfo {
   sound?: SoundMode;
   /** The app's sound can be sent to the PC (this Electron can capture it). */
   soundToPc?: boolean;
+  /** The windows can come as H.264 video (this Electron can capture them; see AppCodec). */
+  h264?: boolean;
 }
 
 /** Next to the app's socket: where its dialogs are served (by a thread of their own, so a dialog that blocks the app still answers). */
@@ -205,13 +214,23 @@ export type HookEvent =
 /** Requests to the hook, on its socket (JSON frames, see shared/frames.ts). */
 export type HookRequest =
   | { t: 'hello'; role: 'screen' | 'control' }
-  /** Frames of a window (null: follow the focused one), at most `fps` a second, longest side `maxSize` pixels; `audio`: the app's sound too, when it plays on the PC. */
-  | { t: 'watch'; window: number | null; maxSize: number; fps: number; quality: number; audio?: boolean }
+  /**
+   * Frames of a window (null: follow the focused one), at most `fps` a second, longest side `maxSize` pixels;
+   * `audio`: the app's sound too, when it plays on the PC. `codec` 'h264' asks for video (JPEG when that cannot
+   * work, see the `codec` message), starting at `bitrate` bits a second.
+   */
+  | { t: 'watch'; window: number | null; maxSize: number; fps: number; quality: number; audio?: boolean; codec?: AppCodec; bitrate?: number }
   /** Where the app's sound plays from now on. */
   | { t: 'sound'; id: number; mode: SoundMode }
   | { t: 'unwatch' }
   /** A frame was sent on: the hook keeps at most two in flight. */
   | { t: 'ack' }
+  /** Video: the next frame is a keyframe (a decoder starts over, frames were dropped). */
+  | { t: 'keyframe' }
+  /** Video: encode at this many bits a second from now on (adaptive bitrate). */
+  | { t: 'bitrate'; bitrate: number }
+  /** Video gave up (the `codec` message said why): try it again. */
+  | { t: 'retry-video' }
   | { t: 'input'; event: AppInputEvent }
   | { t: 'screenshot'; id: number; window?: number }
   | { t: 'reload'; id: number }
@@ -234,6 +253,10 @@ export type HookMessage =
   | { t: 'windows'; windows: AppWindowInfo[]; watched: number | null }
   /** One JPEG of `window` follows as a binary frame. */
   | { t: 'frame'; window: number; seq: number }
+  /** One message of the video follows as a binary frame: a config or a frame, header and all (shared/stream.ts). */
+  | { t: 'video' }
+  /** How the watched window's pictures come from now on; `reason` says why it is JPEG when video was asked for. */
+  | { t: 'codec'; codec: AppCodec; reason?: string }
   /** The cursor over the watched window (Electron's cursor type). */
   | { t: 'cursor'; cursor: string }
   /** Text copied in the app, for the PC's clipboard. */
@@ -744,4 +767,10 @@ export interface ElectronScreenParams {
   window?: number | null;
   /** Send the app's sound too, when it plays on the PC. */
   audio?: boolean;
+  /** 'h264': the smooth stream when the app can send it (default 'jpeg'). */
+  codec?: AppCodec;
+  /** Video: the bitrate to start at; adaptive bitrate moves it between minBitrate and maxBitrate. */
+  bitrate?: number;
+  minBitrate?: number;
+  maxBitrate?: number;
 }
