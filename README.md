@@ -39,19 +39,31 @@ The [coding agent skill](#ai-coding-agents) lets your agent build, read logs and
 
 ## How it works
 
-| On your Windows PC | On your paired Mac |
-| --- | --- |
-| Your source files, editor and terminal | A synced project copy and its dependencies |
-| Your Capacitor web build and dev server | Xcode builds, signing and app installation |
-| Studio or a browser showing the running app | The iOS Simulator or Electron app being controlled |
-| Build errors and app logs | The native tools and app producing them |
+```mermaid
+flowchart TB
+    subgraph pc["Windows PC"]
+        workspace["Your editor and source files<br/>Web build and dev server"]
+        client["CapMac CLI or Studio<br/>Shared engine"]
+        workspace --> client
+    end
 
-CapMac connects the two over SSH and tunnels the dev server to the Mac for live reload.
-On your local network, the connection goes directly between your PC and Mac.
-For internet access, deploy your own [signaling server](services/signal/deploy/README.md).
+    subgraph mac["Paired Mac"]
+        agent["CapMac agent<br/>Synced project and dependencies"]
+        xcode["Xcode build and signing"]
+        simulator["iOS Simulator<br/>Screen and input"]
+        iphone["Connected iPhone<br/>Install and run"]
+        electron["Electron app<br/>Window and input"]
+        agent --> xcode
+        xcode --> simulator
+        xcode --> iphone
+        agent --> electron
+    end
 
-A Mac with Xcode is required for iOS builds.
-Screen viewing and control are available for iOS simulators and Electron windows.
+    client <-->|"SSH: files, commands and input<br/>Errors and logs<br/>Simulator and Electron screens"| agent
+```
+
+Live reload uses an SSH tunnel to your Windows dev server.
+Optional internet access uses your [signaling server](services/signal/deploy/README.md) to set up a direct WebRTC connection or relay fallback, with SSH protecting the session.
 
 ## Quick start
 
@@ -194,6 +206,7 @@ capmac screen --electron
 ```
 
 `capmac run` syncs the app, installs its dependencies and Electron for the Mac, builds it and launches it, with the main process and page consoles in your terminal.
+Objects in console lines read as they do in DevTools, like `{type: 'roll', value: 6}`.
 `capmac dev` reloads the window when you save a page and restarts the app when main process code changes.
 electron-vite and Forge projects reload through their own dev command.
 In a Capacitor project, add `--electron` or `--target mac` to run the Electron platform, which loads your dev server in live reload.
@@ -205,6 +218,12 @@ The Mac needs no Screen Recording or Accessibility permission for this.
 Someone may be using the Mac while you work, so the app opens behind their windows and never takes their keyboard.
 DevTools and full screen wait until someone switches to the app on the Mac.
 After a restart, the app comes back to the front only if someone was using it there.
+
+The app's message boxes and file dialogs stay off the Mac's screen too.
+They show over the app's window in Studio and `capmac screen --electron`, and in your terminal, where you answer them.
+File dialogs browse the Mac's folders, starting in your project's copy on the Mac.
+`capmac dialog` lists them and answers one from a script or an AI agent: `capmac dialog 2`, `capmac dialog Discard`, `capmac dialog "~/Documents/photo.png"` or `capmac dialog --cancel`.
+Someone who switches to the app on the Mac gets the dialog there instead.
 
 In Studio, Electron apps run on **Mac desktop (Electron)** in the target picker and show in a window pane with the Mac's title bar.
 **Try a sample** on the home screen creates a small Electron app to start with.
@@ -228,6 +247,8 @@ Place an optional `capmac.json` beside `capacitor.config.*`.
 ```
 
 Sync respects `.gitignore`, includes the iOS project and built web assets, and skips `node_modules`, Android, Pods and build output.
+In a Capacitor project, videos, design files, pictures over 2 MB and files over 100 MB stay on your PC unless they're in the web assets, a native platform or a local dependency: your PC builds the web app, so nothing on the Mac reads them.
+`capmac info` lists what stays behind, and a `!path` line in `.capmacignore` sends one anyway.
 Use `.capmacignore` or the sync settings above to change the file list.
 Dependencies are installed on the Mac when needed, and simulator builds reuse native output when only web assets changed.
 
