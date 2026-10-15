@@ -30,6 +30,7 @@ CapMac handles the file sync, Xcode build and app launch, then brings the result
 | See changes as you save | Uses your Windows dev server for web live reload and rebuilds when native code changes |
 | Work through errors in your editor | Maps Xcode and Swift errors to Windows file paths and streams the app's console back to your PC |
 | Use the simulator from Windows | Click, drag, scroll, type and take screenshots in Studio or your browser |
+| See a real iPhone from Windows | Shows the screen of an iPhone plugged into the Mac live in Studio or your browser, with full-size screenshots |
 | Keep familiar commands | Routes `npx cap run ios` and `ionic capacitor run ios -l` through your paired Mac |
 | Avoid repeating build work | Transfers changed files and reuses native simulator output when only web assets changed |
 | Prepare a release | Exports signed IPA files and uploads builds to App Store Connect for TestFlight |
@@ -110,7 +111,7 @@ Pair a Mac, add your project and press **Live** (F5) or **Run** (Ctrl+F5).
 
 The workspace shows the build timeline, errors that open at the line in your editor, a searchable console with source and level filters, expandable JSON, and an interactive simulator.
 Click, drag, scroll and type from Windows, or use Home, Lock and screenshot controls.
-Screen viewing is available for simulators.
+Pick a real iPhone as the target to see [its screen](#a-real-iphones-screen) in the same place.
 
 Studio uses an H264 stream with a screenshot fallback.
 If touch or keyboard input is unavailable, `capmac doctor --fix` can install AXe on the Mac.
@@ -158,8 +159,8 @@ It is not enabled automatically by a temporary `npx capmac` copy or when `CI=tru
 | `capmac build --ipa` | Export a signed IPA to `build/ios/` |
 | `capmac build --upload` | Upload to App Store Connect for TestFlight |
 | `capmac targets` | List simulators and connected devices |
-| `capmac screen` | View and control a simulator in your browser |
-| `capmac screenshot [file]` | Save a simulator PNG and print its path |
+| `capmac screen` | View and control a simulator in your browser, or watch a plugged-in iPhone with `--device` |
+| `capmac screenshot [file]` | Save a PNG of a simulator, or of a plugged-in iPhone with `--device`, and print its path |
 | `capmac doctor --fix` | Check setup and repair what it can |
 | `capmac info --files` | Show the detected project and exact sync list without connecting |
 | `capmac exec -- <command>` | Run a command in the Mac's project copy |
@@ -193,6 +194,24 @@ capmac run --device --team "<TEAM_ID>" --api-key C:/keys/AuthKey_ABC123XYZ9.p8 -
 
 You can also set `ios.apiKey` in `capmac.json`, or use `CAPMAC_ASC_KEY_PATH`, `CAPMAC_ASC_KEY_ID` and `CAPMAC_ASC_ISSUER_ID`.
 The same key works for IPA exports and uploads.
+
+### A real iPhone's screen
+
+Plug the iPhone into the Mac with a cable and unlock it.
+Its screen shows up in Studio when the iPhone is the target, and in your browser with:
+
+```powershell
+capmac screen --device
+capmac screenshot --device
+```
+
+The first time, the Mac asks whether **CapMac** may use the camera, because macOS treats an iPhone's screen as one.
+Click **Allow** on the Mac once.
+CapMac uses the same capture as QuickTime Player, through a small helper app that stays in the background on the Mac.
+The iPhone's camera is never turned on, and its sound keeps playing on the iPhone.
+
+The screen is view only for now: tap and type on the iPhone itself.
+Over Wi-Fi alone, the iPhone runs your app but its screen can't be shown.
 
 ## Electron apps
 
@@ -310,6 +329,8 @@ Studio has the same setup under **Settings › Terminal commands › AI coding a
 | Familiar Capacitor commands are still local | Check `capmac takeover` and open a new terminal or restart VS Code |
 | Remote Mac is offline | Check that it is awake, logged in and has remote access enabled |
 | No Electron window or page console | The app must start from source; a packaged app or a launcher that drops `NODE_OPTIONS` keeps CapMac out |
+| A real iPhone's screen stays dark | Plug it into the Mac with a cable, unlock it and quit QuickTime Player if it shows the same iPhone |
+| CapMac isn't allowed to see the iPhone's screen | On the Mac, turn on **CapMac** in **System Settings › Privacy & Security › Camera** |
 
 ## Developing CapMac
 

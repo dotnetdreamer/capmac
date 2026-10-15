@@ -229,9 +229,9 @@ export function Workspace({ path }: { path: string }) {
       >
         <Panel id="simulator" panelRef={simPanel} collapsible collapsedSize={0} minSize={240} defaultSize={onMacTarget ? '50%' : '31%'} className="ws-panel">
           <Pane
-            title={onMacTarget ? t.workspace.macApp : t.workspace.simulator}
+            title={onMacTarget ? t.workspace.macApp : target?.kind === 'device' ? t.workspace.device : t.workspace.simulator}
             labelledBy="pane-sim"
-            sub={target?.kind === 'simulator' || onMacTarget ? `${target!.name} · ${target!.os}` : undefined}
+            sub={target ? `${target.name} · ${target.os}` : undefined}
             className={onMacTarget ? 'pane--sim pane--mac' : 'pane--sim'}
             actions={
               onMacTarget ? (

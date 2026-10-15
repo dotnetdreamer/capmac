@@ -317,6 +317,8 @@ export type ScreenPortMessage =
   | { type: 'codec'; codec: 'h264' | 'jpeg'; fallback: StreamFallback | null }
   /** Smooth stream: preparing the helper on the Mac (compiling it the first time). */
   | { type: 'preparing'; stage: 'building' | 'starting'; xcode?: string }
+  /** A device's screen: waiting for its cable or for Allow on the Mac; null once the picture comes. */
+  | { type: 'device-wait'; wait: 'device' | 'permission' | null }
   /** The Mac's clock minus this PC's (µs), for the latency readout. */
   | { type: 'clock'; offsetUs: number; rttUs: number }
   /** Smooth stream: the bitrate adaptive bitrate chose, and frames dropped to catch up (every few seconds). */
@@ -457,7 +459,14 @@ export const appChannels = {
   'app:copy-image': z.object({ data: z.union([z.instanceof(ArrayBuffer), z.instanceof(Uint8Array)]) }).strict(),
   'app:save-text': z.object({ text: z.string().max(200 * 1024 * 1024), name: text(200) }).strict(),
   /** With `projectPath` and the Mac's desktop as `udid`: the project's Electron app's windows. */
-  'app:screen-open': z.object({ mac: macName, udid, maxSize: z.number().int().min(320).max(4096).optional(), projectPath: fsPath.optional() }).strict(),
+  'app:screen-open': z.object({
+    mac: macName,
+    udid,
+    maxSize: z.number().int().min(320).max(4096).optional(),
+    projectPath: fsPath.optional(),
+    /** A real iPhone or iPad plugged into the Mac, not a simulator. */
+    device: z.object({ name: z.string().max(200) }).strict().optional(),
+  }).strict(),
   'app:project-opened': z.object({ path: fsPath, name: z.string().max(200), appId: z.string().max(200) }).strict(),
   'app:forget-project': z.object({ path: fsPath }).strict(),
   'app:engine-call': z.object({ method: z.string().max(64), params: z.unknown() }).strict(),

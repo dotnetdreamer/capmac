@@ -514,7 +514,8 @@ async function openAppScreen(streamId: string, mac: string, projectPath: string,
   );
 }
 
-function openScreen(streamId: string, mac: string, udid: string, port: MessagePortMain, prefer: 'smooth' | 'compatible', maxSize?: number): void {
+/** A simulator's screen, or (with `device`) the screen of an iPhone plugged into the Mac. */
+function openScreen(streamId: string, mac: string, udid: string, port: MessagePortMain, prefer: 'smooth' | 'compatible', maxSize?: number, device?: { name: string }): void {
   const post = (message: ScreenPortMessage) => port.postMessage(message);
   // Compatible stream: at most two JPEGs in flight; under backpressure only the newest waiting one is kept.
   let jpegSeq = 0;
@@ -554,7 +555,7 @@ function openScreen(streamId: string, mac: string, udid: string, port: MessagePo
     videoDropping = false;
   };
   const scope = { mac, streamId };
-  const stream = new ScreenStream(link(mac), udid, { prefer, fps: 15, quality: 72, maxSize: Math.min(1400, maxSize ?? 1400) }, {
+  const stream = new ScreenStream(link(mac), udid, { prefer, fps: 15, quality: 72, maxSize: Math.min(1400, maxSize ?? 1400), device }, {
     onFrame: sendJpeg,
     onVideo: sendVideo,
     onInfo: (info) => {
@@ -575,6 +576,7 @@ function openScreen(streamId: string, mac: string, udid: string, port: MessagePo
     onPreparing: (stage, xcode) => post({ type: 'preparing', stage, xcode }),
     onClock: (offsetUs, rttUs) => post({ type: 'clock', offsetUs, rttUs }),
     onStatus: (status) => post({ type: 'status', bitrate: status.bitrate ?? null, dropped: status.dropped }),
+    onWaiting: (wait) => post({ type: 'device-wait', wait }),
   });
   if (maxSize) stream.setVideoSize(maxSize);
   port.on('message', (e) => {
@@ -766,6 +768,12 @@ const handlers: Handlers = {
   },
   'screen.stop': async ({ streamId }) => closeScreen(streamId),
   'screen.screenshot': async ({ mac, udid, projectPath, window }) => {
+    // A plugged-in iPhone: the newest picture of its open screen, at the iPhone's own size.
+    const device = [...screens.values()].find((s) => s.stream instanceof ScreenStream && s.stream.isDevice && s.stream.udid === udid)?.stream as ScreenStream | undefined;
+    if (device) {
+      const png = await device.still();
+      return { png: toArrayBuffer(png), width: png.length > 24 ? png.readUInt32BE(16) : null, height: png.length > 24 ? png.readUInt32BE(20) : null };
+    }
     const session = await link(mac).session();
     const shot = udid === MAC_TARGET_ID && projectPath ? await takeAppScreenshot(session, (await loadProject(projectPath)).projectId, window) : await takeScreenshot(session, udid);
     return { png: toArrayBuffer(shot.png), width: shot.width, height: shot.height };
@@ -880,7 +888,7 @@ parent.on('message', (e) => {
     case 'screen-open': {
       const port = e.ports[0];
       if (port && message.udid === MAC_TARGET_ID && message.projectPath) void openAppScreen(message.streamId, message.mac, message.projectPath, port, message.maxSize);
-      else if (port) openScreen(message.streamId, message.mac, message.udid, port, message.prefer, message.maxSize);
+      else if (port) openScreen(message.streamId, message.mac, message.udid, port, message.prefer, message.maxSize, message.device);
       break;
     }
     case 'settings':

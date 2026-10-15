@@ -180,9 +180,10 @@ program
 
 program
   .command('screen')
-  .description("show the Mac's simulator in your browser, with touch and keyboard input (an Electron app: its window)")
+  .description("show the Mac's simulator in your browser, with touch and keyboard input (a plugged-in iPhone: its screen; an Electron app: its window)")
   .addOption(mac()).addOption(routeOption())
-  .option('-t, --target <name|udid>', 'simulator to show')
+  .option('-t, --target <name|udid>', 'simulator or device to show')
+  .option('-d, --device', 'the iPhone or iPad plugged into the Mac with a cable (view only)')
   .option('-e, --electron', "the Electron app's window (it must be running)")
   .option('--port <port>', 'local port for the viewer (default 7373)')
   .option('--no-open', 'do not open the browser automatically')
@@ -191,9 +192,10 @@ program
 
 program
   .command('screenshot [file]')
-  .description("save a PNG of the running simulator's screen, or the Electron app's window (default: a temp file; the path is printed)")
+  .description("save a PNG of the running simulator's screen, a plugged-in iPhone's, or the Electron app's window (default: a temp file; the path is printed)")
   .addOption(mac()).addOption(routeOption())
-  .option('-t, --target <name|udid>', 'simulator (default: the booted one this app last ran on)')
+  .option('-t, --target <name|udid>', 'simulator or device (default: the booted simulator this app last ran on)')
+  .option('-d, --device', 'the iPhone or iPad plugged into the Mac with a cable')
   .option('-e, --electron', "the Electron app's window (it must be running)")
   .action(wrap((file: string | undefined, options) => screenshotCommand(file, options)));
 

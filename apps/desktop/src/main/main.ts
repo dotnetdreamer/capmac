@@ -294,10 +294,10 @@ function registerIpc(): void {
     await fs.writeFile(result.filePath, text);
     return result.filePath;
   });
-  handle('app:screen-open', ({ mac, udid, maxSize, projectPath }, event) => {
+  handle('app:screen-open', ({ mac, udid, maxSize, projectPath, device }, event) => {
     const streamId = `scr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const { port1, port2 } = new MessageChannelMain();
-    engine.openScreen(streamId, mac, udid, port1, { prefer: settings.get().simulatorStream, maxSize, projectPath });
+    engine.openScreen(streamId, mac, udid, port1, { prefer: settings.get().simulatorStream, maxSize, projectPath, device });
     event.sender.postMessage('screen-port', { streamId }, [port2]);
     return { streamId };
   });

@@ -11,6 +11,7 @@ This document covers:
 5. Simulator streaming v2: the plan, the spike and the recommendation.
 6. Remote access: reaching the Mac over the internet.
 7. Electron apps on the Mac: running, showing and live-reloading them without taking over the Mac.
+8. A real iPhone's screen: the smooth stream from an iPhone plugged into the Mac.
 
 ---
 
@@ -228,7 +229,7 @@ Projects                                                    [▸ Add project  Ct
   - **Booting:** a spinner with the boot progress.
   - **First smooth stream on a Mac:** "Setting up the smooth stream for Xcode 26.6…" while CapMac compiles its helper (about two seconds).
   - **Stream lost:** retrying.
-  - **Device target:** "The screen is only available for simulators".
+  - **Device target:** the iPhone's own screen while it is plugged into the Mac (§8), view only. Before that: "Plug IK 14 Pro Max into IK's M1 with a cable", then once "Click Allow on IK's M1"; an unplugged iPhone dims its last picture until it is back.
 
 #### Devices
 
@@ -1017,3 +1018,31 @@ Ludo Wala (Capacitor Electron, Electron 43): the first sync went from 4.7 GB to 
 - The window's frames are JPEG at a fixed quality: over the internet a busy 3D app needs adaptive quality (or H.264 from the compositor's frames).
 - Capacitor live reload loads the dev server's origin (`http://localhost:<port>`), so the page's storage is not the run's (`capacitor-electron://-`), as on iOS. Serving the dev server under the app's own scheme would keep it.
 - Upload a file from the PC to answer an open dialog.
+
+---
+
+## 8. A real iPhone's screen
+
+**Goal:** the screen of an iPhone or iPad plugged into the Mac, live in CapMac Studio and the CLI's viewer, as smooth as a simulator's and through the same pipeline. No app changes, no Developer Mode, nothing installed on the phone.
+
+**Status:** built; view only. Studio shows it in the device pane whenever a device is the target; the CLI has `capmac screen --device` and `capmac screenshot --device`.
+
+### How it works
+
+```
+iPhone ──USB──► Mac: iOSScreenCaptureAssistant (CoreMediaIO, what QuickTime uses)
+                 └► CapMac.app (devstream, a background app) ──Unix socket──► agent op `device-stream` ──SSH──► engine ──► pane / viewer
+```
+
+- **The capture** is QuickTime's: CoreMediaIO lists an iPhone's screen once a process sets `kCMIOHardwarePropertyAllowScreenCaptureDevices`, as a *muxed* AVFoundation device. The same iPhone also shows up nearby as a Continuity Camera, which is video only; the helper only ever opens muxed devices, so it never turns on the phone's camera. It matches the device by UDID (hyphens aside), then by name, and keeps the picture only (the audio port is disabled, so the phone keeps its sound).
+- **The helper** (`packages/core/src/agent/helper/devstream.m`) takes AVFoundation's frames (NV12, the device's own pixels), scales them with `VTPixelTransferSession` (or passes them straight to the encoder at full size), and encodes them with simstream's encoder: VideoToolbox H.264 High, real time, no reordering, keyframes on request, the same byte budget and commands. Its messages are simstream's, plus a still (type 5, a full-size PNG for screenshots) and `wait`/`resume` events. So the agent's relay (latency cap, adaptive bitrate, pings), the engine and the screen worker treat a device like a simulator.
+- **Why an app.** macOS treats an iOS screen as a camera: the capture assistant checks camera access (TCC) for each client and drops its frames otherwise. TCC asks about the *responsible* process, which for anything started over SSH is `sshd-session`, and it can neither be asked nor granted that. So the agent compiles devstream on first use into `~/.capmac/bin/<hash>/CapMac.app`, an ad-hoc signed bundle with no Dock icon (`LSUIElement`) and a camera reason in its Info.plist, and starts it with `open -g -j -n` (LaunchServices, in the logged-in user's session, never in front). macOS asks once, on the Mac, whether "CapMac" may use the camera; the answer belongs to that exact build, so its hash covers only its own source and the architecture, not the Xcode version.
+- **The connection:** the agent listens on a Unix socket in `~/.capmac/run` and passes its path; the helper connects and puts it in place of stdin and stdout (1 MB socket buffers, against macOS's 8 KB default). Its first message is its pid. When the socket closes, the helper stops capturing and quits; if it lingers, the agent signals it. Its log goes to a file next to the socket, read into errors and removed.
+- **Waiting:** CoreMediaIO needs a moment to list a device that is already plugged in. After 2.5 s without it, the helper says it is waiting for the cable, and keeps waiting (connect notifications, plus a look every 500 ms) for as long as the pane is open. It asks for camera access only once the iPhone is there, so the question makes sense to whoever sees it. Unplugging dims the last picture and waits again; plugging back in resumes with a keyframe.
+- **Errors**: camera access refused (`DEVICE_SCREEN_DENIED`, with the System Settings path), the capture failing (another app holding the screen, say), or the helper stopping. A device has no compatible stream to fall back to, so the pane says what happened and offers *Try again*.
+
+### Limits
+
+- **View only.** The pane and the viewer show the screen; taps and typing happen on the iPhone itself.
+- **The cable is needed.** CoreMediaIO's wireless screen capture is for Apple TV, so an iPhone on Wi-Fi alone runs the app but shows no screen. iOS 26 lists a "view device screen" CoreDevice feature for Xcode's own device window; nothing in Xcode 26.6 opens it yet.
+- **Pass-through, maybe later.** The phone already sends H.264 over USB; AVFoundation decodes it and the helper encodes it again (a few milliseconds on Apple silicon). Forwarding the phone's own stream would save that, but CapMac would lose keyframes on request and the size and bitrate control.

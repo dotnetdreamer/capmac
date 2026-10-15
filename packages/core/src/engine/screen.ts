@@ -1,14 +1,17 @@
 /**
- * The simulator's screen, live: the smooth stream (H.264 from capmac's helper
- * on the Mac, agent op `stream`) with the compatible stream (JPEG screenshots,
- * agent op `screen`) as its automatic fallback, plus input (through the
- * helper, else AXe). Used by capmac Studio's simulator pane and the CLI's
- * browser viewer. Survives reconnects: when the MacLink is restored, an active
- * stream restarts, starting from a keyframe.
+ * A screen, live. A simulator's: the smooth stream (H.264 from capmac's
+ * helper on the Mac, agent op `stream`) with the compatible stream (JPEG
+ * screenshots, agent op `screen`) as its automatic fallback, plus input
+ * (through the helper, else AXe). An iPhone's plugged into the Mac: the
+ * smooth stream only (agent op `device-stream`), view only for now, waiting
+ * for the cable and for camera access on the Mac as long as it is open. Used
+ * by capmac Studio's simulator pane and the CLI's browser viewer. Survives
+ * reconnects: when the MacLink is restored, an active stream restarts,
+ * starting from a keyframe.
  */
 import type { InputEvent, ScreenInfo, StreamFallback } from '../shared/protocol.js';
 import type { Route } from '../shared/remote.js';
-import { parseStreamHeader, STREAM_FRAME, type StreamHeader } from '../shared/stream.js';
+import { parseStreamHeader, STREAM_FRAME, STREAM_HEADER_BYTES, STREAM_STILL, type StreamHeader } from '../shared/stream.js';
 import type { AgentCall } from './agent-client.js';
 import { toErrorInfo, type ErrorInfo } from './errors.js';
 import type { MacLink } from './link.js';
@@ -32,7 +35,12 @@ export interface ScreenStreamOptions {
   maxSize?: number;
   /** Take input through capmac's helper when it works (default true; AXe otherwise). */
   helperInput?: boolean;
+  /** A real iPhone or iPad plugged into the Mac (its name), not a simulator: the smooth stream only. */
+  device?: { name: string };
 }
+
+/** What a device's screen waits for before its picture comes: its cable, or Allow on the Mac. */
+export type ScreenWait = 'device' | 'permission';
 
 /** One message of the smooth stream, as the helper wrote it (header and payload). */
 export interface VideoPacket {
@@ -59,7 +67,12 @@ export interface ScreenHandlers {
   onClock?(offsetUs: number, rttUs: number): void;
   /** Smooth stream: the helper's memory and traffic on the Mac, and the bitrate adaptive bitrate chose, every few seconds. */
   onStatus?(status: { footprint: number; fps: number; dropped: number; bitrate?: number }): void;
+  /** A device's screen: waiting for its cable or for Allow on the Mac; null when the picture comes (again). */
+  onWaiting?(wait: ScreenWait | null): void;
 }
+
+/** A still takes a moment on a big screen (a PNG of a few megabytes), then the network. */
+const STILL_TIMEOUT_MS = 20_000;
 
 /**
  * Where adaptive bitrate starts and how high it may go, by route: the local
@@ -158,6 +171,8 @@ export class ScreenStream {
   private lastSeq = 0;
   private ackedSeq = 0;
   private keyRequestedAt = 0;
+  /** Stills asked for and not answered yet, oldest first. */
+  private readonly stills: Array<{ resolve: (png: Buffer) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }> = [];
   private readonly unsubscribe: () => void;
 
   constructor(private readonly link: MacLink, readonly udid: string, private readonly options: ScreenStreamOptions, private readonly handlers: ScreenHandlers) {
@@ -185,6 +200,11 @@ export class ScreenStream {
     return this.clock.offsetUs;
   }
 
+  /** A real iPhone or iPad plugged into the Mac, not a simulator. */
+  get isDevice(): boolean {
+    return Boolean(this.options.device);
+  }
+
   /** Starts streaming (no-op when already running). */
   async start(): Promise<void> {
     this.active = true;
@@ -192,7 +212,8 @@ export class ScreenStream {
   }
 
   private wantsSmooth(): boolean {
-    return this.options.prefer === 'smooth' && !this.fallback;
+    // A device has no compatible stream: its picture comes from CapMac.app or not at all.
+    return Boolean(this.options.device) || (this.options.prefer === 'smooth' && !this.fallback);
   }
 
   private ensure(): Promise<void> {
@@ -213,12 +234,17 @@ export class ScreenStream {
     this.lastSeq = 0;
     this.ackedSeq = 0;
     const rates = bitratesFor(session.route);
-    const call: AgentCall<unknown> = await session.agent.start('stream', { udid: this.udid, maxSize: this.videoSize, fps: 60, ...rates }, {
+    const device = this.options.device;
+    const op = device ? 'device-stream' : 'stream';
+    const call: AgentCall<unknown> = await session.agent.start(op, { udid: this.udid, maxSize: this.videoSize, fps: 60, ...rates, ...(device ? { name: device.name } : {}) }, {
       onEvent: (event) => {
         if (this.call !== call) return;
         switch (event.t) {
           case 'stream-prepare':
             this.handlers.onPreparing?.(event.stage, event.xcode);
+            break;
+          case 'stream-wait':
+            this.handlers.onWaiting?.(event.for);
             break;
           case 'screen':
             this.info = event;
@@ -234,6 +260,9 @@ export class ScreenStream {
           case 'stream-status':
             this.handlers.onStatus?.({ footprint: event.footprint, fps: event.fps, dropped: event.dropped, bitrate: event.bitrate });
             break;
+          case 'still-error':
+            this.settleStill(new Error(event.message));
+            break;
           case 'log':
             if (event.level !== 'debug') this.handlers.onLog?.(event.level, event.msg);
             break;
@@ -243,6 +272,10 @@ export class ScreenStream {
         if (this.call !== call) return;
         const header = parseStreamHeader(data);
         if (!header) return;
+        if (header.type === STREAM_STILL) {
+          this.settleStill(null, data.subarray(STREAM_HEADER_BYTES));
+          return;
+        }
         if (header.type === STREAM_FRAME) {
           this.lastSeq = header.seq;
           if (header.key) {
@@ -348,7 +381,8 @@ export class ScreenStream {
   }
 
   private armPictureTimer(): void {
-    if (this.pictureTimer || this.codec !== 'h264') return;
+    // A device sends nothing while its screen is off, and has no other stream to fall back to.
+    if (this.pictureTimer || this.codec !== 'h264' || this.options.device) return;
     this.pictureTimer = setTimeout(() => {
       this.pictureTimer = null;
       if (this.codec === 'h264' && this.call) {
@@ -367,7 +401,29 @@ export class ScreenStream {
     const call = this.call;
     this.call = null;
     this.stopTimers();
+    while (this.stills.length) this.settleStill(new Error('The screen stopped before the picture came.'));
     return call;
+  }
+
+  /** Answers the oldest still asked for. */
+  private settleStill(error: Error | null, png?: Buffer): void {
+    const waiter = this.stills.shift();
+    if (!waiter) return;
+    clearTimeout(waiter.timer);
+    if (error || !png) waiter.reject(error ?? new Error('No picture came.'));
+    else waiter.resolve(png);
+  }
+
+  /** A device's screen: a PNG of its newest picture, at the device's own size. */
+  still(): Promise<Buffer> {
+    const call = this.call;
+    if (!this.options.device) return Promise.reject(new Error('Full-size pictures come from device screens.'));
+    if (!call || this.codec !== 'h264') return Promise.reject(new Error('The screen is not showing yet.'));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => this.settleStill(new Error('The picture did not come in time.')), STILL_TIMEOUT_MS);
+      this.stills.push({ resolve, reject, timer });
+      call.send({ t: 'still' });
+    });
   }
 
   private ended(call: AgentCall<unknown>, err?: unknown): void {
@@ -381,7 +437,7 @@ export class ScreenStream {
       this.handlers.onState?.('reconnecting');
       return;
     }
-    if (codec === 'h264' && err !== undefined) {
+    if (codec === 'h264' && err !== undefined && !this.options.device) {
       const reason = fallbackFor(err);
       if (reason) {
         this.fallBack(reason);

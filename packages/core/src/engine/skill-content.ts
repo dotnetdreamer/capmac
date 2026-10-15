@@ -125,10 +125,11 @@ Options shared by \`run\`, \`dev\` and \`build\`:
 | Command | What it does |
 |---|---|
 | \`capmac screenshot [file] [-t <simulator>]\` | Saves a PNG of a running simulator and prints its path (a temp file unless you give one). |
+| \`capmac screenshot --device [file]\` | The same for the iPhone plugged into the Mac with a cable, at its full size. The first time, someone has to click Allow on the Mac. |
 | \`capmac screenshot --electron [file]\` | The same for the running Electron app's window. |
 | \`capmac dialog [answer] [--cancel] [--check] [--json]\` | The running Electron app's open dialogs, or an answer to the oldest: a button's number or label, or a path on the Mac. |
 | \`capmac logs [-t <simulator>]\` | Streams the app's system log. Runs until stopped. |
-| \`capmac screen [--electron]\` | The simulator, or the Electron app's window, in a browser, with input (for people, not agents). |
+| \`capmac screen [--electron] [--device]\` | The simulator, the Electron app's window, or a plugged-in iPhone's screen (view only), in a browser (for people, not agents). |
 | \`capmac targets [--json] [--electron]\` | Simulators and devices on the Mac, with their state; \`--electron\` adds the Mac's desktop. |
 
 ## The Mac and the project

@@ -44,6 +44,7 @@
   .screen { position: relative; flex: 1; border-radius: 36px; overflow: hidden; background: #000; outline: none; }
   .screen:focus-visible { box-shadow: 0 0 0 3px var(--accent); }
   .screen img { width: 100%; height: 100%; object-fit: contain; display: block; user-select: none; -webkit-user-drag: none; touch-action: none; }
+  .screen canvas { width: 100%; height: 100%; display: block; }
   .screen.input img { cursor: pointer; }
   /* A Mac app's window: a title bar with the traffic lights above the page. */
   .titlebar { display: none; height: 28px; flex: none; align-items: center; gap: 8px; padding: 0 10px; background: var(--titlebar); color: var(--titletext); font-size: 12.5px; font-weight: 600; position: relative; user-select: none; }
@@ -55,7 +56,7 @@
   body.app .screen { border-radius: 0; background: #fff; }
   body.app .screen.input img { cursor: default; }
   body.app .ripple { display: none; }
-  .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #cfd3da; font-size: 13px; padding: 24px; pointer-events: none; background: rgba(0,0,0,.55); }
+  .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #cfd3da; font-size: 13px; padding: 24px; pointer-events: none; background: rgba(0,0,0,.55); white-space: pre-line; }
   .ripple { position: absolute; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 50%; background: rgba(255,255,255,.45); pointer-events: none; animation: ripple .45s ease-out forwards; }
   @keyframes ripple { from { transform: scale(.4); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
   .banner { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 999px; font-size: 12px; max-width: calc(100% - 32px); }
@@ -141,6 +142,7 @@
       </div>
       <div class="screen" id="screen" tabindex="0" aria-label="Simulator screen">
         <img id="img" alt="">
+        <canvas id="canvas" hidden></canvas>
         <div class="overlay" id="overlay">Connecting…</div>
       </div>
     </div>
@@ -191,11 +193,21 @@
     $('title').textContent = info.title || 'CapMac screen';
     setMode(info.mode === 'app');
     const input = info.screen && info.screen.input;
+    const phone = info.mode === 'device';
     screenEl.classList.toggle('input', !!input);
-    for (const id of ['home', 'lock', 'type']) $(id).disabled = !input;
+    for (const id of ['home', 'lock', 'type']) {
+      $(id).disabled = !input;
+      if (phone) $(id).hidden = true;
+    }
+    if (phone) {
+      screenEl.setAttribute('aria-label', 'iPhone screen (view only)');
+      if (!framesTotal && !waitingFor && !ended) setOverlay(`Opening ${info.targetName || 'the iPhone'}’s screen…`);
+    }
     if (!app && info.screen && !input) {
       banner.hidden = false;
-      banner.textContent = 'View only — install AXe on the Mac for touch input: capmac doctor --fix';
+      banner.textContent = phone
+        ? 'View only: touch and typing work on simulators. On a real iPhone, use the iPhone itself for now'
+        : 'View only — install AXe on the Mac for touch input: capmac doctor --fix';
     } else banner.hidden = true;
     if (next.windows) setWindows(next.windows, next.watched ?? null);
     if (next.waiting !== undefined) setWaiting(next.waiting);
@@ -265,6 +277,157 @@
   function startStream() {
     img.src = '/stream?ts=' + Date.now();
   }
+
+  // The source's picture: JPEG frames on /stream, or the smooth stream (H.264) on /video.
+  let started = false;
+  function startScreen() {
+    if (started || !info) return;
+    started = true;
+    if (info.video) startVideo();
+    else startStream();
+  }
+
+  // ─── The smooth stream: H.264 on /video, decoded here with WebCodecs ────
+  // Whatever the viewer's source sends as video. Each message: its u32 length, CapMac's
+  // 16-byte header (type, flags, capture time, sequence), then a JSON config (type 1)
+  // or one AVCC frame (type 2). Behind on decoding: skip to the next keyframe.
+  const canvas = $('canvas');
+  let player = null, waitingFor = null, ended = false;
+  function startVideo() {
+    img.hidden = true;
+    canvas.hidden = false;
+    if (typeof VideoDecoder === 'undefined') {
+      setOverlay('This browser can’t play the smooth stream.\nOpen this page in Chrome or Edge');
+      return;
+    }
+    player = { decoder: null, config: null, needsKey: true, frame: null, ctx: canvas.getContext('2d', { alpha: false, desynchronized: true }), keyAskedAt: 0 };
+    readVideo();
+  }
+  function askForKeyframe() {
+    const now = performance.now();
+    if (now - player.keyAskedAt < 500) return;
+    player.keyAskedAt = now;
+    fetch('/api/keyframe', { method: 'POST' }).catch(() => undefined);
+  }
+  function drawVideo() {
+    const f = player && player.frame;
+    if (!f) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.round(canvas.clientWidth * dpr), h = Math.round(canvas.clientHeight * dpr);
+    if (w > 0 && h > 0 && (canvas.width !== w || canvas.height !== h)) { canvas.width = w; canvas.height = h; }
+    player.ctx.imageSmoothingEnabled = true;
+    player.ctx.imageSmoothingQuality = 'high';
+    // The decoder pads the picture to whole macroblocks: leave the last pixel out, or scaling shows the padding.
+    player.ctx.drawImage(f, 0, 0, f.displayWidth - 1, f.displayHeight - 1, 0, 0, canvas.width, canvas.height);
+  }
+  function newDecoder() {
+    return new VideoDecoder({
+      output: (frame) => {
+        if (player.frame) player.frame.close();
+        player.frame = frame;
+        drawVideo();
+        frames++;
+        framesTotal++;
+        if (!waitingFor && !ended) overlay.style.display = 'none';
+        dot.className = 'dot live';
+      },
+      error: () => {
+        // Start again from the next keyframe.
+        player.decoder = null;
+        player.needsKey = true;
+        askForKeyframe();
+      },
+    });
+  }
+  function configureVideo(c) {
+    const bin = atob(c.description), description = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) description[i] = bin.charCodeAt(i);
+    if (!player.decoder || player.decoder.state === 'closed') player.decoder = newDecoder();
+    player.decoder.configure({ codec: c.codec, description, codedWidth: c.width, codedHeight: c.height, hardwareAcceleration: 'prefer-hardware', optimizeForLatency: true });
+    player.config = c;
+    player.needsKey = true;
+    const next = c.width / c.height;
+    if (Math.abs(next - ratio) > 0.002) {
+      ratio = next;
+      device.style.setProperty('--ratio', String(ratio));
+      layout();
+    }
+  }
+  function onVideoMessage(m) {
+    const view = new DataView(m.buffer, m.byteOffset, m.byteLength);
+    const type = view.getUint8(0), key = (view.getUint8(1) & 1) === 1;
+    const payload = m.subarray(16);
+    if (type === 1) {
+      try { configureVideo(JSON.parse(new TextDecoder().decode(payload))); } catch (err) { console.warn('video config', err); }
+      return;
+    }
+    if (type !== 2) return;
+    // After a decoder error: the same config again, then wait for a keyframe.
+    if ((!player.decoder || player.decoder.state !== 'configured') && player.config) configureVideo(player.config);
+    if (!player.decoder || player.decoder.state !== 'configured') return;
+    if (!key && (player.needsKey || player.decoder.decodeQueueSize > 3)) {
+      player.needsKey = true;
+      askForKeyframe();
+      return;
+    }
+    player.needsKey = false;
+    try {
+      player.decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: Number(view.getBigUint64(4)), data: payload }));
+    } catch {
+      player.needsKey = true;
+      askForKeyframe();
+    }
+  }
+  async function readVideo() {
+    try {
+      const res = await fetch('/video', { cache: 'no-store' });
+      if (!res.ok || !res.body) throw new Error('no video');
+      const reader = res.body.getReader();
+      let buf = new Uint8Array(0);
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const joined = new Uint8Array(buf.length + value.length);
+        joined.set(buf);
+        joined.set(value, buf.length);
+        let at = 0;
+        while (joined.length - at >= 4) {
+          const length = new DataView(joined.buffer, at, 4).getUint32(0);
+          if (joined.length - at - 4 < length) break;
+          onVideoMessage(joined.subarray(at + 4, at + 4 + length));
+          at += 4 + length;
+        }
+        buf = joined.slice(at);
+      }
+    } catch { /* reconnects below */ }
+    if (ended) return;
+    dot.className = 'dot err';
+    setOverlay('Lost the screen stream. Reconnecting…');
+    setTimeout(readVideo, 1500);
+  }
+  // Sharp at the size it shows: the video's longest side follows the canvas (settled sizes only).
+  let sizeTimer = 0, sentSize = 0;
+  new ResizeObserver(() => {
+    if (!player) return;
+    drawVideo();
+    clearTimeout(sizeTimer);
+    sizeTimer = setTimeout(() => {
+      const pixels = Math.max(canvas.clientWidth, canvas.clientHeight) * (window.devicePixelRatio || 1);
+      const want = Math.max(640, Math.min(2400, Math.ceil(pixels / 64) * 64));
+      if (sentSize && Math.abs(want - sentSize) / sentSize < 0.12) return;
+      sentSize = want;
+      post('/api/size', { maxSize: want }).catch(() => undefined);
+    }, 600);
+  }).observe(canvas);
+  // A plugged-in iPhone waits for its cable, or for Allow on the Mac.
+  function setWaitingFor(wait) {
+    waitingFor = wait;
+    const name = (info && info.targetName) || 'the iPhone';
+    if (wait === 'device') setOverlay(`Plug ${name} into the Mac with a cable\nIts screen shows up here as soon as you do`);
+    else if (wait === 'permission') setOverlay('Click Allow on the Mac\nmacOS asks once if CapMac may see the iPhone’s screen. It counts that screen as a camera');
+    else if (framesTotal > 0 && !ended) overlay.style.display = 'none';
+    else setOverlay(`Opening ${name}’s screen…`);
+  }
   img.addEventListener('load', () => {
     frames++;
     framesTotal++;
@@ -289,7 +452,7 @@
     const now = performance.now();
     const fps = frames / ((now - lastFpsAt) / 1000);
     frames = 0; lastFpsAt = now;
-    if (info) meta.textContent = `${info.target} · ${fps.toFixed(1)} fps · ${info.screen ? (app ? 'app window' : info.screen.source) : '…'}`;
+    if (info) meta.textContent = `${info.target} · ${fps.toFixed(1)} fps · ${info.screen ? (app ? 'app window' : info.video ? 'smooth stream' : info.screen.source) : '…'}`;
   }, 1000);
 
   function point(e) {
@@ -440,8 +603,10 @@
   $('shot').onclick = () => {
     const a = document.createElement('a');
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    a.href = app ? '/api/screenshot.png?ts=' + Date.now() : '/api/frame.jpg?ts=' + Date.now();
-    a.download = app ? 'app-' + stamp + '.png' : 'simulator-' + stamp + '.jpg';
+    // An app's window and a plugged-in iPhone: a full-size PNG. A simulator: the newest frame.
+    const png = app || (info && info.video);
+    a.href = png ? '/api/screenshot.png?ts=' + Date.now() : '/api/frame.jpg?ts=' + Date.now();
+    a.download = (app ? 'app-' : info && info.mode === 'device' ? 'iphone-' : 'simulator-') + stamp + (png ? '.png' : '.jpg');
     a.click();
   };
   $('toggleLogs').onclick = () => $('logs').classList.toggle('hidden');
@@ -724,7 +889,9 @@
     if (event.type === 'dialogs') setDialogs(event.dialogs);
     else if (event.type === 'audio') { playPackets(event.packets); return; }
     else if (event.type === 'sound') setSound(event);
-    if (event.type === 'hello') { applyInfo(event); if (event.dialogs) setDialogs(event.dialogs); if (event.sound) setSound(event.sound); }
+    if (event.type === 'hello') { applyInfo(event); startScreen(); if (event.dialogs) setDialogs(event.dialogs); if (event.sound) setSound(event.sound); }
+    else if (event.type === 'device-wait') setWaitingFor(event.wait);
+    else if (event.type === 'ended') { ended = true; dot.className = 'dot err'; setOverlay(event.message + (event.hint ? '\n' + event.hint : '')); }
     else if (event.type === 'windows') setWindows(event.windows, event.watched);
     else if (event.type === 'waiting') setWaiting(event.waiting);
     else if (event.type === 'cursor') setCursor(event.cursor);
@@ -763,8 +930,7 @@
   const events = new EventSource('/api/logs');
   events.onmessage = (m) => { try { addLine(JSON.parse(m.data)); } catch {} };
 
-  loadInfo();
-  startStream();
+  loadInfo().then(startScreen);
 })();
 </script>
 </body>

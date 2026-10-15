@@ -142,6 +142,125 @@ export async function ensureHelper(
   return { path: exe, xcode, compiled: true };
 }
 
+// ─── The device screen app (devstream) ───────────────────────────────────────
+
+const SCREEN_APP_FRAMEWORKS = ['Foundation', 'AVFoundation', 'CoreGraphics', 'CoreMedia', 'CoreMediaIO', 'CoreVideo', 'ImageIO', 'VideoToolbox'];
+
+/** The device screen app's bundle id: macOS remembers its camera access by it. */
+export const SCREEN_APP_ID = 'dev.capmac.screen';
+
+/** What macOS shows when it asks for camera access for the app (and in System Settings). */
+export const SCREEN_APP_CAMERA_REASON = 'CapMac shows the screen of the iPhone plugged into this Mac on your PC. macOS counts that screen as a camera.';
+
+export function screenAppInfoPlist(): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>${SCREEN_APP_ID}</string>
+  <key>CFBundleName</key><string>CapMac</string>
+  <key>CFBundleDisplayName</key><string>CapMac</string>
+  <key>CFBundleExecutable</key><string>devstream</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSUIElement</key><true/>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>NSCameraUsageDescription</key><string>${SCREEN_APP_CAMERA_REASON}</string>
+</dict>
+</plist>
+`;
+}
+
+/**
+ * Where the device screen app built from `source` lives. Unlike the
+ * simulator helper, a new Xcode is no reason to rebuild: macOS remembers
+ * camera access for this exact build, so it changes only with its source,
+ * its Info.plist or the Mac's architecture.
+ */
+export function screenAppHash(source: string, arch: string = process.arch): string {
+  return createHash('sha256').update(source).update('\0').update(screenAppInfoPlist()).update('\0screen-app\0').update(arch).digest('hex').slice(0, 16);
+}
+
+export interface ScreenApp {
+  /** The app bundle (CapMac.app). */
+  path: string;
+  /** Built just now (its first use on this Mac). */
+  compiled: boolean;
+}
+
+function screenAppError(output: string): AgentError {
+  return new AgentError(
+    "CapMac's iPhone screen helper does not compile on this Mac.",
+    'HELPER_BUILD_FAILED',
+    'Updating CapMac usually fixes this after a macOS or Xcode update.',
+    compilerSummary(output),
+  );
+}
+
+/**
+ * The device screen app, building it first when needed: devstream compiled
+ * with the Mac's own clang, in a bundle with an Info.plist (no Dock icon, the
+ * camera question's text) and an ad-hoc signature macOS can recognise it by.
+ */
+export async function ensureScreenApp(
+  source: string,
+  env: NodeJS.ProcessEnv,
+  options: { force?: boolean; signal?: AbortSignal; onBuild?: () => void } = {},
+): Promise<ScreenApp> {
+  const hash = screenAppHash(source);
+  const dir = helperDir(hash);
+  const app = path.join(dir, 'CapMac.app');
+  const ready = async () => (await isExecutable(path.join(app, 'Contents', 'MacOS', 'devstream'))) && (await fs.stat(path.join(app, 'Contents', '_CodeSignature')).then(() => true, () => false));
+  const errorLog = path.join(dir, 'error.log');
+  if (options.force) await fs.rm(errorLog, { force: true });
+  if (await ready()) {
+    const now = new Date();
+    await fs.utimes(dir, now, now).catch(() => undefined);
+    return { path: app, compiled: false };
+  }
+  const cached = await fs.readFile(errorLog, 'utf8').catch(() => null);
+  if (cached !== null) throw screenAppError(cached);
+
+  options.onBuild?.();
+  await fs.mkdir(dir, { recursive: true });
+  const file = path.join(dir, 'devstream.m');
+  await fs.writeFile(file, source);
+  // Built aside and renamed into place: two streams starting at once never see half an app.
+  const tmp = path.join(dir, `build-${process.pid}.app`);
+  await fs.rm(tmp, { recursive: true, force: true });
+  await fs.mkdir(path.join(tmp, 'Contents', 'MacOS'), { recursive: true });
+  const fail = async (output: string, cache: boolean): Promise<never> => {
+    await fs.rm(tmp, { recursive: true, force: true });
+    if (cache) await fs.writeFile(errorLog, output).catch(() => undefined);
+    throw screenAppError(output);
+  };
+  const exe = path.join(tmp, 'Contents', 'MacOS', 'devstream');
+  const args = ['clang', '-fobjc-arc', '-O2', '-Wno-objc-method-access', ...SCREEN_APP_FRAMEWORKS.flatMap((f) => ['-framework', f]), file, '-o', exe];
+  const r = await run('xcrun', args, { env, signal: options.signal, timeoutMs: 180_000 });
+  if (r.cancelled) {
+    await fs.rm(tmp, { recursive: true, force: true });
+    throw new AgentError('Cancelled', 'CANCELLED');
+  }
+  if (r.code !== 0) await fail(`${r.stderr}\n${r.stdout}`.trim() || `clang exited with ${r.code ?? r.signal}`, !r.timedOut);
+  await fs.writeFile(path.join(tmp, 'Contents', 'Info.plist'), screenAppInfoPlist());
+  const signed = await run('codesign', ['--force', '--sign', '-', '--identifier', SCREEN_APP_ID, tmp], { env, timeoutMs: 60_000 });
+  if (signed.code !== 0) await fail(`codesign: ${signed.stderr || signed.stdout}`.trim(), false);
+  // A half-built app from an interrupted build makes way; a finished one (another stream's) stays.
+  if (!(await ready())) await fs.rm(app, { recursive: true, force: true });
+  try {
+    await fs.rename(tmp, app);
+  } catch (err) {
+    // Another stream finished the same build first.
+    await fs.rm(tmp, { recursive: true, force: true });
+    if (!(await ready())) throw err;
+    return { path: app, compiled: false };
+  }
+  await fs.writeFile(path.join(dir, 'build.json'), JSON.stringify({ kind: 'screen-app', at: new Date().toISOString() })).catch(() => undefined);
+  await removeOldBuilds(hash);
+  return { path: app, compiled: true };
+}
+
 /** CoreSimulator 1155.4 (Xcode 27) ignores the legacy input the helper sends. */
 export function legacyInputWorks(coreSimulatorVersion: string): boolean {
   const [major = 0, minor = 0] = coreSimulatorVersion.split('.').map(Number);

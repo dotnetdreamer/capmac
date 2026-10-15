@@ -188,10 +188,19 @@ export interface StreamParams {
   maxBitrate?: number;
 }
 
+/** The H.264 stream of an iPhone or iPad plugged into the Mac (agent op `device-stream`). */
+export interface DeviceStreamParams extends StreamParams {
+  /** The device's name, to find it when the Mac knows it by another id. */
+  name?: string;
+}
+
 export interface ScreenInfo {
   t: 'screen';
-  /** 'app': a window of an Electron app on the Mac (through CapMac's module in the app). */
-  source: 'axe' | 'simctl' | 'helper' | 'app';
+  /**
+   * 'app': a window of an Electron app on the Mac (through CapMac's module in the app).
+   * 'device': an iPhone or iPad plugged into the Mac (CapMac.app on the Mac captures it).
+   */
+  source: 'axe' | 'simctl' | 'helper' | 'app' | 'device';
   /** Screen size in points (null until known). */
   points: { width: number; height: number } | null;
   /** Whether the screen takes input at all. */
@@ -324,6 +333,10 @@ export type AgentEvent =
   | { t: 'pong'; id: number; pc: number; mac: number }
   /** `stream`: the helper's memory and traffic, every few seconds. */
   | { t: 'stream-status'; footprint: number; fps: number; dropped: number; bitrate?: number }
+  /** `device-stream`: waiting for the device's cable or for camera access on the Mac; null once the picture comes. */
+  | { t: 'stream-wait'; for: 'device' | 'permission' | null }
+  /** `device-stream`: no still this time (the answer to `still`). */
+  | { t: 'still-error'; message: string }
   | { t: 'result'; ok: true; data: unknown }
   | { t: 'result'; ok: false; error: AgentErrorInfo };
 
@@ -352,6 +365,8 @@ export const ERROR_CODES = {
   streamStalled: 'STREAM_STALLED',
   /** Nothing to build the helper with (no Xcode selected). */
   streamUnsupported: 'STREAM_UNSUPPORTED',
+  /** The Mac said no to CapMac seeing a plugged-in iPhone's screen (camera access). */
+  deviceScreenDenied: 'DEVICE_SCREEN_DENIED',
   /** Electron: the app's build failed. */
   electronBuild: 'ELECTRON_BUILD_FAILED',
   /** Electron: the app did not start, or no Electron is installed in the project. */

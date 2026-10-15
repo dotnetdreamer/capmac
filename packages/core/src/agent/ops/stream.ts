@@ -1,38 +1,34 @@
 /**
- * The simulator's screen as H.264 (streaming v2). Runs capmac's helper on
- * the Mac, compiling it on first use, and relays its messages as binary frames
- * without transcoding. Takes input through the same helper (AXe when the
- * helper has none), answers clock pings, keeps latency bounded on a slow
- * network, and notices a stalled stream. When the call ends (the client
- * closes the channel, or stops talking), the helper stops too: no orphans.
+ * The smooth stream (v2): a screen as H.264 from capmac's helpers on the Mac,
+ * relayed as binary frames without transcoding (helper/relay.ts).
+ *
+ * - `stream`: a simulator. The helper (simstream) is compiled on first use and
+ *   also takes touch and keys (AXe when it has no input); a stall check
+ *   notices a screen the helper stopped seeing.
+ * - `device-stream`: an iPhone or iPad plugged into the Mac with a cable. The
+ *   helper (devstream) runs as a background app, CapMac.app, so macOS can ask
+ *   for camera access for it once (see helper/app.ts). It waits for the cable
+ *   and for that answer as long as the client is there, and says so.
+ *
+ * When the call ends (the client closes the channel, or stops talking), the
+ * helper stops too: no orphans.
  */
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { InputEvent, ScreenInfo, StreamHelperState, StreamParams } from '../../shared/protocol.js';
-import { STREAM_CONFIG } from '../../shared/stream.js';
+import type { DeviceStreamParams, ScreenInfo, StreamHelperState, StreamParams } from '../../shared/protocol.js';
 import { toolEnv } from '../env.js';
-import { BitrateController } from '../helper/bitrate.js';
-import { ensureHelper, helperState } from '../helper/build.js';
+import { AppHelper } from '../helper/app.js';
+import { ensureHelper, ensureScreenApp, helperState } from '../helper/build.js';
 import { HelperInput } from '../helper/input.js';
 import { HelperProcess, type HelperExit } from '../helper/process.js';
-import { HELPER_SOURCE } from '../helper/source.js';
+import { clampInt, StreamRelay } from '../helper/relay.js';
+import { DEVICE_HELPER_SOURCE, HELPER_SOURCE } from '../helper/source.js';
 import { StallWatch } from '../helper/stall.js';
-import { VideoWindow } from '../helper/window.js';
 import type { AgentIO } from '../io.js';
 import { AgentError, run, sleep, which } from '../proc.js';
 import { createAxeInput, setSimulatorPasteboard } from './screen.js';
-
-/** The client pings every couple of seconds; this long without a word means it is gone. */
-const CLIENT_TIMEOUT_MS = 15_000;
-
-const nowUs = () => Math.round((performance.timeOrigin + performance.now()) * 1000);
-
-function clampInt(value: unknown, min: number, max: number, fallback: number): number {
-  const n = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback;
-  return Math.min(max, Math.max(min, n));
-}
 
 /** Why the helper could not start or kept going, as an error the engine turns into a fallback reason. */
 export function helperFailure(exit: HelperExit, started: boolean): AgentError {
@@ -70,17 +66,8 @@ export async function opStream(params: StreamParams, io: AgentIO): Promise<{ fra
   if (io.signal.aborted) throw new AgentError('Cancelled', 'CANCELLED');
   io.send({ t: 'stream-prepare', stage: 'starting', xcode: binary.xcode.version });
 
-  const window = new VideoWindow();
-  const maxBitrate = clampInt(params.maxBitrate ?? params.bitrate, 1_000_000, 20_000_000, 6_000_000);
-  const bitrate = new BitrateController({
-    start: clampInt(params.bitrate, 300_000, maxBitrate, maxBitrate),
-    min: clampInt(params.minBitrate, 300_000, maxBitrate, 600_000),
-    max: maxBitrate,
-  });
   const watch = new StallWatch(() => screenFingerprint(params.udid, env, io.signal));
-  let frames = 0;
-  let footprint = 0;
-  let helperDropped = 0;
+  const relay = new StreamRelay(io, params, watch);
   const helper = new HelperProcess(
     binary.path,
     [
@@ -88,29 +75,11 @@ export async function opStream(params: StreamParams, io: AgentIO): Promise<{ fra
       '--developer-dir', binary.xcode.developerDir,
       '--max-size', String(clampInt(params.maxSize, 480, 3000, 1400)),
       '--fps', String(clampInt(params.fps, 10, 60, 60)),
-      '--bitrate', String(bitrate.current),
+      '--bitrate', String(relay.bitrate.current),
     ],
-    {
-      onVideo: (message, header) => {
-        watch.activity();
-        if (header.type === STREAM_CONFIG) {
-          io.sendLive(message);
-          return;
-        }
-        if (!window.offer(header.seq, header.key, io.backlog)) return;
-        frames += 1;
-        io.sendLive(message);
-      },
-      onStatus: (status) => {
-        if (status.callbacks > 0) watch.activity();
-        footprint = status.footprint;
-        helperDropped += status.dropped;
-      },
-      onInputError: (message) => io.log('warn', `Input: ${message}`),
-    },
+    { ...relay.handlers, onInputError: (message) => io.log('warn', `Input: ${message}`) },
     env,
   );
-  let stopping = false;
   try {
     const hello = await helper.hello;
     if (!hello) throw helperFailure(await helper.exited, false);
@@ -142,87 +111,114 @@ export async function opStream(params: StreamParams, io: AgentIO): Promise<{ fra
     io.send(info);
     io.send({ t: 'ready', data: { xcode: binary.xcode.version, compiled: binary.compiled } });
 
-    let lastHeard = Date.now();
-    io.onMessage((message) => {
-      lastHeard = Date.now();
-      switch (message?.t) {
-        case 'ack':
-          if (Number.isInteger(message.seq)) window.ack(message.seq);
-          break;
-        case 'keyframe':
-          helper.send('k');
-          break;
-        case 'ping':
-          io.send({ t: 'pong', id: Number(message.id) || 0, pc: Number(message.pc) || 0, mac: nowUs() });
-          break;
-        case 'size':
-          helper.send(`s ${clampInt(message.maxSize, 480, 3000, 1400)}`);
-          break;
-        case 'input': {
-          const event = message.event as InputEvent | undefined;
-          if (!event) break;
-          if (helperInput) void helperInput.push(event);
-          else axeInput?.(event);
-          break;
-        }
-      }
+    relay.attach(helper, {
+      failure: (exit) => helperFailure(exit, true),
+      onInput: (event) => {
+        if (helperInput) void helperInput.push(event);
+        else axeInput?.(event);
+      },
+      stalled: () => new AgentError("The simulator's screen changed but the smooth stream saw nothing.", 'STREAM_STALLED', 'Restarting the simulator brings the smooth stream back.'),
     });
-
-    // Set from callbacks (the helper exiting, the stall check): ends the loop below.
-    const ended: { failure: AgentError | null } = { failure: null };
-    void helper.exited.then((exit) => {
-      if (!stopping && !io.signal.aborted) ended.failure ??= helperFailure(exit, true);
-    });
-    let lastKeyAsk = 0;
-    let lastCheck = Date.now();
-    let lastStatus = Date.now();
-    let lastFrames = 0;
-    let lastTick = Date.now();
-    let tickFrames = 0;
-    let tickDropped = 0;
-    while (!io.signal.aborted && !ended.failure) {
-      await sleep(100, io.signal);
-      const now = Date.now();
-      // Dropped frames to catch up: once the way is clear, restart from a keyframe.
-      if (window.wantsKeyframe(io.backlog) && now - lastKeyAsk > 400) {
-        helper.send('k');
-        lastKeyAsk = now;
-      }
-      if (now - lastHeard > CLIENT_TIMEOUT_MS) break;
-      // Adaptive bitrate: once a second, from how the frames got through.
-      if (now - lastTick >= 1000) {
-        lastTick = now;
-        const change = bitrate.tick({ peakLagMs: window.takePeakLag(), dropped: window.dropped - tickDropped, frames: frames - tickFrames, backlogBytes: io.backlog });
-        tickFrames = frames;
-        tickDropped = window.dropped;
-        if (change) helper.send(`r ${change}`);
-      }
-      if (now - lastCheck >= 1000) {
-        lastCheck = now;
-        void watch.check().then((stalled) => {
-          if (!stalled) return;
-          ended.failure ??= new AgentError(
-            "The simulator's screen changed but the smooth stream saw nothing.",
-            'STREAM_STALLED',
-            'Restarting the simulator brings the smooth stream back.',
-          );
-        });
-      }
-      if (now - lastStatus >= 5000) {
-        io.send({ t: 'stream-status', footprint, fps: Math.round(((frames - lastFrames) * 1000) / (now - lastStatus)), dropped: window.dropped + helperDropped, bitrate: bitrate.current });
-        lastStatus = now;
-        lastFrames = frames;
-      }
-    }
-    if (ended.failure) throw ended.failure;
-    return { frames, dropped: window.dropped + helperDropped };
+    return await relay.run();
   } finally {
-    stopping = true;
+    await relay.close();
     await helper.stop();
   }
 }
 
-/** The helper's state for this Mac's Xcode; `build` compiles it now (`force` retries after a failure). */
+/** What a device helper's last word means for the person looking at the screen. */
+export function deviceFailure(exit: HelperExit, started: boolean, device: string): AgentError {
+  switch (exit.fatal?.code) {
+    case 'NO_PERMISSION':
+      return new AgentError(
+        `CapMac is not allowed to see ${device}'s screen.`,
+        'DEVICE_SCREEN_DENIED',
+        'On the Mac, open System Settings › Privacy & Security › Camera and turn on CapMac. Then try again.',
+      );
+    case 'CAPTURE_FAILED':
+      return new AgentError(exit.fatal.message, 'HELPER_EXITED', 'Unplug the iPhone, plug it in again, and unlock it. QuickTime Player showing the same iPhone also gets in the way.', exit.stderr.slice(-8));
+    default:
+      return helperFailure(exit, started);
+  }
+}
+
+/**
+ * A plugged-in iPhone's screen: CapMac.app captures it on the Mac (built on
+ * first use) and the relay sends it on like a simulator's. Stills (`still`)
+ * are full-size PNGs from the newest picture. No input yet.
+ */
+export async function opDeviceStream(params: DeviceStreamParams, io: AgentIO): Promise<{ frames: number; dropped: number }> {
+  const env = await toolEnv();
+  const app = await ensureScreenApp(DEVICE_HELPER_SOURCE, env, {
+    signal: io.signal,
+    onBuild: () => io.send({ t: 'stream-prepare', stage: 'building' }),
+  });
+  if (io.signal.aborted) throw new AgentError('Cancelled', 'CANCELLED');
+  io.send({ t: 'stream-prepare', stage: 'starting' });
+
+  const device = params.name || 'The iPhone';
+  const relay = new StreamRelay(io, params);
+  // Stills go out reliably, in order with nothing else: a PNG is too big to drop and too rare to matter.
+  let stills = Promise.resolve();
+  const helper = await AppHelper.launch(
+    app.path,
+    [
+      '--udid', params.udid,
+      '--name', params.name ?? '',
+      '--max-size', String(clampInt(params.maxSize, 480, 3000, 1400)),
+      '--fps', String(clampInt(params.fps, 10, 60, 60)),
+      '--bitrate', String(relay.bitrate.current),
+    ],
+    {
+      ...relay.handlers,
+      onStill: (message) => {
+        stills = stills.then(() => io.sendBinary(message, true));
+      },
+      onEvent: (event) => {
+        if (event.t === 'wait') io.send({ t: 'stream-wait', for: event.for });
+        else if (event.t === 'resume') io.send({ t: 'stream-wait', for: null });
+        else if (event.t === 'still-error') io.send({ t: 'still-error', message: event.message });
+      },
+    },
+    env,
+    io.signal,
+  );
+  let started = false;
+  try {
+    relay.attach(helper, {
+      failure: (exit) => deviceFailure(exit, started, device),
+      onInput: () => undefined,
+      onMessage: (message) => {
+        if (message?.t === 'still') helper.send('S');
+      },
+    });
+    // Waits for the cable and for camera access as long as someone is looking.
+    const hello = await relay.waitFor(helper.hello);
+    if (!hello) {
+      // The helper gave up before its picture came (camera access refused, the capture failed)…
+      if (!helper.running && !io.signal.aborted) throw deviceFailure(await helper.exited, false, device);
+      // …or the client went away while it waited: nothing to report.
+      return { frames: 0, dropped: 0 };
+    }
+    started = true;
+    io.send({ t: 'stream-wait', for: null });
+    const info: ScreenInfo = {
+      t: 'screen',
+      source: 'device',
+      codec: 'h264',
+      points: hello.points ?? null,
+      scale: hello.scale,
+      input: false,
+      inputReason: hello.inputReason,
+    };
+    io.send(info);
+    io.send({ t: 'ready', data: { compiled: app.compiled, model: hello.model ?? null } });
+    return await relay.run();
+  } finally {
+    await relay.close();
+  }
+}
+
 export async function opStreamHelper(params: { build?: boolean; force?: boolean }, io: AgentIO): Promise<StreamHelperState> {
   const env = await toolEnv();
   if (params.build) {

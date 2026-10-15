@@ -28,14 +28,16 @@ type StreamState = { kind: 'connecting' } | { kind: 'streaming' } | { kind: 'rec
 
 const PADDING = 11;
 
-async function screenshot(mac: string, udid: string, action: 'save' | 'copy') {
+/** A full-size screenshot: simctl's for a simulator, the newest picture for a plugged-in iPhone. */
+async function screenshot(mac: string, target: Target, action: 'save' | 'copy') {
   try {
-    const shot = await call('screen.screenshot', { mac, udid });
+    const shot = await call('screen.screenshot', { mac, udid: target.udid });
     if (action === 'copy') {
       await window.capmac.invoke('app:copy-image', { data: shot.png });
       toast({ tone: 'success', title: t.simulator.shotCopied, body: shot.width ? `${shot.width} × ${shot.height}` : undefined });
     } else {
-      const name = t.simulator.shotName(new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-'));
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      const name = target.kind === 'device' ? t.simulator.deviceShotName(target.name, stamp) : t.simulator.shotName(stamp);
       const saved = await window.capmac.invoke('app:save-image', { data: shot.png, name });
       if (saved) toast({ tone: 'success', title: t.simulator.shotSaved, body: saved, action: { label: t.common.showInFolder, run: () => void window.capmac.invoke('app:show-in-folder', { path: saved }) } });
     }
@@ -88,8 +90,12 @@ function CompatibleNote({ fallback, onRetry, onRestart }: { fallback: StreamFall
   );
 }
 
-/** The live simulator screen: a canvas fed by a worker that decodes frames off the main thread. */
-function Screen({ mac, target, frame }: { mac: string; target: Target; frame: boolean }) {
+/**
+ * The live screen of a simulator, or of an iPhone plugged into the Mac: a
+ * canvas fed by a worker that decodes frames off the main thread.
+ */
+function Screen({ mac, macLabel, target, frame }: { mac: string; macLabel: string; target: Target; frame: boolean }) {
+  const device = target.kind === 'device';
   const macRoute = useMacs((s) => s.macs.find((m) => m.name === mac)?.route ?? null);
   const [targetBitrate, setTargetBitrate] = useState<number | null>(null);
   const macRtt = useMacs((s) => s.macs.find((m) => m.name === mac)?.rttMs ?? null);
@@ -102,6 +108,10 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
   const [codec, setCodec] = useState<'h264' | 'jpeg' | null>(null);
   const [fallback, setFallback] = useState<StreamFallback | null>(null);
   const [preparing, setPreparing] = useState<{ stage: 'building' | 'starting'; xcode?: string } | null>(null);
+  // A plugged-in iPhone: waiting for its cable, or for Allow on the Mac.
+  const [wait, setWait] = useState<'device' | 'permission' | null>(null);
+  // A plugged-in iPhone sends nothing while its screen is off: say so after a moment.
+  const [slowPicture, setSlowPicture] = useState(false);
   const [frameSize, setFrameSize] = useState<{ width: number; height: number } | null>(null);
   const [box, setBox] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [stats, setStats] = useState<Stats | null>(null);
@@ -149,6 +159,7 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
       else if (m.type === 'info') setInfo(m.info);
       else if (m.type === 'status') setTargetBitrate(m.bitrate);
       else if (m.type === 'preparing') setPreparing({ stage: m.stage, xcode: m.xcode });
+      else if (m.type === 'device-wait') setWait(m.wait);
       else if (m.type === 'codec') {
         setCodec(m.codec);
         setFallback(m.fallback);
@@ -158,11 +169,12 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
     setState({ kind: 'connecting' });
     setHasFrame(false);
     setPreparing(null);
+    setWait(null);
     setFallback(null);
     (async () => {
       try {
         const maxSize = canvasPixels.current ? videoSizeFor(canvasPixels.current, null) : undefined;
-        const opened = await window.capmac.invoke('app:screen-open', { mac, udid: target.udid, maxSize });
+        const opened = await window.capmac.invoke('app:screen-open', { mac, udid: target.udid, maxSize, device: device ? { name: target.name } : undefined });
         streamId = opened.streamId;
         const port = await claimScreenPort(opened.streamId);
         if (disposed) {
@@ -181,7 +193,15 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
       workerRef.current = null;
       if (streamId) void call('screen.stop', { streamId }).catch(() => undefined);
     };
-  }, [mac, target.udid, epoch, prefer]);
+  }, [mac, target.udid, target.name, device, epoch, prefer]);
+
+  // The iPhone's screen is up but no picture came: its screen is probably off.
+  useEffect(() => {
+    setSlowPicture(false);
+    if (!device || hasFrame || !info || wait) return;
+    const timer = window.setTimeout(() => setSlowPicture(true), 4000);
+    return () => window.clearTimeout(timer);
+  }, [device, hasFrame, info, wait]);
 
   // Fit the screen into the pane (exact pixel sizes; the canvas backing store follows the DPR).
   useLayoutEffect(() => {
@@ -431,17 +451,23 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
   // Workspace command: Ctrl+Shift+S
   useEffect(() => {
     const onAction = (e: Event) => {
-      if ((e as CustomEvent<WorkspaceAction>).detail === 'screenshot') void screenshot(mac, target.udid, 'save');
+      if ((e as CustomEvent<WorkspaceAction>).detail === 'screenshot') void screenshot(mac, target, 'save');
     };
     workspaceBus.addEventListener('action', onAction);
     return () => workspaceBus.removeEventListener('action', onAction);
-  }, [mac, target.udid]);
+  }, [mac, target]);
 
   const ended = state.kind === 'ended';
-  // The connection dropped: keep the last frame, dimmed, until the stream resumes.
+  // The connection dropped, or the iPhone was unplugged: keep the last frame, dimmed, until the picture is back.
   const reconnecting = state.kind === 'reconnecting';
-  const connectingText =
-    preparing?.stage === 'building'
+  const waiting = !ended && wait !== null;
+  const connectingText = device
+    ? preparing?.stage === 'building'
+      ? t.simulator.deviceSettingUp
+      : preparing?.stage === 'starting' || info
+        ? t.simulator.deviceStarting(target.name)
+        : t.simulator.connectingTo(target.name)
+    : preparing?.stage === 'building'
       ? t.simulator.settingUp(preparing.xcode)
       : preparing?.stage === 'starting'
         ? t.simulator.startingSmooth
@@ -457,7 +483,7 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
     stats?.inputMs != null ? t.simulator.touch(Math.round(stats.inputMs)) : null,
     codec === 'h264' && stats?.fps === 0 ? t.simulator.still : null,
   ].filter(Boolean).join(' · ');
-  const viewOnlyReason = tidy(info?.inputReason) ?? t.simulator.viewOnlyWhy;
+  const viewOnlyReason = device ? t.simulator.deviceViewOnly : tidy(info?.inputReason) ?? t.simulator.viewOnlyWhy;
   const inputHelp = mode === 'touch' ? t.simulator.helpTouch : t.simulator.helpBasic;
   return (
     <div className="sim">
@@ -486,22 +512,29 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
             {ripples.map((r) => (
               <span key={r.id} className="sim__ripple" style={{ left: r.x, top: r.y }} />
             ))}
-            {(!hasFrame || ended || reconnecting) && (
-              <div className={`sim__overlay${reconnecting && hasFrame ? ' is-dimmed' : ''}`}>
+            {(!hasFrame || ended || reconnecting || waiting) && (
+              <div className={`sim__overlay${(reconnecting || waiting) && hasFrame ? ' is-dimmed' : ''}`}>
                 {ended ? (
                   <>
-                    <Icon name="plugDisconnected" size={20} />
+                    <Icon name={state.error?.code === 'DEVICE_SCREEN_DENIED' ? 'shieldError' : 'plugDisconnected'} size={20} />
                     <span>{tidy(state.error?.message) ?? t.simulator.stopped}</span>
                     {state.error?.hint && <span className="faint">{tidy(state.error.hint)}</span>}
                     <Button size="sm" onClick={() => setEpoch((e) => e + 1)}>
-                      {t.simulator.reconnect}
+                      {device ? t.simulator.tryAgain : t.simulator.reconnect}
                     </Button>
+                  </>
+                ) : waiting && !reconnecting ? (
+                  <>
+                    <Icon name={wait === 'device' ? 'usb' : 'shield'} size={20} />
+                    <span>{wait === 'device' ? t.simulator.plugIn(target.name, macLabel) : t.simulator.allowOnMac(macLabel)}</span>
+                    <span className="faint">{wait === 'device' ? t.simulator.plugInBody : t.simulator.allowOnMacBody}</span>
                   </>
                 ) : (
                   <>
                     <Spinner size={20} />
                     <span>{reconnecting ? t.simulator.reconnectingMac : connectingText}</span>
                     {!reconnecting && preparing?.stage === 'building' && <span className="faint">{t.simulator.firstTime}</span>}
+                    {!reconnecting && slowPicture && <span className="faint">{t.simulator.deviceNoPicture}</span>}
                   </>
                 )}
               </div>
@@ -509,8 +542,8 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
           </div>
         </div>
       </div>
-      <div className="sim__toolbar" role="toolbar" aria-label={t.simulator.controls}>
-        {info && !info.input ? (
+      <div className="sim__toolbar" role="toolbar" aria-label={device ? t.simulator.deviceControls : t.simulator.controls}>
+        {(info && !info.input) || device ? (
           <span className="sim__viewonly">
             <Tooltip content={viewOnlyReason}>
               <span className="sim__viewonly-label" tabIndex={0}>
@@ -518,9 +551,11 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
                 {t.simulator.viewOnly}
               </span>
             </Tooltip>
-            <Button size="sm" variant="ghost" onClick={() => void fixAxe()}>
-              {t.simulator.installAxe}
-            </Button>
+            {!device && (
+              <Button size="sm" variant="ghost" onClick={() => void fixAxe()}>
+                {t.simulator.installAxe}
+              </Button>
+            )}
           </span>
         ) : (
           <>
@@ -549,7 +584,7 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
             </Button>
           </form>
         </Popover>
-        <button type="button" className="icon-btn icon-btn--sm" aria-label={t.simulator.screenshot} aria-haspopup="menu" {...shotMenu.triggerProps}>
+        <button type="button" className="icon-btn icon-btn--sm" aria-label={t.simulator.screenshot} aria-haspopup="menu" disabled={device && !hasFrame} {...shotMenu.triggerProps}>
           <Icon name="camera" size={16} />
         </button>
         <Menu
@@ -557,8 +592,8 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
           label={t.simulator.screenshot}
           placement="top-start"
           items={[
-            { id: 'save', label: t.simulator.saveShot, icon: 'download', shortcut: 'Ctrl+Shift+S', onSelect: () => void screenshot(mac, target.udid, 'save') },
-            { id: 'copy', label: t.simulator.copyShot, icon: 'copy', onSelect: () => void screenshot(mac, target.udid, 'copy') },
+            { id: 'save', label: t.simulator.saveShot, icon: 'download', shortcut: 'Ctrl+Shift+S', onSelect: () => void screenshot(mac, target, 'save') },
+            { id: 'copy', label: t.simulator.copyShot, icon: 'copy', onSelect: () => void screenshot(mac, target, 'copy') },
           ]}
         />
         <span className="sim__spacer" />
@@ -576,6 +611,8 @@ function Screen({ mac, target, frame }: { mac: string; target: Target; frame: bo
               t.simulator.disconnected
             ) : reconnecting ? (
               t.common.reconnecting
+            ) : waiting ? (
+              wait === 'device' ? t.simulator.waitingCable : t.simulator.waitingAllow
             ) : (
               t.common.connecting
             )}
@@ -609,13 +646,6 @@ export function SimulatorPane({ mac, target, onBooted }: { mac: MacSummary | nul
       </EmptyState>
     );
   }
-  if (target.kind === 'device') {
-    return (
-      <EmptyState compact icon="phone" title={t.simulator.isDevice(target.name)}>
-        {t.simulator.isDeviceBody}
-      </EmptyState>
-    );
-  }
   if (connected === 'offline') {
     return (
       <EmptyState compact icon="plugDisconnected" title={t.simulator.cantReach(mac.label)}>
@@ -623,6 +653,8 @@ export function SimulatorPane({ mac, target, onBooted }: { mac: MacSummary | nul
       </EmptyState>
     );
   }
+  // A real iPhone: its screen comes over the cable to the Mac, and on to here.
+  if (target.kind === 'device') return <Screen key={`${mac.name}-${target.udid}`} mac={mac.name} macLabel={mac.label} target={target} frame={frame} />;
   if (target.state !== 'Booted') {
     const boot = async () => {
       setBooting(true);
@@ -650,5 +682,5 @@ export function SimulatorPane({ mac, target, onBooted }: { mac: MacSummary | nul
       </EmptyState>
     );
   }
-  return <Screen key={`${mac.name}-${target.udid}`} mac={mac.name} target={target} frame={frame} />;
+  return <Screen key={`${mac.name}-${target.udid}`} mac={mac.name} macLabel={mac.label} target={target} frame={frame} />;
 }

@@ -251,7 +251,7 @@ export async function logsCommand(options: MacOption & { target?: string }): Pro
   }
 }
 
-export async function screenCommand(options: MacOption & { target?: string; port?: string; open?: boolean; electron?: boolean; sound?: SoundMode }): Promise<void> {
+export async function screenCommand(options: MacOption & { target?: string; device?: boolean; port?: string; open?: boolean; electron?: boolean; sound?: SoundMode }): Promise<void> {
   const { ctx } = terminalContext();
   const project = await loadProject(process.cwd());
   const link = new MacLink(options.mac ?? project.config.host, ctx, { autoReconnect: true });
@@ -269,12 +269,13 @@ export async function screenCommand(options: MacOption & { target?: string; port
       return;
     }
     const pipeline = new Pipeline(session, project, ctx);
-    const target = await pipeline.chooseTarget({ target: options.target, simulator: true });
-    if (target.kind !== 'simulator') throw new UserError('The remote screen works with simulators only.');
-    if (target.state !== 'Booted') await pipeline.call('boot', { target }).catch((err) => reportError(err));
+    // A simulator, or (--device, or --target naming it) an iPhone plugged into the Mac.
+    const target = await pipeline.chooseTarget(options.device ? { target: options.target, device: true } : { target: options.target, simulator: !options.target });
+    if (target.kind === 'simulator' && target.state !== 'Booted') await pipeline.call('boot', { target }).catch((err) => reportError(err));
     viewer = await ScreenViewer.start(link, target, { title: `${project.appName} · ${target.name}`, port: options.port ? Number(options.port) : undefined });
     if (options.open !== false) viewer.open();
-    log.dim('Press Ctrl+C to stop sharing the screen.');
+    if (target.kind === 'device') log.dim(`Shows ${target.name}'s screen while it is plugged into the Mac with a cable (view only). Press Ctrl+C to stop.`);
+    else log.dim('Press Ctrl+C to stop sharing the screen.');
     await new Promise<void>((resolve) => process.once('SIGINT', () => resolve()));
   } finally {
     await viewer?.close().catch(() => undefined);

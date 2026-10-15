@@ -1,7 +1,8 @@
 /** Simulators and devices: live state, boot/shut down, screenshots. */
 import type { AgentEvent, Target, TargetsResult } from '../shared/protocol.js';
+import { parseStreamHeader, STREAM_FRAME, STREAM_HEADER_BYTES, STREAM_STILL } from '../shared/stream.js';
 import type { AgentCall, CallHandlers } from './agent-client.js';
-import { toErrorInfo, type ErrorInfo } from './errors.js';
+import { toErrorInfo, UserError, type ErrorInfo } from './errors.js';
 import type { EngineContext } from './context.js';
 import type { MacLink } from './link.js';
 import type { MacSession } from './session.js';
@@ -37,6 +38,73 @@ export async function takeScreenshot(session: MacSession, udid: string): Promise
   const chunks: Buffer[] = [];
   const result = await session.call<{ width: number | null; height: number | null }>('screenshot', { udid }, { onBinary: (chunk) => chunks.push(chunk) });
   return { png: Buffer.concat(chunks), width: result.width, height: result.height };
+}
+
+export interface DeviceScreenshotOptions {
+  /** Waiting for the cable, or for Allow on the Mac (told once each). */
+  onWait?(wait: 'device' | 'permission'): void;
+  /** How long to wait for the cable and for Allow (default a minute). */
+  waitMs?: number;
+}
+
+/**
+ * A full-size PNG of an iPhone plugged into the Mac: CapMac.app opens its
+ * screen (agent op `device-stream`), takes the first picture at the iPhone's
+ * own size, and closes it again. The video itself is kept tiny: only the
+ * still matters.
+ */
+export async function takeDeviceScreenshot(session: MacSession, target: Pick<Target, 'udid' | 'name'>, options: DeviceScreenshotOptions = {}): Promise<{ png: Buffer; width: number | null; height: number | null }> {
+  const told = new Set<string>();
+  let call: AgentCall<unknown> | null = null;
+  let timer: NodeJS.Timeout | undefined;
+  let pinger: NodeJS.Timeout | undefined;
+  try {
+    return await new Promise((resolve, reject) => {
+      let asked = false;
+      const done = (error: Error | null, png?: Buffer) => {
+        if (error || !png) reject(error ?? new Error('No picture came.'));
+        else resolve({ png, width: png.length > 24 ? png.readUInt32BE(16) : null, height: png.length > 24 ? png.readUInt32BE(20) : null });
+      };
+      timer = setTimeout(
+        () => done(new UserError(`No picture came from ${target.name}.`, 'Plug it into the Mac with a cable, unlock it, and allow CapMac on the Mac if it asks.')),
+        options.waitMs ?? 60_000,
+      );
+      session.agent
+        .start('device-stream', { udid: target.udid, name: target.name, maxSize: 480, fps: 10, bitrate: 500_000, minBitrate: 300_000, maxBitrate: 1_000_000 }, {
+          onEvent: (event) => {
+            if (event.t === 'stream-wait' && event.for && !told.has(event.for)) {
+              told.add(event.for);
+              options.onWait?.(event.for);
+            } else if (event.t === 'still-error') {
+              // No picture yet: the next frame asks again.
+              asked = false;
+            }
+          },
+          onBinary: (data) => {
+            const header = parseStreamHeader(data);
+            if (header?.type === STREAM_FRAME && !asked) {
+              asked = true;
+              call?.send({ t: 'still' });
+            } else if (header?.type === STREAM_STILL) {
+              done(null, data.subarray(STREAM_HEADER_BYTES));
+            }
+          },
+        })
+        .then((started) => {
+          call = started;
+          // The op takes a client that stops talking for gone.
+          pinger = setInterval(() => started.send({ t: 'ping', id: 0, pc: 0 }), 2000);
+          started.result.then(
+            () => done(new Error(`${target.name}'s screen closed before its picture came.`)),
+            (err) => done(err instanceof Error ? err : new Error(String(err))),
+          );
+        }, reject);
+    });
+  } finally {
+    clearTimeout(timer);
+    clearInterval(pinger);
+    (call as AgentCall<unknown> | null)?.cancel();
+  }
 }
 
 /**

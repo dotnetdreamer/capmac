@@ -229,4 +229,14 @@ describe('screenshot target', () => {
     expect(() => screenshotTarget(all, 'iPhone Air', undefined)).toThrow(/not running/);
     expect(() => screenshotTarget({ ...all, simulators: [sim('C', 'iPhone Air', 'Shutdown')] } as TargetsResult, undefined, undefined)).toThrow(/No simulator is running/);
   });
+
+  it('photographs a plugged-in iPhone asked for by name or with --device', () => {
+    const phone = { kind: 'device' as const, udid: 'PHONE', name: 'IK 14 Pro Max', os: 'iOS 26.6.2', osVersion: '26.6.2', state: 'available', available: true, connection: 'usb' as const };
+    const withPhone = { ...all, devices: [phone] } as unknown as TargetsResult;
+    expect(screenshotTarget(withPhone, 'IK 14 Pro Max', undefined).udid).toBe('PHONE');
+    expect(screenshotTarget(withPhone, undefined, 'B', true).udid).toBe('PHONE');
+    // Without asking, a booted simulator still comes first.
+    expect(screenshotTarget(withPhone, undefined, undefined).udid).toBe('A');
+    expect(() => screenshotTarget(all, undefined, undefined, true)).toThrow(/No iPhone or iPad/);
+  });
 });

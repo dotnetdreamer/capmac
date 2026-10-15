@@ -1,11 +1,12 @@
 /**
- * The H.264 simulator stream (v2): messages from capmac's helper on the Mac
- * (`simstream`), relayed unchanged by the agent's `stream` op to the engine
- * and on to the screen worker, which decodes them with WebCodecs.
+ * The H.264 screen stream (v2): messages from capmac's helpers on the Mac
+ * (`simstream` for a simulator, `devstream` for a plugged-in iPhone),
+ * relayed unchanged by the agent's `stream` and `device-stream` ops to the
+ * engine and on to the screen worker, which decodes them with WebCodecs.
  *
  * Each message: u8 type, u8 flags (bit 0: keyframe), u16 reserved,
  * u64 capture time (Unix epoch µs, the Mac's clock), u32 sequence number,
- * then the payload. On the helper's stdout each message is preceded by its
+ * then the payload. On the helper's output each message is preceded by its
  * u32 big-endian length; agent frames carry one message each.
  *
  * No Node.js APIs here: the renderer's worker uses this module too.
@@ -16,6 +17,8 @@ export const STREAM_CONFIG = 1;
 export const STREAM_FRAME = 2;
 export const STREAM_PONG = 3;
 export const STREAM_EVENT = 4;
+/** A PNG of the newest picture at the device's own size (devstream's answer to `S`). */
+export const STREAM_STILL = 5;
 
 export const STREAM_HEADER_BYTES = 16;
 
@@ -155,13 +158,17 @@ export interface HelperHello {
   t: 'hello';
   device: string;
   video: boolean;
-  api: 'SimScreen' | 'SimDisplayRenderable' | 'none';
+  /** 'CoreMediaIO': a plugged-in iPhone or iPad (devstream). */
+  api: 'SimScreen' | 'SimDisplayRenderable' | 'CoreMediaIO' | 'none';
   input: boolean;
   inputReason?: string;
   coreSimulator: string;
   scale?: number;
   pixels?: { width: number; height: number };
   points?: { width: number; height: number };
+  /** devstream: the device's model ("iPhone15,3") and the helper's process id. */
+  model?: string;
+  pid?: number;
 }
 
 /** Once a second: what happened on the Mac since the last status. */
@@ -186,7 +193,15 @@ export type HelperEvent =
   | HelperHello
   | HelperStatus
   | { t: 'input-error'; message: string }
-  | { t: 'fatal'; code: string; message: string };
+  | { t: 'fatal'; code: string; message: string }
+  /** devstream: its first message, once connected (it is not the agent's child). */
+  | { t: 'started'; pid: number }
+  /** devstream: waiting for the device to be plugged in, or for camera access on the Mac. */
+  | { t: 'wait'; for: 'device' | 'permission' }
+  /** devstream: the device is back after a wait; a keyframe follows. */
+  | { t: 'resume' }
+  /** devstream: no still this time (no picture yet, or it did not convert). */
+  | { t: 'still-error'; message: string };
 
 export function parseHelperEvent(message: Uint8Array): HelperEvent | null {
   const header = parseStreamHeader(message);

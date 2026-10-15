@@ -3,12 +3,32 @@ import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AppScreenStream, ScreenStream, soundFor, takeAppScreenshot, type AppLogEntry, type MacLink } from '@capmac/core/engine';
+import { AppScreenStream, ScreenStream, soundFor, takeAppScreenshot, type AppLogEntry, type MacLink, type VideoPacket } from '@capmac/core/engine';
 import { isSoundMode, type AppWindowInfo, type SoundMode } from '@capmac/core/shared/electron';
 import type { InputEvent, ScreenInfo, Target } from '@capmac/core/shared/protocol';
+import { parseVideoConfig, STREAM_CONFIG, STREAM_FRAME, STREAM_HEADER_BYTES } from '@capmac/core/shared/stream';
 import { log, pc } from '../ui.js';
 
 const BOUNDARY = 'capmacframe';
+
+/**
+ * A config message as the page takes it: the helper's header, then JSON with
+ * the WebCodecs settings (the SPS already says frames come in order, see
+ * core's h264.ts), so the page parses no H.264 itself.
+ */
+export function pageConfigMessage(message: Buffer): Buffer | null {
+  const config = parseVideoConfig(message);
+  if (!config) return null;
+  const json = JSON.stringify({ codec: config.codec, width: config.width, height: config.height, description: Buffer.from(config.description).toString('base64') });
+  return Buffer.concat([message.subarray(0, STREAM_HEADER_BYTES), Buffer.from(json)]);
+}
+
+/** One message on /video: its u32 big-endian length, then the message. */
+export function lengthPrefixed(message: Buffer): Buffer {
+  const head = Buffer.alloc(4);
+  head.writeUInt32BE(message.length);
+  return Buffer.concat([head, message]);
+}
 
 function loadPage(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -37,8 +57,20 @@ interface StreamClient {
   busy: boolean;
 }
 
-/** What the viewer shows: a simulator, or an Electron app's windows on the Mac's desktop. */
-export type ViewerSource = { kind: 'simulator'; target: Target } | { kind: 'app'; projectId: string; label: string };
+/** A page playing the smooth stream (/video). */
+interface VideoClient {
+  res: http.ServerResponse;
+  /** Its socket is full: frames are skipped until it drains, then it resumes at a keyframe. */
+  blocked: boolean;
+  /** Deltas are useless until the next keyframe. */
+  needsKey: boolean;
+}
+
+/**
+ * What the viewer shows: a simulator, an iPhone plugged into the Mac (the
+ * smooth stream, view only), or an Electron app's windows on the Mac's desktop.
+ */
+export type ViewerSource = { kind: 'simulator'; target: Target } | { kind: 'device'; target: Target } | { kind: 'app'; projectId: string; label: string };
 
 /** What both streams offer the viewer. */
 interface Stream {
@@ -56,11 +88,16 @@ interface Stream {
  */
 export class ScreenViewer {
   private readonly clients = new Set<StreamClient>();
+  private readonly videoClients = new Set<VideoClient>();
   private readonly logClients = new Set<http.ServerResponse>();
   private readonly eventClients = new Set<http.ServerResponse>();
   private readonly logBacklog: AppLogEntry[] = [];
   private readonly stream: Stream;
   private readonly app: AppScreenStream | null = null;
+  /** The smooth stream's source (a plugged-in iPhone): keyframes, its video size, stills. */
+  private readonly video: ScreenStream | null = null;
+  /** The newest config, for pages that join later. */
+  private videoConfig: Buffer | null = null;
   private latest: Buffer | null = null;
   private idleTimer: NodeJS.Timeout | null = null;
   private readonly page = loadPage();
@@ -68,10 +105,13 @@ export class ScreenViewer {
   url = '';
 
   private constructor(private readonly link: MacLink, private readonly source: ViewerSource, private readonly title: string, private readonly server: http.Server) {
-    const onEnd = (error?: { message: string }) => {
-      if (error) log.warn(`Screen stream stopped: ${error.message}`);
+    const onEnd = (error?: { message: string; hint?: string }) => {
+      if (error) log.warn(`Screen stream stopped: ${error.message}${error.hint ? ` ${error.hint}` : ''}`);
+      if (error) this.event({ type: 'ended', message: error.message, hint: error.hint ?? null });
       for (const client of this.clients) client.res.end();
       this.clients.clear();
+      for (const client of this.videoClients) client.res.end();
+      this.videoClients.clear();
     };
     if (source.kind === 'app') {
       this.app = new AppScreenStream(link, source.projectId, { fps: 20, quality: 72, audio: true }, {
@@ -91,6 +131,21 @@ export class ScreenViewer {
         onEnd,
       });
       this.stream = this.app;
+    } else if (source.kind === 'device') {
+      // The iPhone's screen comes as H.264 only: the page decodes it (WebCodecs).
+      this.video = new ScreenStream(link, source.target.udid, { maxSize: 1400, device: { name: source.target.name } }, {
+        onFrame: () => undefined,
+        onVideo: (packet) => this.sendVideo(packet),
+        onInfo: (info) => this.event({ type: 'info', screen: info }),
+        onWaiting: (wait) => {
+          this.event({ type: 'device-wait', wait });
+          if (wait === 'device') log.info(`Plug ${source.target.name} into the Mac with a cable to see its screen.`);
+          else if (wait === 'permission') log.info(`Click ${pc.bold('Allow')} on the Mac: macOS asks once if CapMac may see the iPhone's screen.`);
+        },
+        onLog: (_level, message) => log.dim(`  screen: ${message}`),
+        onEnd,
+      });
+      this.stream = this.video;
     } else {
       this.stream = new ScreenStream(link, source.target.udid, { fps: 12, quality: 70 }, {
         onFrame: (jpeg) => this.broadcast(jpeg),
@@ -102,8 +157,8 @@ export class ScreenViewer {
 
   static async start(link: MacLink, source: ViewerSource | Target, options: { title: string; port?: number }): Promise<ScreenViewer> {
     const server = http.createServer();
-    // A Target (a simulator) is the usual case; the app's windows come as a ViewerSource.
-    const what: ViewerSource = 'target' in source || source.kind === 'app' ? (source as ViewerSource) : { kind: 'simulator', target: source };
+    // A Target (a simulator, or a plugged-in iPhone) is the usual case; the app's windows come as a ViewerSource.
+    const what: ViewerSource = 'target' in source || source.kind === 'app' ? (source as ViewerSource) : { kind: source.kind === 'device' ? 'device' : 'simulator', target: source };
     const viewer = new ScreenViewer(link, what, options.title, server);
     server.on('request', (req, res) => void viewer.handle(req, res));
     const port = await new Promise<number>((resolve, reject) => {
@@ -164,11 +219,51 @@ export class ScreenViewer {
     }
   }
 
+  /**
+   * The smooth stream, to every page playing it: each message whole, in
+   * order. A page that falls behind skips to the next keyframe instead of
+   * piling up delay; one that joins starts from the newest config and a
+   * fresh keyframe.
+   */
+  private sendVideo({ data, header }: VideoPacket): void {
+    if (header.type === STREAM_CONFIG) {
+      const config = pageConfigMessage(data);
+      if (!config) return;
+      this.videoConfig = config;
+      for (const client of this.videoClients) {
+        client.needsKey = true;
+        this.writeVideo(client, config);
+      }
+      return;
+    }
+    if (header.type !== STREAM_FRAME) return;
+    for (const client of this.videoClients) {
+      if (client.blocked) {
+        client.needsKey = true;
+        continue;
+      }
+      if (client.needsKey) {
+        if (!header.key) continue;
+        client.needsKey = false;
+      }
+      this.writeVideo(client, data);
+    }
+  }
+
+  private writeVideo(client: VideoClient, message: Buffer): void {
+    if (client.res.write(lengthPrefixed(message)) || client.blocked) return;
+    client.blocked = true;
+    client.res.once('drain', () => {
+      client.blocked = false;
+      this.video?.requestKeyframe();
+    });
+  }
+
   private scheduleIdleStop(): void {
-    if (this.clients.size > 0 || this.idleTimer) return;
+    if (this.clients.size > 0 || this.videoClients.size > 0 || this.idleTimer) return;
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
-      if (this.clients.size === 0) this.stream.stop();
+      if (this.clients.size === 0 && this.videoClients.size === 0) this.stream.stop();
     }, 15_000);
   }
 
@@ -189,7 +284,10 @@ export class ScreenViewer {
     return {
       title: this.title,
       target,
+      targetName: this.source.kind === 'app' ? this.source.label : this.source.target.name,
       mode: this.source.kind,
+      // The page plays /video (H.264) instead of /stream (JPEG).
+      video: this.video !== null,
       screen: this.stream.info,
       ...(app ? { windows: app.windows as AppWindowInfo[], watched: app.watched, waiting: app.waiting, cursor: this.cursor, dialogs: app.dialogs, sound: app.sound } : {}),
     };
@@ -231,6 +329,35 @@ export class ScreenViewer {
           this.clients.delete(client);
           this.scheduleIdleStop();
         });
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/video' && this.video) {
+        await this.ensureStream();
+        res.writeHead(200, { 'content-type': 'application/octet-stream', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+        const client: VideoClient = { res, blocked: false, needsKey: true };
+        this.videoClients.add(client);
+        if (this.videoConfig) this.writeVideo(client, this.videoConfig);
+        this.video.requestKeyframe();
+        req.on('close', () => {
+          this.videoClients.delete(client);
+          this.scheduleIdleStop();
+        });
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/keyframe' && this.video) {
+        this.video.requestKeyframe();
+        res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}');
+        return;
+      }
+      if (req.method === 'POST' && url.pathname === '/api/size' && this.video) {
+        const body = await this.readJson(req);
+        if (typeof body.maxSize === 'number' && Number.isFinite(body.maxSize)) this.video.setVideoSize(body.maxSize);
+        res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}');
+        return;
+      }
+      if (req.method === 'GET' && url.pathname === '/api/screenshot.png' && this.video) {
+        const png = await this.video.still();
+        res.writeHead(200, { 'content-type': 'image/png', 'content-length': png.length }).end(png);
         return;
       }
       if (req.method === 'GET' && url.pathname === '/api/info') {
@@ -324,6 +451,7 @@ export class ScreenViewer {
   async close(): Promise<void> {
     this.stream.dispose();
     for (const client of this.clients) client.res.end();
+    for (const client of this.videoClients) client.res.end();
     for (const res of this.logClients) res.end();
     for (const res of this.eventClients) res.end();
     await new Promise<void>((resolve) => this.server.close(() => resolve()));
