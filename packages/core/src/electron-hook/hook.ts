@@ -24,11 +24,19 @@
 import fs from 'node:fs';
 import Module from 'node:module';
 import net from 'node:net';
+import os from 'node:os';
+import { isMainThread, parentPort, Worker, workerData } from 'node:worker_threads';
 import { encodeBinary, encodeJson, FrameDecoder } from '../shared/frames.js';
+import { DialogService, runDialogWorker } from './dialogs.js';
+import { SoundControl } from './sound.js';
 import {
+  dialogSocket,
   ENV_LIVE_SCHEME,
   ENV_LIVE_URL,
+  ENV_PROJECT,
   ENV_SOCKET,
+  ENV_SOUND,
+  isSoundMode,
   frontFile,
   HOOK_MARK,
   KEY_ALT,
@@ -48,6 +56,9 @@ import {
   type HookEvent,
   type HookMessage,
   type HookRequest,
+  formatConsoleArgs,
+  formatConsoleValue,
+  withoutConsoleStyles,
 } from '../shared/electron.js';
 
 /* eslint-disable @typescript-eslint/no-explicit-any -- Electron is loaded at run time from the app's own copy. */
@@ -117,6 +128,12 @@ let virtualFocus: BrowserWindow | null = null;
 /** Tells CapMac's view that another window came forward. */
 let onForward: ((win: BrowserWindow) => void) | null = null;
 const pageFocused = new WeakSet<object>();
+/** The app's dialogs while it is in the background (see dialogs.ts); set with the guard. */
+let dialogs: DialogService | null = null;
+/** The project's folder on the Mac, for file dialogs (the agent says, see ENV_PROJECT). */
+let projectDir: string | null = null;
+/** Where the app's sound plays when it starts (the agent says, see ENV_SOUND; off unless asked). */
+let initialSound: 'off' | 'mac' | 'pc' = 'off';
 
 /** Wraps a method once; a read-only one stays as it is. */
 function wrap(target: any, name: string, make: (original: (...args: any[]) => any) => (...args: any[]) => any): void {
@@ -191,6 +208,24 @@ export function guardFocus(electron: Electron, socketPath: string): void {
     told.add(message);
     report({ e: 'note', message });
   };
+  // A message box or file picker would activate the app: while it is in the background, CapMac shows it instead.
+  dialogs = new DialogService({
+    inBackground,
+    windowId: (win) => {
+      try {
+        return typeof (win as BrowserWindow)?.id === 'number' && !(win as BrowserWindow).isDestroyed() ? (win as BrowserWindow).id : null;
+      } catch {
+        return null;
+      }
+    },
+    appName: () => {
+      try {
+        return String(app.getName());
+      } catch {
+        return '';
+      }
+    },
+  }, { project: projectDir });
 
   /** Shows a window without activating the app: behind every other window (a child window stays on its parent). */
   function showBehind(win: BrowserWindow): void {
@@ -348,6 +383,8 @@ export function guardFocus(electron: Electron, socketPath: string): void {
   app.on('did-become-active', () => {
     active = true;
     remember(true);
+    // Someone at the Mac comes first: dialogs waiting in CapMac show there now.
+    dialogs?.appActivated();
     for (const [win, modes] of pendingScreen) {
       if (win.isDestroyed()) continue;
       for (const mode of modes) {
@@ -377,16 +414,22 @@ export function guardFocus(electron: Electron, socketPath: string): void {
   });
 }
 
-/** The app's own `require('electron')`, with window classes that open windows the guard way. */
+/** The app's own `require('electron')`, with window classes that open windows the guard way, and dialogs that stay off the Mac's screen. */
 export function guardedElectron(electron: Electron): Electron {
   const classes = new Map<unknown, unknown>();
+  let dialogModule: { original: unknown; wrapped: unknown } | null = null;
   return new Proxy(electron, {
     get(target, prop) {
       const value = Reflect.get(target, prop);
-      if ((prop !== 'BrowserWindow' && prop !== 'BaseWindow') || typeof value !== 'function') return value;
       // A proxy may only change what a property it could change reads.
       const own = Object.getOwnPropertyDescriptor(target, prop);
       if (own && !own.configurable && 'value' in own && !own.writable) return value;
+      if (prop === 'dialog' && dialogs && value && typeof value === 'object') {
+        // Electron's dialog module is read-only: the app gets one whose methods go through CapMac.
+        if (!dialogModule || dialogModule.original !== value) dialogModule = { original: value, wrapped: dialogs.wrap(value) };
+        return dialogModule!.wrapped;
+      }
+      if ((prop !== 'BrowserWindow' && prop !== 'BaseWindow') || typeof value !== 'function') return value;
       let guarded = classes.get(value);
       if (!guarded) {
         const proxy: any = new Proxy(value, {
@@ -475,6 +518,26 @@ function start(electron: Electron, socketPath: string): void {
   const clients = new Set<Client>();
   let focusOrder: number[] = [];
 
+  // ─── Sound ─────────────────────────────────────────────────────────────
+
+  const sound = new SoundControl(electron, initialSound, {
+    pages: () => [...windows.values()].filter((w) => w && !w.isDestroyed()).map((w) => w.webContents),
+    onPackets: (packets) => {
+      const data = packets.map((p) => p.toString('base64'));
+      for (const client of clients) if (client.wantsAudio) client.send({ t: 'audio', packets: data });
+    },
+    note: (message) => report({ e: 'note', message }),
+  });
+  /** The clients watching with sound, for the capture. */
+  function listenersChanged(): void {
+    let count = 0;
+    for (const client of clients) if (client.wantsAudio) count += 1;
+    sound.setListeners(count);
+  }
+  function soundChanged(): void {
+    for (const client of clients) if (client.role === 'screen') client.send({ t: 'sound', mode: sound.mode, toPc: sound.canSendToPc });
+  }
+
   // ─── Windows ───────────────────────────────────────────────────────────
 
   const alive = (win: BrowserWindow) => win && !win.isDestroyed();
@@ -553,6 +616,7 @@ function start(electron: Electron, socketPath: string): void {
     windows.set(id, win);
     if (liveUrl) patchLoadUrl(win);
     const wc = win.webContents;
+    sound.track(wc);
     const changed = () => windowsChanged();
     for (const event of ['page-title-updated', 'show', 'hide', 'minimize', 'restore', 'resize', 'maximize', 'unmaximize', 'enter-full-screen', 'leave-full-screen']) win.on(event, changed);
     win.on('focus', () => {
@@ -567,6 +631,7 @@ function start(electron: Electron, socketPath: string): void {
       changed();
     });
     win.once('closed', () => {
+      sound.forget(wc);
       if (virtualFocus === win) virtualFocus = null;
       windows.delete(id);
       focusOrder = focusOrder.filter((other) => other !== id);
@@ -575,12 +640,14 @@ function start(electron: Electron, socketPath: string): void {
       changed();
     });
     wc.on('console-message', (...args: any[]) => {
+      // The DevTools protocol reports this page's console (see consoleOverProtocol).
+      if (protocolConsole.has(wc)) return;
       // Electron 35+: one event object; before: (event, level, message, line, sourceId).
       const e = args[0] ?? {};
       const legacy = typeof args[1] === 'number';
       const levels = ['debug', 'info', 'warning', 'error'] as const;
       const level = legacy ? levels[args[1]] ?? 'info' : (levels as readonly string[]).includes(e.level) ? e.level : 'info';
-      const text = String(legacy ? args[2] : e.message ?? '');
+      const text = withoutConsoleStyles(String(legacy ? args[2] : e.message ?? ''));
       const line = legacy ? args[3] : e.lineNumber;
       const source = legacy ? args[4] : e.sourceId;
       report({ e: 'console', level, text, source: source || undefined, line: typeof line === 'number' && line > 0 ? line : undefined, window: id });
@@ -595,8 +662,101 @@ function start(electron: Electron, socketPath: string): void {
     wc.on('cursor-changed', (_e: unknown, type: string) => {
       for (const client of clients) if (client.watching?.win === win) client.send({ t: 'cursor', cursor: String(type) });
     });
+    consoleOverProtocol(wc, id);
     report({ e: 'window', window: infoOf(win) });
     changed();
+  }
+
+  // ─── The pages' console, through the DevTools protocol ─────────────────
+  //
+  // Electron's console-message event hands over "dispatch [object Object]";
+  // the protocol gives each argument with a preview, so the line reads as in
+  // DevTools: "dispatch {type: 'roll', by: 'red'}". CapMac steps aside when
+  // the app wants the page's debugger itself (it falls back to the event).
+
+  const protocolConsole = new WeakSet<object>();
+  const ownDebugger = new WeakSet<object>();
+  let debuggerGuarded = false;
+  const CONSOLE_LEVELS: Record<string, 'debug' | 'info' | 'warning' | 'error'> = { debug: 'debug', info: 'info', warning: 'warning', error: 'error', assert: 'error', trace: 'info' };
+
+  /** The app attaches its own debugger: CapMac lets go of the page first. */
+  function guardDebugger(dbg: any): void {
+    if (debuggerGuarded) return;
+    debuggerGuarded = true;
+    const proto = Object.getPrototypeOf(dbg);
+    wrap(proto, 'attach', (attach) => function (this: any, ...args: unknown[]) {
+      if (ownDebugger.has(this)) {
+        ownDebugger.delete(this);
+        try {
+          raw.detachDebugger?.call(this);
+        } catch {
+          // gone already
+        }
+      }
+      return attach.apply(this, args);
+    });
+    wrap(proto, 'isAttached', (isAttached) => function (this: any) {
+      return ownDebugger.has(this) ? false : isAttached.call(this);
+    });
+    raw.detachDebugger = proto.detach;
+  }
+
+  function consoleOverProtocol(wc: any, id: number): void {
+    const dbg = wc.debugger;
+    if (!dbg || typeof dbg.attach !== 'function' || typeof dbg.sendCommand !== 'function') return;
+    try {
+      guardDebugger(dbg);
+      if (dbg.isAttached()) return;
+      dbg.attach('1.3');
+    } catch {
+      return;
+    }
+    ownDebugger.add(dbg);
+    let count = 0;
+    // Enabling replays what the page logged before: already reported through the event.
+    const since = Date.now();
+    const report1 = (level: 'debug' | 'info' | 'warning' | 'error', text: string, url?: string, line?: number) =>
+      report({ e: 'console', level, text, source: url || undefined, line: typeof line === 'number' && line >= 0 ? line + 1 : undefined, window: id });
+    const onMessage = (_event: unknown, method: string, params: any) => {
+      try {
+        if (method === 'Runtime.consoleAPICalled') {
+          if (params.timestamp < since || params.type === 'endGroup' || params.type === 'clear' || params.type === 'profile' || params.type === 'profileEnd') return;
+          const frame = params.stackTrace?.callFrames?.[0];
+          const text = params.type === 'assert' ? `Assertion failed: ${formatConsoleArgs(params.args ?? [])}` : formatConsoleArgs(params.args ?? []);
+          report1(CONSOLE_LEVELS[params.type] ?? 'info', text, frame?.url, frame?.lineNumber);
+          // The page keeps what it logged for DevTools: let it go now and then (objects stay alive otherwise).
+          if (++count % 200 === 0) dbg.sendCommand('Runtime.discardConsoleEntries').catch(() => undefined);
+        } else if (method === 'Runtime.exceptionThrown') {
+          const details = params.exceptionDetails ?? {};
+          if (params.timestamp < since) return;
+          const what = details.exception ? formatConsoleValue(details.exception) : details.text;
+          report1('error', /^Uncaught/.test(what) ? what : `Uncaught ${what}`, details.url, details.lineNumber);
+        } else if (method === 'Log.entryAdded') {
+          const entry = params.entry ?? {};
+          if (entry.timestamp < since) return;
+          report1(entry.level === 'verbose' ? 'debug' : CONSOLE_LEVELS[entry.level] ?? 'info', String(entry.text ?? ''), entry.url, entry.lineNumber);
+        }
+      } catch {
+        // a message CapMac does not read
+      }
+    };
+    const stop = () => {
+      protocolConsole.delete(wc);
+      ownDebugger.delete(dbg);
+      dbg.removeListener('message', onMessage);
+      dbg.removeListener('detach', stop);
+    };
+    dbg.on('message', onMessage);
+    dbg.on('detach', stop);
+    protocolConsole.add(wc);
+    Promise.all([dbg.sendCommand('Runtime.enable'), dbg.sendCommand('Log.enable')]).catch(() => {
+      stop();
+      try {
+        dbg.detach();
+      } catch {
+        // gone already
+      }
+    });
   }
 
   // ─── Frames ────────────────────────────────────────────────────────────
@@ -903,6 +1063,8 @@ function start(electron: Electron, socketPath: string): void {
   class Client {
     role: 'screen' | 'control' = 'control';
     watching: Subscription | null = null;
+    /** Wants the app's sound when it plays on the PC. */
+    wantsAudio = false;
     /** The window the client asked for (null: follow the focused one). */
     pinned: number | null = null;
     private maxSize = 1400;
@@ -964,6 +1126,20 @@ function start(electron: Electron, socketPath: string): void {
             this.quality = Math.min(95, Math.max(30, Number(request.quality) || 70));
             this.pinned = typeof request.window === 'number' ? request.window : null;
             this.follow();
+            if (this.wantsAudio !== (this.role === 'screen' && Boolean(request.audio))) {
+              this.wantsAudio = !this.wantsAudio;
+              listenersChanged();
+            }
+            this.send({ t: 'sound', mode: sound.mode, toPc: sound.canSendToPc });
+            break;
+          case 'sound':
+            if (isSoundMode(request.mode)) {
+              sound.setMode(request.mode);
+              soundChanged();
+              this.reply(request.id, true, sound.mode);
+            } else {
+              this.reply(request.id, false, undefined, 'Not a sound setting');
+            }
             break;
           case 'unwatch':
             this.stopWatching();
@@ -1105,6 +1281,7 @@ function start(electron: Electron, socketPath: string): void {
       this.closed = true;
       this.stopWatching();
       clients.delete(this);
+      if (this.wantsAudio) listenersChanged();
       this.socket.destroy();
     }
   }
@@ -1195,12 +1372,21 @@ function start(electron: Electron, socketPath: string): void {
     chrome: process.versions.chrome ?? '',
     node: process.versions.node ?? '',
     socket: listening ? socketPath : null,
+    dialogs: dialogs?.socketPath ?? null,
+    sound: sound.mode,
+    soundToPc: sound.canSendToPc,
   });
+
+  // The dialogs' own socket, served by a worker thread (this same file, see the end).
+  const dialogPath = dialogSocket(socketPath);
+  const dialogsReady = dialogs
+    ? dialogs.start(() => (HOOK_FILE ? new Worker(HOOK_FILE, { workerData: { capmacDialogs: { socket: dialogPath, home: os.homedir(), project: projectDir } } }) : null))
+    : Promise.resolve(null);
 
   const server = net.createServer((socket) => new Client(socket));
   server.on('error', (err) => {
     report({ e: 'error', message: `CapMac could not show the app's windows: ${err.message}` });
-    report({ e: 'hello', ...appInfo() });
+    void dialogsReady.then(() => report({ e: 'hello', ...appInfo() }));
   });
   try {
     fs.rmSync(socketPath, { force: true });
@@ -1214,7 +1400,7 @@ function start(electron: Electron, socketPath: string): void {
     } catch {
       // the folder is private anyway
     }
-    report({ e: 'hello', ...appInfo() });
+    void dialogsReady.then(() => report({ e: 'hello', ...appInfo() }));
   });
   server.unref();
 
@@ -1231,22 +1417,35 @@ function start(electron: Electron, socketPath: string): void {
   app.once('will-quit', () => {
     for (const client of [...clients]) client.close();
     server.close();
-    try {
-      fs.rmSync(socketPath, { force: true });
-    } catch {
-      // gone
+    dialogs?.stop();
+    sound.stop();
+    for (const file of [socketPath, dialogPath]) {
+      try {
+        fs.rmSync(file, { force: true });
+      } catch {
+        // gone
+      }
     }
   });
 }
 
-if (process.versions.electron && (process as { type?: string }).type === 'browser' && process.env[ENV_SOCKET]) {
+/** This file, which also runs the dialogs' worker thread (null when loaded from source, in tests). */
+const HOOK_FILE: string | null = typeof __filename === 'string' && /\.c?js$/.test(__filename) ? __filename : null;
+const DIALOG_WORKER = Symbol.for('capmac.dialogWorker');
+
+if (isMainThread && process.versions.electron && (process as { type?: string }).type === 'browser' && process.env[ENV_SOCKET]) {
   const socketPath = process.env[ENV_SOCKET]!;
+  projectDir = process.env[ENV_PROJECT] || null;
+  const sound = process.env[ENV_SOUND];
+  if (isSoundMode(sound)) initialSound = sound;
   // Only this process: Node.js processes the app starts must not load CapMac.
   try {
     const options = (process.env.NODE_OPTIONS ?? '').replace(/--require[= ]+("[^"]*capmac[^"]*"|\S*capmac\S*)/g, '').trim();
     if (options) process.env.NODE_OPTIONS = options;
     else delete process.env.NODE_OPTIONS;
     delete process.env[ENV_SOCKET];
+    delete process.env[ENV_PROJECT];
+    delete process.env[ENV_SOUND];
   } catch {
     // read-only environment
   }
@@ -1262,5 +1461,16 @@ if (process.versions.electron && (process as { type?: string }).type === 'browse
     } catch (err) {
       report({ e: 'error', message: `CapMac could not attach to the app: ${String((err as Error)?.message ?? err)}` });
     }
+  });
+}
+
+// The dialogs' worker thread (started by `start` with this file). A worker also loads
+// the preloads of NODE_OPTIONS, so this file may run twice in it: the flag keeps one.
+if (!isMainThread && parentPort && (workerData as { capmacDialogs?: unknown } | null)?.capmacDialogs && !(globalThis as Record<symbol, unknown>)[DIALOG_WORKER]) {
+  (globalThis as Record<symbol, unknown>)[DIALOG_WORKER] = true;
+  const port = parentPort;
+  runDialogWorker((workerData as { capmacDialogs: { socket: string; home: string; project: string | null } }).capmacDialogs, {
+    postMessage: (message) => port.postMessage(message),
+    on: (event, listener) => port.on(event, listener),
   });
 }

@@ -1,10 +1,13 @@
-import { loadApiKey, loadProject, MacLink, requireElectron, requireIos, runApp, runElectronApp, runsOnMac, UserError, type ProjectInfo } from '@capmac/core/engine';
+import type { SoundMode } from '@capmac/core/shared/electron';
+import { answerAppDialog, loadApiKey, loadProject, MacLink, requireElectron, requireIos, runApp, runElectronApp, runsOnMac, UserError, type ProjectInfo } from '@capmac/core/engine';
 import { cancelOnSigint } from '../cli-context.js';
 import { terminalContext } from '../terminal.js';
 import { log } from '../ui.js';
 
 export interface RunOptions {
   mac?: string;
+  /** An Electron app's sound (remembered for the project). */
+  sound?: SoundMode;
   target?: string;
   device?: boolean;
   simulator?: boolean;
@@ -74,8 +77,10 @@ async function runOnMac(project: ProjectInfo, options: RunOptions): Promise<void
   if (options.logs === false) {
     throw new UserError('An Electron app runs while CapMac is attached to it.', 'Use `capmac run --for 20` to launch it, show its console for 20 seconds, then quit it.');
   }
-  const { ctx } = terminalContext({ mode: 'run', platform: 'electron', allWarnings: options.allWarnings, attach: true });
+  const { ctx, reporter } = terminalContext({ mode: 'run', platform: 'electron', allWarnings: options.allWarnings, attach: true });
   const link = new MacLink(options.mac ?? project.config.host, ctx, { autoReconnect: false });
+  // The app's dialogs stay off the Mac's screen: answered here.
+  reporter.onDialogAnswer = async (dialog, answer) => answerAppDialog(await link.session(), project.projectId, dialog.id, answer);
   const seconds = parseSeconds(options.for);
   const controller = new AbortController();
   const restore = cancelOnSigint(controller, 'Quitting the app…');
@@ -87,7 +92,7 @@ async function runOnMac(project: ProjectInfo, options: RunOptions): Promise<void
     }, seconds * 1000);
   };
   try {
-    await runElectronApp(project, link, { full: options.full || options.clean, webBuild: options.webBuild, onReady }, ctx, controller.signal);
+    await runElectronApp(project, link, { full: options.full || options.clean, webBuild: options.webBuild, onReady, sound: options.sound }, ctx, controller.signal);
   } finally {
     clearTimeout(timer);
     restore();

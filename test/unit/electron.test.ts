@@ -22,6 +22,8 @@ import {
   parseAppLine,
   ROLE_ACCELERATORS,
   typedText,
+  formatConsoleArgs,
+  withoutConsoleStyles,
 } from '../../packages/core/src/shared/electron.js';
 import { JsDiagnosticParser } from '../../packages/core/src/shared/js-diagnostics.js';
 
@@ -79,6 +81,55 @@ describe('menu shortcuts, the way macOS matches them', () => {
     expect(matchesAccelerator(zoomIn, '=', 'Equal', KEY_META)).toBe(true);
     expect(matchesAccelerator(zoomIn, '+', 'Equal', KEY_META | KEY_SHIFT)).toBe(true);
     expect(matchesAccelerator(zoomIn, '-', 'Minus', KEY_META)).toBe(false);
+  });
+});
+
+describe('console styling (%c)', () => {
+  it('drops the CSS Electron joins into the line', () => {
+    expect(withoutConsoleStyles('%c[sys 1.90s] color:#9aa0a6 analytics: enabled G-9SL0KCGK9Y platform=electron')).toBe('[sys 1.90s] analytics: enabled G-9SL0KCGK9Y platform=electron');
+    expect(withoutConsoleStyles('%cElectron Security Warning (Insecure Content-Security-Policy) font-weight: bold; This renderer process has')).toBe('Electron Security Warning (Insecure Content-Security-Policy) This renderer process has');
+    expect(withoutConsoleStyles('%cDownload the React DevTools: https://reactjs.org/link/react-devtools font-weight:bold')).toBe('Download the React DevTools: https://reactjs.org/link/react-devtools');
+    expect(withoutConsoleStyles('%cHi%c there color: red; font-size: 14px background: #222; padding: 2px 4px')).toBe('Hi there');
+    expect(withoutConsoleStyles('%c[game 260.62s] color:#7bd88f dispatch [object Object] [local]')).toBe('[game 260.62s] dispatch [object Object] [local]');
+    expect(withoutConsoleStyles('%cBox border: 1px solid #ccc; color: blue the rest')).toBe('Box the rest');
+  });
+
+  it('leaves lines without %c alone', () => {
+    expect(withoutConsoleStyles('color: red is my favourite')).toBe('color: red is my favourite');
+    expect(withoutConsoleStyles('100% done')).toBe('100% done');
+  });
+});
+
+describe('console lines from the DevTools protocol', () => {
+  const str = (value: string) => ({ type: 'string', value });
+  it('shows objects the way DevTools does, styling dropped', () => {
+    const action = {
+      type: 'object',
+      className: 'Object',
+      description: 'Object',
+      preview: { type: 'object', description: 'Object', overflow: false, properties: [{ name: 'type', type: 'string', value: 'roll' }, { name: 'n', type: 'number', value: '3' }, { name: 'meta', type: 'object', value: 'Object' }, { name: 'list', type: 'object', subtype: 'array', value: 'Array(2)' }, { name: 'gone', type: 'object', subtype: 'null', value: 'null' }] },
+    };
+    expect(formatConsoleArgs([str('%c[game 1s]'), str('color:#7bd88f'), str('dispatch'), action])).toBe("[game 1s] dispatch {type: 'roll', n: 3, meta: {…}, list: Array(2), gone: null}");
+  });
+
+  it('shows arrays, maps, class instances, errors and plain values', () => {
+    const array = { type: 'object', subtype: 'array', description: 'Array(3)', preview: { type: 'object', subtype: 'array', description: 'Array(3)', overflow: false, properties: [{ name: '0', type: 'number', value: '1' }, { name: '1', type: 'string', value: 'two' }, { name: '2', type: 'boolean', value: 'true' }] } };
+    expect(formatConsoleArgs([array])).toBe("[1, 'two', true]");
+    const long = { type: 'object', subtype: 'array', description: 'Array(500)', preview: { type: 'object', subtype: 'array', description: 'Array(500)', overflow: true, properties: [{ name: '0', type: 'number', value: '0' }] } };
+    expect(formatConsoleArgs([long])).toBe('[0, …]');
+    const map = { type: 'object', subtype: 'map', description: 'Map(1)', preview: { type: 'object', subtype: 'map', description: 'Map(1)', overflow: false, entries: [{ key: { type: 'string', description: 'a' }, value: { type: 'number', description: '1' } }] } };
+    expect(formatConsoleArgs([map])).toBe("Map(1) {'a' => 1}");
+    const pawn = { type: 'object', className: 'Pawn', description: 'Pawn', preview: { type: 'object', description: 'Pawn', overflow: false, properties: [{ name: 'color', type: 'string', value: 'red' }] } };
+    expect(formatConsoleArgs([pawn])).toBe("Pawn {color: 'red'}");
+    expect(formatConsoleArgs([{ type: 'object', subtype: 'error', className: 'TypeError', description: 'TypeError: x is not a function\n    at go (app.js:3:9)' }])).toBe('TypeError: x is not a function\n    at go (app.js:3:9)');
+    expect(formatConsoleArgs([{ type: 'object', subtype: 'null', value: null }, { type: 'undefined' }, { type: 'boolean', value: false }, { type: 'number', unserializableValue: 'NaN', description: 'NaN' }, { type: 'bigint', unserializableValue: '10n', description: '10n' }])).toBe('null undefined false NaN 10n');
+    expect(formatConsoleArgs([{ type: 'function', description: 'function go() {\n  return 1;\n}' }])).toBe('function go() {');
+  });
+
+  it('fills in the format string', () => {
+    expect(formatConsoleArgs([str('%d items at %s, %f%% done'), { type: 'number', value: 3.7, description: '3.7' }, str('noon'), { type: 'number', value: 0.5, description: '0.5' }])).toBe('3 items at noon, 0.5% done');
+    expect(formatConsoleArgs([str('100% sure'), str('really')])).toBe('100% sure really');
+    expect(formatConsoleArgs([str('%s and %s'), str('one')])).toBe('one and %s');
   });
 });
 

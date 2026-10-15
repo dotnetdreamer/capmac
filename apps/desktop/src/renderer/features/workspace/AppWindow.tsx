@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react';
 import { CSS_CURSORS, macModifiers } from '@capmac/core/shared/electron';
-import type { AppWindowInfo, ErrorInfo, InputEvent, MacSummary, ScreenInfo } from '../../../shared/contract';
+import type { AppDialog, AppWindowInfo, ErrorInfo, InputEvent, MacSummary, ScreenInfo, SoundMode } from '../../../shared/contract';
 import { t, tidy } from '../../../shared/i18n';
 import { workspaceBus, type WorkspaceAction } from '../../app/commands';
 import { reloadApp, startSession } from '../../state/actions';
@@ -9,6 +9,7 @@ import { call, errorInfo } from '../../state/engine';
 import { useMacs } from '../../state/macs';
 import { useProject } from '../../state/projects';
 import { isActive, isBusy, MAC_TARGET_ID, type RunState } from '../../state/runs';
+import { AppAudioPlayer } from '../../lib/app-audio';
 import { claimScreenPort } from '../../lib/screen-ports';
 import { Button, IconButton } from '../../ui/Button';
 import { EmptyState, Spinner, StatusDot } from '../../ui/Feedback';
@@ -16,6 +17,7 @@ import { Icon } from '../../ui/Icon';
 import { Menu, Popover, usePopover } from '../../ui/Popover';
 import { Rich } from '../../ui/Rich';
 import { Tooltip } from '../../ui/Tooltip';
+import { AppDialogLayer, type AppDialogCommand } from './AppDialog';
 
 type StreamState = { kind: 'connecting' } | { kind: 'streaming' } | { kind: 'reconnecting' } | { kind: 'ended'; error?: ErrorInfo };
 
@@ -75,6 +77,14 @@ function AppScreen({ mac, path, frame, live, label, appName }: { mac: string; pa
   const [hasFrame, setHasFrame] = useState(false);
   const [epoch, setEpoch] = useState(0);
   const [typed, setTyped] = useState('');
+  // The app's dialogs, answered here while the app is in the background on the Mac.
+  const [dialogs, setDialogs] = useState<AppDialog[]>([]);
+  // Where the app's sound plays; on this PC, it plays here.
+  const [sound, setSound] = useState<{ mode: SoundMode; toPc: boolean } | null>(null);
+  const player = useRef<AppAudioPlayer | null>(null);
+  const soundMenu = usePopover();
+  const replies = useRef(new Map<number, { resolve: (data: unknown) => void; reject: (err: Error) => void; timer: number }>());
+  const nextReq = useRef(1);
   const typePopover = usePopover();
   const shotMenu = usePopover();
   const windowMenu = usePopover();
@@ -124,6 +134,26 @@ function AppScreen({ mac, path, frame, live, label, appName }: { mac: string; pa
           // Copied in the app: it is on this PC's clipboard too.
           void navigator.clipboard.writeText(m.text).then(() => toast({ tone: 'success', title: t.appWindow.copied }), () => undefined);
           break;
+        case 'dialogs':
+          setDialogs(m.dialogs);
+          break;
+        case 'sound':
+          setSound({ mode: m.mode, toPc: m.toPc });
+          if (m.mode === 'pc') (player.current ??= new AppAudioPlayer()).start();
+          else player.current?.stop();
+          break;
+        case 'audio':
+          for (const packet of m.packets) player.current?.push(packet);
+          break;
+        case 'dialog-reply': {
+          const waiting = replies.current.get(m.req);
+          if (!waiting) break;
+          replies.current.delete(m.req);
+          window.clearTimeout(waiting.timer);
+          if (m.ok) waiting.resolve(m.data);
+          else waiting.reject(new Error(m.error ?? ''));
+          break;
+        }
         case 'state':
           setState(m.state === 'ended' ? { kind: 'ended', error: m.error } : { kind: m.state });
           break;
@@ -146,11 +176,20 @@ function AppScreen({ mac, path, frame, live, label, appName }: { mac: string; pa
         if (!disposed) setState({ kind: 'ended', error: errorInfo(err) });
       }
     })();
+    const pending = replies.current;
     return () => {
       disposed = true;
       worker.terminate();
       canvas.remove();
       workerRef.current = null;
+      for (const waiting of pending.values()) {
+        window.clearTimeout(waiting.timer);
+        waiting.reject(new Error(t.appWindow.stopped));
+      }
+      pending.clear();
+      setDialogs([]);
+      player.current?.stop();
+      player.current = null;
       if (streamId) void call('screen.stop', { streamId }).catch(() => undefined);
     };
   }, [mac, path, epoch]);
@@ -209,6 +248,8 @@ function AppScreen({ mac, path, frame, live, label, appName }: { mac: string; pa
   const pressed = useRef(0);
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    // A click lets the page play sound (browsers wait for one).
+    if (sound?.mode === 'pc') player.current?.start();
     if (!canInput) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -296,6 +337,28 @@ function AppScreen({ mac, path, frame, live, label, appName }: { mac: string; pa
     send({ kind: 'text', text: text.slice(0, 20_000), via: 'paste' });
   };
 
+  const dialogRequest = useCallback(
+    (command: AppDialogCommand) =>
+      new Promise<unknown>((resolve, reject) => {
+        const worker = workerRef.current;
+        if (!worker) return reject(new Error(t.appWindow.stopped));
+        const req = nextReq.current++;
+        const timer = window.setTimeout(() => {
+          replies.current.delete(req);
+          reject(new Error(t.appWindow.stopped));
+        }, 20_000);
+        replies.current.set(req, { resolve, reject, timer });
+        worker.postMessage({ type: 'dialog', command: { ...command, req } });
+      }),
+    [],
+  );
+
+  const chooseSound = (mode: SoundMode) => {
+    if (mode === 'pc') (player.current ??= new AppAudioPlayer()).start();
+    workerRef.current?.postMessage({ type: 'dialog', command: { type: 'sound', mode } });
+  };
+  const soundLabel = sound?.mode === 'pc' ? t.appWindow.soundPc : sound?.mode === 'mac' ? t.appWindow.soundMac : t.appWindow.soundOff;
+
   const windowAction = (action: 'close' | 'minimize' | 'zoom') => {
     if (watched !== null) workerRef.current?.postMessage({ type: 'window-action', window: watched, action });
   };
@@ -347,6 +410,7 @@ function AppScreen({ mac, path, frame, live, label, appName }: { mac: string; pa
               onBlur={releaseAll}
             />
             {frame && bar === 0 && current && <TrafficLights onAction={windowAction} overlay />}
+            {dialogs.length > 0 && !ended && <AppDialogLayer dialogs={dialogs} request={dialogRequest} />}
             {(!hasFrame || ended || reconnecting || waiting || noWindow) && (
               <div className={`sim__overlay${(reconnecting || waiting) && hasFrame ? ' is-dimmed' : ''}`}>
                 {ended ? (
@@ -426,6 +490,20 @@ function AppScreen({ mac, path, frame, live, label, appName }: { mac: string; pa
           items={[
             { id: 'save', label: t.simulator.saveShot, icon: 'download', shortcut: 'Ctrl+Shift+S', onSelect: () => void screenshot(mac, path, watched, 'save') },
             { id: 'copy', label: t.simulator.copyShot, icon: 'copy', onSelect: () => void screenshot(mac, path, watched, 'copy') },
+          ]}
+        />
+        <button type="button" className="icon-btn icon-btn--sm" aria-label={t.appWindow.soundNow(soundLabel)} title={t.appWindow.soundNow(soundLabel)} aria-haspopup="menu" disabled={!sound} {...soundMenu.triggerProps}>
+          <Icon name={sound && sound.mode !== 'off' ? 'speaker' : 'speakerOff'} size={16} />
+        </button>
+        <Menu
+          state={soundMenu}
+          label={t.appWindow.sound}
+          placement="top-start"
+          width={240}
+          items={[
+            { id: 'off', label: t.appWindow.soundOff, hint: t.appWindow.soundOffHint, checked: sound?.mode === 'off', onSelect: () => chooseSound('off') },
+            { id: 'mac', label: t.appWindow.soundMac, hint: t.appWindow.soundMacHint, checked: sound?.mode === 'mac', onSelect: () => chooseSound('mac') },
+            { id: 'pc', label: t.appWindow.soundPc, hint: sound?.toPc === false ? t.appWindow.soundNeedsNewer : t.appWindow.soundPcHint, checked: sound?.mode === 'pc', disabled: sound?.toPc === false, onSelect: () => chooseSound('pc') },
           ]}
         />
         {live && <IconButton icon="refresh" size="sm" label={t.toolbar.reloadApp} disabled={!canInput} onClick={() => void reloadApp(path)} />}

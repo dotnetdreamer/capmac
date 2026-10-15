@@ -130,6 +130,8 @@ function updateVisibility(): void {
 // ─── Engine events: relay to the window, drive tray and notifications ─────
 
 const launchedAt = new Map<string, number>();
+/** An Electron app's dialogs already announced, per project. */
+const dialogsSeen = new Map<string, Set<number>>();
 
 function onEngineEvents(batch: Envelope[]): void {
   send('engine:events', batch);
@@ -167,6 +169,23 @@ function onEngineEvents(batch: Envelope[]): void {
       case 'ipa-ready':
         notify(t.ipa.ready, path.basename(event.file), () => shell.showItemInFolder(event.file));
         break;
+      case 'app-dialogs': {
+        // An Electron app asks something (over its window, in the pane): flash the taskbar and say so, without taking the keyboard.
+        const seen = dialogsSeen.get(event.projectId) ?? new Set<number>();
+        dialogsSeen.set(event.projectId, seen);
+        const open = new Set(event.dialogs.map((d) => d.id));
+        for (const id of [...seen]) if (!open.has(id)) seen.delete(id);
+        const fresh = event.dialogs.find((d) => !seen.has(d.id));
+        for (const d of event.dialogs) seen.add(d.id);
+        if (fresh && win && !win.isDestroyed() && !win.isFocused()) {
+          const app = fresh.app || (scope.projectPath ? projectName(scope.projectPath) : t.common.theApp);
+          const body = fresh.kind === 'message' ? t.appDialog.asks(app, fresh.message || fresh.title || t.appDialog.message) : fresh.kind === 'save' ? t.appDialog.wantsSave(app) : t.appDialog.wantsFile(app);
+          if (!win.isVisible()) win.showInactive();
+          win.flashFrame(true);
+          notify(t.appDialog.waiting(app), body, scope.projectPath ? () => command({ type: 'open-project', path: scope.projectPath! }) : undefined);
+        }
+        break;
+      }
       default:
         break;
     }

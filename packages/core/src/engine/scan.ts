@@ -22,6 +22,13 @@ export interface ScanOptions {
   excludeElectron?: boolean;
   include?: string[];
   exclude?: string[];
+  /**
+   * Capacitor projects: this PC builds the web app, so nothing on the Mac
+   * reads videos, design files or other very large files outside the folders
+   * it builds from (POSIX paths from root: the web assets, the native
+   * platforms, local dependencies). They stay on the PC (see ScanResult.leftOnPc).
+   */
+  macBuildsFrom?: string[];
   cacheFile?: string;
 }
 
@@ -39,6 +46,8 @@ export interface ScanResult {
   files: LocalFile[];
   hashed: number;
   skippedSymlinks: number;
+  /** Files kept on this PC because no build on the Mac reads them (see ScanOptions.macBuildsFrom). */
+  leftOnPc: Array<{ rel: string; size: number }>;
   ms: number;
 }
 
@@ -56,6 +65,13 @@ const IOS_EXCLUDES = [
 ];
 const SCRIPT_EXT = /\.(sh|bash|zsh|command)$/i;
 const SMALL = 4 * 1024 * 1024;
+/** Videos, raw audio, design sources and disk images: no install or native build reads them. */
+const MEDIA_EXT = /\.(mp4|m4v|mov|qt|webm|mkv|avi|wmv|flv|mpe?g|3gp|mts|m2ts|mxf|wav|aiff?|flac|psd|psb|ai|sketch|fig|xd|afdesign|afphoto|kra|xcf|blend|c4d|aep|aepx|prproj|drp|mogrt|tiff?|heic|exr|hdr|raw|cr2|nef|dng|dmg|iso)$/i;
+/** Pictures (screenshots, renders) this big outside those folders stay on the PC as well. */
+const IMAGE_EXT = /\.(png|jpe?g|gif|webp|bmp)$/i;
+const LARGE_IMAGE = 2 * 1024 * 1024;
+/** Any file this big outside the folders the Mac builds from stays on the PC too. */
+const LARGE = 100 * 1024 * 1024;
 
 type CacheEntry = [size: number, mtimeMs: number, hash: string, flags: number];
 interface HashCache {
@@ -132,6 +148,15 @@ export async function scanProject(options: ScanOptions): Promise<ScanResult> {
   } catch {
     // optional
   }
+  const buildRoots = options.macBuildsFrom?.map((rel) => rel.replace(/^\.?\/+|\/+$/g, ''));
+  /** Outside every folder the Mac builds from, and not asked for (`!path` in .capmacignore, or sync.include). */
+  const mayStayOnPc = (rel: string): boolean => {
+    if (!buildRoots || buildRoots.some((base) => under(rel, base))) return false;
+    // A local plugin's native folders (its sounds and videos ship in the app).
+    if (/(^|\/)(ios|electron)\//.test(rel)) return false;
+    if (userExclude.test(rel).unignored) return false;
+    return !(hasUserInclude && userInclude.ignores(rel));
+  };
 
   type Level = { base: string; ig: Ignore };
 
@@ -169,7 +194,8 @@ export async function scanProject(options: ScanOptions): Promise<ScanResult> {
     return true;
   };
 
-  const found: Array<{ rel: string; abs: string; size: number; mtimeMs: number }> = [];
+  const found: Array<{ rel: string; abs: string; optional: boolean }> = [];
+  const leftOnPc: ScanResult['leftOnPc'] = [];
   let skippedSymlinks = 0;
 
   const walk = async (dirAbs: string, dirRel: string, levels: Level[]): Promise<void> => {
@@ -204,7 +230,7 @@ export async function scanProject(options: ScanOptions): Promise<ScanResult> {
       }
       if (!entry.isFile()) continue;
       if (excluded(rel, false, current)) continue;
-      found.push({ rel, abs, size: 0, mtimeMs: 0 });
+      found.push({ rel, abs, optional: mayStayOnPc(rel) });
     }
     await Promise.all(subdirs);
   };
@@ -221,6 +247,10 @@ export async function scanProject(options: ScanOptions): Promise<ScanResult> {
     try {
       st = await fs.stat(item.abs);
     } catch {
+      return;
+    }
+    if (item.optional && (MEDIA_EXT.test(item.rel) || st.size > LARGE || (st.size > LARGE_IMAGE && IMAGE_EXT.test(item.rel)))) {
+      leftOnPc.push({ rel: item.rel, size: st.size });
       return;
     }
     const cached = cache.files[item.rel];
@@ -261,5 +291,6 @@ export async function scanProject(options: ScanOptions): Promise<ScanResult> {
   }
 
   files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
-  return { files, hashed, skippedSymlinks, ms: Date.now() - started };
+  leftOnPc.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
+  return { files, hashed, skippedSymlinks, leftOnPc, ms: Date.now() - started };
 }

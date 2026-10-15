@@ -1,4 +1,5 @@
-import { ElectronLiveSession, LiveSession, loadApiKey, loadProject, MacLink, requireElectron, requireIos, runsOnMac, type ProjectInfo } from '@capmac/core/engine';
+import { SOUND_MODES, type SoundMode } from '@capmac/core/shared/electron';
+import { answerAppDialog, ElectronLiveSession, LiveSession, loadApiKey, loadProject, MacLink, requireElectron, requireIos, runsOnMac, soundFor, type ProjectInfo } from '@capmac/core/engine';
 import { listenForKeys } from '../keys.js';
 import { reportError } from '../report.js';
 import { terminalContext } from '../terminal.js';
@@ -7,6 +8,8 @@ import { ScreenViewer } from '../viewer/server.js';
 
 export interface DevOptions {
   mac?: string;
+  /** An Electron app's sound (remembered for the project). */
+  sound?: SoundMode;
   target?: string;
   device?: boolean;
   simulator?: boolean;
@@ -32,6 +35,10 @@ export interface DevOptions {
 
 function printKeys(): void {
   log.line(pc.dim(`  press ${pc.bold('r')} rebuild · ${pc.bold('R')} clean rebuild · ${pc.bold('l')} relaunch · ${pc.bold('o')} open screen · ${pc.bold('c')} clear · ${pc.bold('q')} quit`));
+}
+
+function printElectronKeys(): void {
+  log.line(pc.dim(`  press ${pc.bold('r')} rebuild · ${pc.bold('R')} clean rebuild · ${pc.bold('l')} relaunch · ${pc.bold('o')} open window · ${pc.bold('s')} sound · ${pc.bold('c')} clear · ${pc.bold('q')} quit`));
 }
 
 /** Runs until q or Ctrl+C (also while starting up), then stops the session. */
@@ -103,9 +110,19 @@ export async function devCommand(options: DevOptions): Promise<void> {
 async function devOnMac(project: ProjectInfo, options: DevOptions): Promise<void> {
   requireElectron(project);
   const { ctx, reporter } = terminalContext({ mode: 'dev', platform: 'electron', allWarnings: options.allWarnings });
-  reporter.onAppRunning = printKeys;
+  reporter.onAppRunning = printElectronKeys;
   const link = new MacLink(options.mac ?? project.config.host, ctx, { autoReconnect: true });
-  const live = new ElectronLiveSession(project, link, { url: options.url, devCommand: options.devCommand, full: options.full || options.clean, watch: options.watch }, ctx);
+  const live = new ElectronLiveSession(project, link, { url: options.url, devCommand: options.devCommand, full: options.full || options.clean, watch: options.watch, sound: options.sound }, ctx);
+  let sound = await soundFor(project.projectId, options.sound);
+  const SOUND_WORDS: Record<SoundMode, string> = { off: 'off', mac: 'on the Mac', pc: 'on this PC (in the window viewer: press o)' };
+  /** s: the app's sound off, on the Mac, on this PC, and round again. */
+  const nextSound = () => {
+    sound = SOUND_MODES[(SOUND_MODES.indexOf(sound) + 1) % SOUND_MODES.length]!;
+    log.info(`Sound: ${SOUND_WORDS[sound]}`);
+    live.setSound(sound).catch((err: Error) => log.warn(`Could not change the sound: ${err.message}`));
+  };
+  // The app's dialogs stay off the Mac's screen: answered here or in the viewer.
+  reporter.onDialogAnswer = async (dialog, answer) => answerAppDialog(await link.session(), project.projectId, dialog.id, answer);
   let viewer: ScreenViewer | null = null;
   const openScreen = async () => {
     const target = live.target;
@@ -123,7 +140,7 @@ async function devOnMac(project: ProjectInfo, options: DevOptions): Promise<void
   };
   await untilQuit(
     () => live.start(),
-    { r: () => live.rebuild(), R: () => live.rebuild({ clean: true }), l: () => live.relaunch(), o: () => void openScreen() },
+    { r: () => live.rebuild(), R: () => live.rebuild({ clean: true }), l: () => live.relaunch(), o: () => void openScreen(), s: nextSound },
     () => {
       if (options.screen) void openScreen();
     },

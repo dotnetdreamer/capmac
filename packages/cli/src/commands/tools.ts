@@ -15,6 +15,7 @@ import {
   electronPlan,
   macTarget,
   runsOnMac,
+  largestFolders,
   scanOptionsFor,
   scanProject,
   streamAppLogs,
@@ -28,6 +29,7 @@ import { cancelOnSigint, openForProject, type MacOption } from '../cli-context.j
 import { reportError } from '../report.js';
 import { terminalContext } from '../terminal.js';
 import { canPrompt, confirm, formatBytes, log, pc, plural } from '../ui.js';
+import type { SoundMode } from '@capmac/core/shared/electron';
 import { ScreenViewer } from '../viewer/server.js';
 
 function targetRow(t: Target, nameWidth: number): string {
@@ -130,6 +132,13 @@ export async function infoCommand(options: { files?: boolean; live?: boolean }):
   if (groups.size > 15) log.dim(`  … and ${groups.size - 15} more`);
   if (options.files) for (const f of scan.files) log.line(`  ${f.rel}${f.mode === 0o755 ? pc.dim('  (executable)') : ''}`);
   else log.dim('  (list every file with --files; exclude more with a .capmacignore file)');
+  if (scan.leftOnPc.length > 0) {
+    const kept = scan.leftOnPc.reduce((sum, f) => sum + f.size, 0);
+    log.line();
+    log.line(`${pc.bold('Kept on this PC')} ${plural(scan.leftOnPc.length, 'file')} (${formatBytes(kept)}): videos, design and large files nothing on the Mac reads`);
+    for (const g of largestFolders(scan.leftOnPc, 5)) log.line(`  ${`${g.folder}/`.padEnd(40)} ${String(g.files).padStart(6)} files  ${formatBytes(g.bytes).padStart(9)}`);
+    log.dim('  (send one anyway with a `!path` line in .capmacignore)');
+  }
 }
 
 export async function syncCommand(options: MacOption & { live?: boolean; full?: boolean; prepare?: boolean }): Promise<void> {
@@ -242,7 +251,7 @@ export async function logsCommand(options: MacOption & { target?: string }): Pro
   }
 }
 
-export async function screenCommand(options: MacOption & { target?: string; port?: string; open?: boolean; electron?: boolean }): Promise<void> {
+export async function screenCommand(options: MacOption & { target?: string; port?: string; open?: boolean; electron?: boolean; sound?: SoundMode }): Promise<void> {
   const { ctx } = terminalContext();
   const project = await loadProject(process.cwd());
   const link = new MacLink(options.mac ?? project.config.host, ctx, { autoReconnect: true });
@@ -253,6 +262,7 @@ export async function screenCommand(options: MacOption & { target?: string; port
       // The Electron app's window: it shows once the app runs (`capmac run` or `capmac dev` in another terminal).
       const title = `${project.appName} · ${session.label}`;
       viewer = await ScreenViewer.start(link, { kind: 'app', projectId: project.projectId, label: session.label }, { title, port: options.port ? Number(options.port) : undefined });
+      if (options.sound) await viewer.setSound(options.sound);
       if (options.open !== false) viewer.open();
       log.dim(`Shows ${project.appName}'s window while it runs on the Mac. Press Ctrl+C to stop.`);
       await new Promise<void>((resolve) => process.once('SIGINT', () => resolve()));

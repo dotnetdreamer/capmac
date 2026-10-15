@@ -5,6 +5,7 @@ import { capmacDir } from './config.js';
 import { log, startStep, type EngineContext } from './context.js';
 import { isCancelled } from './errors.js';
 import { formatBytes, plural } from './format.js';
+import { readPackageJson } from './electron-project.js';
 import type { ProjectInfo } from './project.js';
 import { scanProject, type ScanOptions } from './scan.js';
 import type { MacSession } from './session.js';
@@ -25,6 +26,30 @@ export function scanCacheFile(project: ProjectInfo): string {
   return path.join(capmacDir(), 'cache', `${project.projectId}.json`);
 }
 
+/**
+ * Capacitor projects: the folders a build on the Mac reads (this PC builds
+ * the web app): the web assets, the native platforms, local dependencies.
+ * Undefined for an Electron app, which runs from its sources.
+ */
+export function macBuildRoots(project: ProjectInfo): string[] | undefined {
+  if (project.kind !== 'capacitor') return undefined;
+  const toRoot = (abs: string) => path.relative(project.syncRoot, abs).split(path.sep).join('/');
+  const roots = [project.webDir, project.iosDir, project.electron?.rel ?? '']
+    .filter((rel) => rel && rel !== '.')
+    .map((rel) => toRoot(path.resolve(project.capDir, rel)));
+  // file: and link: dependencies install from their own folders.
+  for (const dir of new Set([project.syncRoot, project.capDir, project.electron?.dir].filter((d): d is string => Boolean(d)))) {
+    const pkg = readPackageJson(dir);
+    for (const spec of Object.values({ ...pkg?.dependencies, ...pkg?.devDependencies, ...pkg?.optionalDependencies })) {
+      const local = /^(?:file|link):(.+)$/.exec(String(spec))?.[1];
+      if (local) roots.push(toRoot(path.resolve(dir, local)));
+    }
+  }
+  // A root that is the whole project (webDir ".") leaves nothing out.
+  if (roots.some((rel) => rel === '')) return undefined;
+  return roots.filter((rel) => !rel.startsWith('..'));
+}
+
 /** What a sync of `project` uploads (the same for iOS and Electron runs, so switching never re-uploads). */
 export function scanOptionsFor(project: ProjectInfo, includeWebDir: boolean): ScanOptions {
   return {
@@ -37,8 +62,41 @@ export function scanOptionsFor(project: ProjectInfo, includeWebDir: boolean): Sc
     excludeElectron: project.kind === 'capacitor' && !project.electron,
     include: project.config.sync?.include,
     exclude: project.config.sync?.exclude,
+    macBuildsFrom: macBuildRoots(project),
     cacheFile: scanCacheFile(project),
   };
+}
+
+/** The biggest folders among `files`, by their first two path parts ("promo/out"). */
+export function largestFolders(files: Array<{ rel: string; size: number }>, count = 3): Array<{ folder: string; files: number; bytes: number }> {
+  const folders = new Map<string, { files: number; bytes: number }>();
+  for (const file of files) {
+    const parts = file.rel.split('/');
+    const folder = parts.length > 2 ? parts.slice(0, 2).join('/') : parts.length === 2 ? parts[0]! : '.';
+    const entry = folders.get(folder) ?? { files: 0, bytes: 0 };
+    entry.files += 1;
+    entry.bytes += file.size;
+    folders.set(folder, entry);
+  }
+  return [...folders.entries()].map(([folder, v]) => ({ folder, ...v })).sort((a, b) => b.bytes - a.bytes).slice(0, count);
+}
+
+const reportedLeftOnPc = new Set<string>();
+
+/** Says once per project which files stay on this PC (every sync leaves the same ones out). */
+function reportLeftOnPc(project: ProjectInfo, files: Array<{ rel: string; size: number }>, ctx: EngineContext): void {
+  if (files.length === 0) return;
+  const bytes = files.reduce((sum, f) => sum + f.size, 0);
+  const where = largestFolders(files).map((f) => f.folder).join(', ');
+  const key = `${project.projectId}:${files.length}:${bytes}`;
+  const first = !reportedLeftOnPc.has(key);
+  reportedLeftOnPc.add(key);
+  log(
+    ctx,
+    first ? 'info' : 'debug',
+    `Kept ${plural(files.length, 'video, design or large file', 'videos, design and large files')} (${formatBytes(bytes)}) on this PC: nothing on the Mac reads them (${where})`,
+    first ? 'To send one anyway, add a `!path` line to .capmacignore' : undefined,
+  );
 }
 
 export async function syncToMac(session: MacSession, project: ProjectInfo, options: SyncOptions, ctx: EngineContext): Promise<SyncSummary> {
@@ -46,6 +104,7 @@ export async function syncToMac(session: MacSession, project: ProjectInfo, optio
   try {
     const scan = await scanProject(scanOptionsFor(project, options.includeWebDir));
     s.update(`${plural(scan.files.length, 'file')} scanned`);
+    reportLeftOnPc(project, scan.leftOnPc, ctx);
     const call = await session.agent.start<SyncResult>('sync', { projectId: project.projectId, projectRel: project.projectRel }, { signal: options.signal });
     call.send({ t: 'manifest', entries: scan.files.map((f) => ({ p: f.rel, h: f.hash, s: f.size, m: f.mode })) });
     const need = await call.waitFor<SyncNeed>('need');

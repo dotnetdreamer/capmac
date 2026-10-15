@@ -11,11 +11,18 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   CHROMIUM_LOG,
+  dialogSocket,
   ENV_LIVE_SCHEME,
   ENV_LIVE_URL,
+  ENV_PROJECT,
   ENV_SOCKET,
+  ENV_SOUND,
   frontFile,
+  isSoundMode,
   parseAppLine,
+  type AppDialog,
+  type AppDialogAnswer,
+  type AppDialogClosed,
   type AppInputEvent,
   type AppWindowInfo,
   type ElectronControl,
@@ -27,6 +34,7 @@ import {
   type ElectronScreenParams,
   type HookEvent,
   type HookMessage,
+  type HookRequest,
 } from '../../shared/electron.js';
 import { JsDiagnosticParser } from '../../shared/js-diagnostics.js';
 import type { ScreenInfo } from '../../shared/protocol.js';
@@ -334,13 +342,75 @@ function withHook(existing: string | undefined, hook: string): string {
   return existing?.trim() ? `${existing.trim()} ${require}` : require;
 }
 
+type DialogRequest = Extract<HookRequest, { t: 'dialog-answer' | 'dialog-list' | 'dialog-mkdir' }>;
+type WithoutId<T> = T extends unknown ? Omit<T, 'id'> : never;
+
+/**
+ * The app's dialog socket (see the hook's dialogs.ts): the dialogs waiting
+ * for an answer go to `onDialogs`, and requests (answers, folders) go back.
+ * `connect` again after every hello: a restarted app has a new socket.
+ */
+class DialogWatch {
+  private conn: HookConnection | null = null;
+  private generation = 0;
+  private nextId = 1;
+  private closed = false;
+
+  constructor(private readonly path: string, private readonly onDialogs: (dialogs: AppDialog[], closed?: { id: number; how: AppDialogClosed }) => void) {}
+
+  async connect(): Promise<void> {
+    const generation = ++this.generation;
+    this.conn?.close();
+    this.conn = null;
+    // The worker serving it starts with the app: give it a few seconds.
+    for (let attempt = 0; attempt < 20 && !this.closed && generation === this.generation; attempt++) {
+      const conn = await HookConnection.connect(this.path, 1500).catch(() => null);
+      if (conn) {
+        if (this.closed || generation !== this.generation) {
+          conn.close();
+          return;
+        }
+        this.conn = conn;
+        conn.onMessage = (message) => {
+          if (message.t === 'dialogs') this.onDialogs(message.dialogs, message.closed);
+        };
+        conn.send({ t: 'hello', role: 'control' });
+        void conn.done.then(() => {
+          if (this.conn !== conn) return;
+          this.conn = null;
+          // The app quit or restarted: its dialogs are gone with it.
+          this.onDialogs([]);
+        });
+        return;
+      }
+      await sleep(500);
+    }
+  }
+
+  async request(request: WithoutId<DialogRequest>): Promise<unknown> {
+    const conn = this.conn;
+    if (!conn) throw new Error('The app is not running.');
+    const { message } = await conn.request({ ...request, id: this.nextId++ } as DialogRequest, 15_000);
+    if (message.t !== 'result') throw new Error('Unexpected answer from the app.');
+    if (!message.ok) throw new Error(message.error ?? 'The app could not do that.');
+    return message.data;
+  }
+
+  close(): void {
+    this.closed = true;
+    this.conn?.close();
+    this.conn = null;
+  }
+}
+
 async function controlRequest(socket: string, control: ElectronControl): Promise<unknown> {
   const conn = await HookConnection.connect(socket).catch(() => {
     throw new Error('The app is not running.');
   });
   try {
     conn.send({ t: 'hello', role: 'control' });
-    const { message } = await conn.request({ t: control.action === 'reload' ? 'reload' : 'modules', id: 1 });
+    const request: HookRequest = control.action === 'sound' ? { t: 'sound', id: 1, mode: control.mode } : { t: control.action === 'reload' ? 'reload' : 'modules', id: 1 };
+    const { message } = await conn.request(request as HookRequest & { id: number });
     if (message.t !== 'result') throw new Error('Unexpected answer from the app.');
     if (!message.ok) throw new Error(message.error ?? 'The app could not do that.');
     return message.data;
@@ -390,6 +460,8 @@ export async function opElectronLaunch(params: ElectronLaunchParams, io: AgentIO
     ...env,
     NODE_OPTIONS: withHook(env.NODE_OPTIONS, hook),
     [ENV_SOCKET]: socket,
+    [ENV_PROJECT]: paths.project,
+    [ENV_SOUND]: isSoundMode(params.sound) ? params.sound : 'off',
     ...(params.liveUrl ? { [ENV_LIVE_URL]: params.liveUrl, [ENV_LIVE_SCHEME]: 'capacitor-electron' } : {}),
   };
   delete childEnv.ELECTRON_RUN_AS_NODE;
@@ -397,6 +469,8 @@ export async function opElectronLaunch(params: ElectronLaunchParams, io: AgentIO
   let child: ChildProcess | null = null;
   let ready = false;
   let hello = false;
+  // The app's dialogs, for the console and the terminal (answered with `electron-dialog`).
+  const dialogWatch = new DialogWatch(dialogSocket(socket), (dialogs, closed) => io.send({ t: 'electron', event: { e: 'dialogs', dialogs, closed } }));
   const announce = (data: unknown) => {
     if (ready) return;
     ready = true;
@@ -405,6 +479,7 @@ export async function opElectronLaunch(params: ElectronLaunchParams, io: AgentIO
   const onHook = (event: HookEvent) => {
     if (event.e === 'hello') {
       hello = true;
+      if (event.dialogs) void dialogWatch.connect();
       // An app with no window (a tray app) is running all the same.
       setTimeout(() => announce({ windows: 0 }), 8000).unref();
     }
@@ -420,6 +495,10 @@ export async function opElectronLaunch(params: ElectronLaunchParams, io: AgentIO
   io.onMessage((message) => {
     const control = message as ElectronControl;
     if (control?.t !== 'control' || typeof control.id !== 'number') return;
+    if (control.action === 'sound' && !isSoundMode(control.mode)) {
+      io.send({ t: 'control-result', id: control.id, ok: false, error: 'Not a sound setting' });
+      return;
+    }
     if (control.action === 'input') {
       const ok = Boolean(child?.stdin?.writable && child.stdin.write(String(control.text ?? '')));
       io.send({ t: 'control-result', id: control.id, ok });
@@ -469,6 +548,7 @@ export async function opElectronLaunch(params: ElectronLaunchParams, io: AgentIO
     return { reason: 'exited', exitCode: result.code };
   } finally {
     clearTimeout(fallback);
+    dialogWatch.close();
     await fs.rm(recordFile, { force: true }).catch(() => undefined);
     await fs.rm(socket, { force: true }).catch(() => undefined);
   }
@@ -499,6 +579,7 @@ export async function opElectronScreen(params: ElectronScreenParams, io: AgentIO
     maxSize: clampInt(params.maxSize, 320, 4096, 1400),
     fps: clampInt(params.fps, 1, 60, 30),
     quality: clampInt(params.quality, 30, 95, 72),
+    audio: Boolean(params.audio),
   };
   let pinned: number | null = typeof params.window === 'number' ? params.window : null;
   let conn: HookConnection | null = null;
@@ -515,10 +596,27 @@ export async function opElectronScreen(params: ElectronScreenParams, io: AgentIO
     io.send({ t: 'app-waiting', waiting: value });
   };
   const watch = () => conn?.send({ t: 'watch', window: pinned, ...options });
+  // The app's dialogs, shown over its window and answered there.
+  const dialogWatch = new DialogWatch(dialogSocket(socket), (dialogs, closed) => io.send({ t: 'app-dialogs', dialogs, closed }));
 
   io.onMessage((message) => {
     lastHeard = Date.now();
     switch (message?.t) {
+      case 'dialog-answer':
+      case 'dialog-list':
+      case 'dialog-mkdir': {
+        const req = Number(message.req) || 0;
+        const request: WithoutId<DialogRequest> = message.t === 'dialog-answer'
+          ? { t: 'dialog-answer', dialog: Number(message.dialog), answer: message.answer as AppDialogAnswer }
+          : message.t === 'dialog-list'
+            ? { t: 'dialog-list', path: String(message.path ?? '~'), hidden: Boolean(message.hidden) }
+            : { t: 'dialog-mkdir', path: String(message.path ?? '') };
+        dialogWatch.request(request).then(
+          (data) => io.send({ t: 'app-dialog-reply', req, ok: true, data }),
+          (err) => io.send({ t: 'app-dialog-reply', req, ok: false, error: String((err as Error)?.message ?? err) }),
+        );
+        break;
+      }
       case 'ping':
         io.send({ t: 'pong', id: Number(message.id) || 0, pc: Number(message.pc) || 0, mac: nowUs() });
         break;
@@ -542,6 +640,14 @@ export async function opElectronScreen(params: ElectronScreenParams, io: AgentIO
       case 'window-action':
         if (typeof message.window === 'number' && ['close', 'minimize', 'zoom'].includes(message.action)) conn?.send({ t: 'window-action', window: message.window, action: message.action });
         break;
+      case 'sound':
+        // The app tells every screen where its sound plays now (app-sound).
+        if (isSoundMode(message.mode)) conn?.send({ t: 'sound', id: 0, mode: message.mode });
+        break;
+      case 'audio':
+        options.audio = Boolean(message.on);
+        watch();
+        break;
     }
   });
 
@@ -558,6 +664,7 @@ export async function opElectronScreen(params: ElectronScreenParams, io: AgentIO
         case 'hello': {
           setWaiting(false);
           attached = true;
+          if (message.app.dialogs) void dialogWatch.connect();
           const recent = early.filter((item) => Date.now() - item.at < 5000);
           early = [];
           for (const item of recent) current.send({ t: 'input', event: item.event });
@@ -586,6 +693,12 @@ export async function opElectronScreen(params: ElectronScreenParams, io: AgentIO
         case 'clipboard':
           io.send({ t: 'app-clipboard', text: message.text });
           break;
+        case 'sound':
+          io.send({ t: 'app-sound', mode: message.mode, toPc: message.toPc });
+          break;
+        case 'audio':
+          io.send({ t: 'app-audio', packets: message.packets });
+          break;
       }
     };
     current.send({ t: 'hello', role: 'screen' });
@@ -608,6 +721,7 @@ export async function opElectronScreen(params: ElectronScreenParams, io: AgentIO
       await sleep(300, io.signal);
     }
   }
+  dialogWatch.close();
   return { frames };
 }
 
@@ -624,6 +738,44 @@ export async function opElectronScreenshot(params: { projectId: string; window?:
     }
     await io.sendBinary(binary);
     return { bytes: binary.length, width: message.width, height: message.height };
+  } finally {
+    conn.close();
+  }
+}
+
+/**
+ * The app's dialogs from the terminal (the screen relays its own): the ones
+ * open now, an answer to one, or a folder listed or made for one.
+ */
+export async function opElectronDialog(
+  params: { projectId: string; action: 'dialogs' | 'answer' | 'list' | 'mkdir'; dialog?: number; answer?: AppDialogAnswer; path?: string; hidden?: boolean },
+  _io: AgentIO,
+): Promise<unknown> {
+  const conn = await HookConnection.connect(dialogSocket(socketPath(params.projectId))).catch(() => {
+    throw new AgentError('The app is not running.', 'APP_NOT_RUNNING', 'Start it with Run or Live first.');
+  });
+  try {
+    if (params.action === 'dialogs') {
+      // The worker answers hello with the dialogs open now.
+      return await new Promise<AppDialog[]>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new AgentError('The app did not answer.', 'APP_NOT_RUNNING')), 5000);
+        conn.onMessage = (message) => {
+          if (message.t !== 'dialogs') return;
+          clearTimeout(timer);
+          resolve(message.dialogs);
+        };
+        conn.send({ t: 'hello', role: 'control' });
+      });
+    }
+    const request: DialogRequest = params.action === 'answer'
+      ? { t: 'dialog-answer', id: 1, dialog: Number(params.dialog), answer: params.answer as AppDialogAnswer }
+      : params.action === 'list'
+        ? { t: 'dialog-list', id: 1, path: String(params.path ?? '~'), hidden: Boolean(params.hidden) }
+        : { t: 'dialog-mkdir', id: 1, path: String(params.path ?? '') };
+    const { message } = await conn.request(request, 15_000);
+    if (message.t !== 'result') throw new AgentError('Unexpected answer from the app.', 'BAD_REQUEST');
+    if (!message.ok) throw new AgentError(message.error ?? 'The app could not do that.', 'BAD_REQUEST');
+    return message.data ?? null;
   } finally {
     conn.close();
   }

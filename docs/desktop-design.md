@@ -935,7 +935,7 @@ WebRTC with our own server won: everything stays TypeScript, and the user's own 
 
 **Goal:** an Electron app (plain Electron, electron-vite, Electron Forge, or Capacitor's Electron platform) builds, runs, live-reloads and shows on the paired Mac exactly like an iOS app on a simulator, from the CLI and CapMac Studio, without disturbing whoever is using the Mac.
 
-**Status:** shipped in the CLI (`capmac run`, `dev`, `screen --electron`, `screenshot --electron`, `targets --electron`) and Studio (the *Mac desktop (Electron)* target, the window pane, the Electron sample). Verified on the real Mac (macOS 26.6, Electron 44) with the two samples and an electron-vite app.
+**Status:** shipped in the CLI (`capmac run`, `dev`, `screen --electron`, `screenshot --electron`, `targets --electron`, `dialog`) and Studio (the *Mac desktop (Electron)* target, the window pane, the Electron sample). Verified on the real Mac (macOS 26.6, Electron 43 and 44) with the two samples, an electron-vite app and a real Capacitor game (Ludo Wala: a three.js app with a custom protocol handler, a CSP, `maximize()` on a hidden window and native modules).
 
 ### How it works
 
@@ -943,9 +943,20 @@ WebRTC with our own server won: everything stays TypeScript, and the user's own 
 - **Prepare** (`electron-prepare`): the agent installs the app's dependencies on the Mac, fetches Electron's macOS build when Windows installed only its own, copies the web app into Capacitor's platform, and builds (`npm run build`, never a packaging script).
 - **CapMac's module in the app** (`src/electron-hook/hook.ts`). The agent launches the app, or its dev command, with `NODE_OPTIONS=--require <module>`. The module turns itself on only in Electron's main process, and only when the agent asked for it.
   - **Output:** it marks the main process's lines, and reports windows and every page's console as marked lines on stdout. The CLI and Studio tell main, page, Chromium and dev-tool output apart.
+  - **The pages' console** comes through the DevTools protocol (`webContents.debugger`, `Runtime` and `Log`), so objects read as in DevTools (`dispatch {type: 'roll', value: 1}`, not `[object Object]`), format strings are filled in and `%c` styling is dropped. Messages logged before CapMac attached are not reported twice, and the page's kept console entries are discarded now and then so logged objects can be freed. When the app attaches its own debugger, CapMac lets go first and falls back to Electron's `console-message` event (its `%c` CSS is stripped there too).
   - **The windows:** a Unix socket in `~/.capmac/run` serves frames from the app's own compositor (`beginFrameSubscription`, JPEG), input (`sendInputEvent`), screenshots (`capturePage`) and reloads. None of this needs Screen Recording or Accessibility permission, which SSH sessions can't get anyway.
   - **Input:** Ctrl on the PC is ⌘. Menu shortcuts run the menu item, the way macOS does, matched by the letter the PC's layout types. Text arrives as characters in order. Copying in the app sends the text to the PC's clipboard.
 - **Capacitor live reload:** Vite runs on the PC behind an SSH reverse tunnel. The module sends the app's `capacitor-electron://` loads to the dev server, drops the page's Content-Security-Policy for that origin only, and lets the dev server's own reloads through the template's navigation guard.
+
+### Sound
+
+Someone may be working at the Mac, so an app's sound is **off** by default. The CLI (`--sound off|mac|pc` on `run`, `dev` and `screen`; `s` in `dev`) and Studio (the speaker button under the window) offer the same three choices, remembered per project in `~/.capmac/projects.json`:
+
+- **Off** and **on this PC** mute the app's pages on the Mac (`webContents.setAudioMuted`). The app's own `setAudioMuted` still counts, and its `isAudioMuted()` keeps answering what the app asked for.
+- **On this PC:** a hidden page of CapMac's (a `WebContentsView` in a session of its own, served on the Mac's loopback so it is a secure context with a real origin) captures each window's sound the way Chromium captures a tab: `getMediaSourceId`, then `getUserMedia` with the `tab` source. That needs no macOS permission, and muting the page leaves the capture alone. The windows are mixed in an `AudioContext`, encoded as 96 kbps Opus with WebCodecs, and sent in batches of about 60 ms to the window pane or viewer, which decodes and plays them with a 120 ms cushion. The capture runs only while a pane or viewer listens; it needs Electron 30 or later (CapMac says so and leaves the sound off before that).
+- **On the Mac:** the app as it would be without CapMac.
+
+Measured with Ludo Wala's background music: about 100 buffers a second reached the pane (two channels of 20 ms packets) with the music's level (RMS 0.0037), and *Sound off* stopped them at once.
 
 ### Live reload, by flavor
 
@@ -971,6 +982,17 @@ Someone may be working on the Mac, so the app must not take their keyboard or co
 
 Elsewhere: `--show-simulator` opens Simulator in the background (`open -g`). When the engine needs an answer (a password, say), Studio waits for the user instead of jumping to the front: its taskbar button flashes and a notification says so.
 
+### Native dialogs
+
+A message box or file picker activates the app on the Mac and takes the keyboard (`runModal`), and the window's frames don't contain it. While the app is in the background, CapMac keeps the dialog off the Mac's screen and shows it where the developer is:
+
+- **The module wraps `dialog`** (`src/electron-hook/dialogs.ts`): `showMessageBox`, `showOpenDialog`, `showSaveDialog`, their `…Sync` forms and `showErrorBox`. Electron's module is read-only, so the app's guarded `electron` hands out a wrapped copy. While someone uses the app on the Mac, or when CapMac can't serve dialogs, Electron's own dialog shows as usual.
+- **A worker thread serves them** on a socket of its own (`<socket>.dlg`), from the same file. A `…Sync` dialog blocks the main thread as it would on the Mac; the main thread waits on shared memory (`Atomics.wait`) and the worker writes the answer there. A heartbeat in the same memory lets the main thread give up after 10 s if the worker stops, and show the dialog natively instead.
+- **What CapMac shows:** the dialog as Electron would draw it on macOS (default and cancel buttons by Electron's rules, the checkbox, the window it belongs to as a sheet), and for file dialogs a browser of the Mac's folders (places, a path bar, file types, hidden files, New folder, the save name with the type's extension added, Replace for an existing file). It starts in the project's copy on the Mac, where files synced from the PC are.
+- **Where it is answered:** over the window in Studio's pane and in `capmac screen --electron` (keyboard as on a Mac: Return, Escape, arrows); in the terminal of `capmac run` and `dev` (a button number, `+` to tick the checkbox, or a path on the Mac); and with `capmac dialog [answer]` for scripts and AI agents. Studio's console says what the app asks, and when Studio isn't in front its taskbar button flashes and a notification says so, without taking the keyboard. The first answer wins; the others close.
+- **Someone at the Mac comes first:** when the app becomes active there, waiting dialogs move to the Mac and show natively. A dialog the app closes itself (its `AbortSignal`, or its window closing) is cancelled, as in Electron.
+- **No permission prompts:** processes started over SSH can't show privacy (TCC) prompts. On a Mac where remote users have no full disk access, browsing Desktop or Documents says macOS doesn't let CapMac open the folder.
+
 ### Results
 
 Measured on 2026-10-15 on the paired M1 (macOS 26.6.1), over home Wi-Fi. Someone was working on the Mac during the plain and Capacitor runs, and its front app (`lsappinfo front`, sampled every 100 ms) never changed; the Mac was locked by the electron-vite run:
@@ -985,7 +1007,13 @@ Measured on 2026-10-15 on the paired M1 (macOS 26.6.1), over home Wi-Fi. Someone
 
 Input through the stream (clicks, typing, paste, ⌘A, a menu shortcut, the wheel) works on a window behind other apps and without focus. Unit tests drive the guard with a fake Electron for the parts that would need someone to switch apps on the Mac.
 
+Dialogs, 2026-10-15, same Mac: each kind (a sheet with a checkbox, a blocking `showMessageBoxSync`, an open dialog with two files and a type filter, a save into a new folder, `showErrorBox`) was answered from Studio's pane in light and dark, the CLI's viewer, the terminal and `capmac dialog`. The app's code had the answer within 0.2 s of the click, and the Mac's front app never changed.
+
+Ludo Wala (Capacitor Electron, Electron 43): the first sync went from 4.7 GB to 180 MB once videos and big pictures stayed on the PC (11 s over Wi-Fi); a cold `capmac run` took 57 s in Studio, most of it the web build on the PC. The three.js window streams at 19 fps in the CLI's viewer (its 20 fps cap) and 28-29 fps in Studio (about 24 Mbps at 2400 px), and the game plays through it: menus, typing a name with ⌘A, rolling and moving. Live reload: an edit reloaded the page on the Mac 0.4 s after saving; a main-process edit ran 2.3 s after saving, `tsc` included.
+
 ### Next
 
-- Native dialogs (`dialog.showMessageBox`, file pickers) are not in the window's frames: show them in the CLI and Studio, and answer them from there.
 - Open links the app opens on the PC instead of the Mac.
+- The window's frames are JPEG at a fixed quality: over the internet a busy 3D app needs adaptive quality (or H.264 from the compositor's frames).
+- Capacitor live reload loads the dev server's origin (`http://localhost:<port>`), so the page's storage is not the run's (`capacitor-electron://-`), as on iOS. Serving the dev server under the app's own scheme would keep it.
+- Upload a file from the PC to answer an open dialog.

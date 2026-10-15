@@ -15,6 +15,7 @@ import {
   remoteTestCommand,
 } from './commands/remote.js';
 import { runCommand } from './commands/run.js';
+import { dialogCommand } from './commands/dialog.js';
 import { screenshotCommand } from './commands/screenshot.js';
 import { skillAddCommand, skillRemoveCommand, skillShowCommand, skillStatusCommand } from './commands/skill.js';
 import { takeoverByDefault, takeoverCommand } from './commands/takeover.js';
@@ -69,6 +70,7 @@ program
 
 const mac = () => new Option('--mac <name>', 'which paired Mac to use');
 const routeOption = () => new Option('--route <how>', 'how to reach the Mac this time (default: its remote-access setting)').choices(ROUTE_CHOICES);
+const soundOption = () => new Option('--sound <where>', "an Electron app's sound: off, on the mac, or on this pc (in the window viewer); remembered for the project (default off)").choices(['off', 'mac', 'pc']);
 
 function targetOptions(cmd: Command): Command {
   return cmd
@@ -129,7 +131,8 @@ buildOptions(targetOptions(
     .option('--for <seconds>', "stream the app's console for this long, then stop (scripts, AI agents)")
     .option('--show-simulator', 'also open the Simulator window on the Mac\'s screen')
     .option('--os-logs', 'also show NSLog/os_log output, like Xcode\'s console')
-    .option('--bridge', 'show Capacitor bridge traffic in the logs'),
+    .option('--bridge', 'show Capacitor bridge traffic in the logs')
+    .addOption(soundOption()),
 )).action(wrap(runCommand));
 
 buildOptions(targetOptions(
@@ -143,7 +146,8 @@ buildOptions(targetOptions(
     .option('--no-watch', 'do not rebuild automatically when native files change')
     .option('--show-simulator', 'also open the Simulator window on the Mac\'s screen')
     .option('--os-logs', 'also show NSLog/os_log output, like Xcode\'s console')
-    .option('--bridge', 'show Capacitor bridge traffic in the logs'),
+    .option('--bridge', 'show Capacitor bridge traffic in the logs')
+    .addOption(soundOption()),
 )).action(wrap(devCommand));
 
 buildOptions(targetOptions(
@@ -182,6 +186,7 @@ program
   .option('-e, --electron', "the Electron app's window (it must be running)")
   .option('--port <port>', 'local port for the viewer (default 7373)')
   .option('--no-open', 'do not open the browser automatically')
+  .addOption(soundOption())
   .action(wrap(screenCommand));
 
 program
@@ -191,6 +196,16 @@ program
   .option('-t, --target <name|udid>', 'simulator (default: the booted one this app last ran on)')
   .option('-e, --electron', "the Electron app's window (it must be running)")
   .action(wrap((file: string | undefined, options) => screenshotCommand(file, options)));
+
+program
+  .command('dialog [answer]')
+  .description("the running Electron app's message boxes and file dialogs: list them, or answer the oldest (a button's number or label, or a path on the Mac)")
+  .addOption(mac()).addOption(routeOption())
+  .option('--cancel', 'cancel it, as Escape or Cancel would')
+  .option('--check', "tick (or untick) the message box's checkbox too")
+  .option('--id <n>', 'answer this dialog instead of the oldest')
+  .option('--json', 'machine-readable output')
+  .action(wrap((answer: string | undefined, options) => dialogCommand(answer, options)));
 
 program
   .command('logs')

@@ -35,6 +35,7 @@ import {
   remoteSettings,
   requireIos,
   resolveHost,
+  soundFor,
   revokeRemotePc,
   runApp,
   runElectronApp,
@@ -63,6 +64,7 @@ import {
   type Prompter,
   type VideoPacket,
 } from '@capmac/core/engine';
+import { isSoundMode } from '@capmac/core/shared/electron';
 import { STREAM_CONFIG } from '@capmac/core/shared/stream';
 import type { ProbeResult, Target, TargetsResult } from '@capmac/core/shared/protocol';
 import type { RemoteDoorStatus } from '@capmac/core/shared/remote-door';
@@ -424,7 +426,7 @@ async function openAppScreen(streamId: string, mac: string, projectPath: string,
     post({ type: 'frame', data: toArrayBuffer(jpeg), seq: ++seq });
   };
   const scope = { mac, streamId };
-  const stream = new AppScreenStream(link(mac), project.projectId, { fps: 30, quality: 75, maxSize: Math.min(2400, maxSize ?? 1400) }, {
+  const stream = new AppScreenStream(link(mac), project.projectId, { fps: 30, quality: 75, maxSize: Math.min(2400, maxSize ?? 1400), audio: true }, {
     onFrame: sendFrame,
     onInfo: (info) => {
       post({ type: 'info', info });
@@ -433,6 +435,9 @@ async function openAppScreen(streamId: string, mac: string, projectPath: string,
     onWindows: (windows, watched) => post({ type: 'windows', windows, watched }),
     onCursor: (cursor) => post({ type: 'cursor', cursor }),
     onClipboard: (text) => post({ type: 'clipboard', text }),
+    onDialogs: (dialogs, closed) => post({ type: 'dialogs', dialogs, closed }),
+    onSound: (mode, toPc) => post({ type: 'sound', mode, toPc }),
+    onAudio: (packets) => post({ type: 'audio', packets: packets.map(toArrayBuffer) }),
     onWaiting: (waiting) => post({ type: 'waiting', waiting }),
     onEnd: (error) => post({ type: 'state', state: 'ended', error }),
     onState: (state) => {
@@ -469,6 +474,28 @@ async function openAppScreen(streamId: string, mac: string, projectPath: string,
       case 'window-action':
         if (typeof message.window === 'number' && ['close', 'minimize', 'zoom'].includes(message.action)) stream.windowAction(message.window, message.action);
         break;
+      case 'sound':
+        if (isSoundMode(message.mode)) {
+          stream.setSound(message.mode);
+          // The next run of this project plays its sound here too (the CLI reads the same).
+          void soundFor(project.projectId, message.mode);
+        }
+        break;
+      case 'dialog-answer':
+      case 'dialog-list':
+      case 'dialog-mkdir': {
+        const req = Number(message.req) || 0;
+        const work = message.type === 'dialog-answer'
+          ? stream.answerDialog(Number(message.dialog), message.answer)
+          : message.type === 'dialog-list'
+            ? stream.listFolder(String(message.path ?? '~'), Boolean(message.hidden))
+            : stream.makeFolder(String(message.path ?? ''));
+        work.then(
+          (data) => post({ type: 'dialog-reply', req, ok: true, data }),
+          (err) => post({ type: 'dialog-reply', req, ok: false, error: toErrorInfo(err).message }),
+        );
+        break;
+      }
       case 'restart':
         inFlight = 0;
         pending = null;

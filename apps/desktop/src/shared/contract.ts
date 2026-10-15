@@ -8,7 +8,7 @@ import { z } from 'zod';
 import type { ErrorInfo } from '@capmac/core/engine/errors';
 import type { Check, ConnectionState, EngineEvent, FixId, SessionMode } from '@capmac/core/engine/events';
 import type { ProbeResult, ScreenInfo, StreamFallback, TargetsResult } from '@capmac/core/shared/protocol';
-import type { AppWindowInfo, ElectronFlavor } from '@capmac/core/shared/electron';
+import type { AppDialog, AppDialogAnswer, AppDialogClosed, AppWindowInfo, ElectronFlavor, MacFolder, SoundMode } from '@capmac/core/shared/electron';
 import { PUBLIC_KEY_RE, RELAY_CHOICES, ROUTE_CHOICES } from '@capmac/core/shared/remote';
 import type { RemoteSettings, RemoteTestResult, Route, SignalServerSetting } from '@capmac/core/shared/remote';
 import type { RemoteDoorStatus, RemotePc } from '@capmac/core/shared/remote-door';
@@ -18,7 +18,7 @@ import type { TakeoverStatus } from '@capmac/core/shared/takeover';
 export type { ErrorInfo } from '@capmac/core/engine/errors';
 export type { AppLogEntry, Check, CheckLevel, ConnectionState, EngineEvent, FixId, Phase, SessionMode, SessionState, StepStatus } from '@capmac/core/engine/events';
 export type { Diagnostic, InputEvent, ProbeResult, ScreenInfo, StreamFallback, StreamHelperState, Target, TargetsResult } from '@capmac/core/shared/protocol';
-export type { AppWindowInfo, ElectronFlavor } from '@capmac/core/shared/electron';
+export type { AppDialog, AppDialogAnswer, AppDialogClosed, AppWindowInfo, ElectronFlavor, MacFolder, SoundMode } from '@capmac/core/shared/electron';
 export type { RelayChoice, RemoteSettings, RemoteTestResult, Route, RouteChoice, SignalServerSetting } from '@capmac/core/shared/remote';
 export type { RemoteDoorStatus, RemotePc } from '@capmac/core/shared/remote-door';
 
@@ -328,7 +328,15 @@ export type ScreenPortMessage =
   /** An Electron app: text copied in the app, for this PC's clipboard. */
   | { type: 'clipboard'; text: string }
   /** An Electron app: not running (or restarting), or showing again. */
-  | { type: 'waiting'; waiting: boolean };
+  | { type: 'waiting'; waiting: boolean }
+  /** An Electron app: its dialogs waiting for an answer here (it is in the background on the Mac). */
+  | { type: 'dialogs'; dialogs: AppDialog[]; closed?: { id: number; how: AppDialogClosed } }
+  /** An Electron app: the answer to a dialog command (`req` is the command's). */
+  | { type: 'dialog-reply'; req: number; ok: boolean; data?: unknown; error?: string }
+  /** An Electron app: where its sound plays, and whether it can play on this PC. */
+  | { type: 'sound'; mode: SoundMode; toPc: boolean }
+  /** An Electron app: its sound on this PC, Opus packets in order. */
+  | { type: 'audio'; packets: ArrayBuffer[] };
 
 /** Messages on a screen port, renderer → engine. */
 export type ScreenPortCommand =
@@ -345,7 +353,13 @@ export type ScreenPortCommand =
   /** An Electron app: show this window (null: follow the focused one). */
   | { type: 'window'; window: number | null }
   /** An Electron app: the window's traffic lights. */
-  | { type: 'window-action'; window: number; action: 'close' | 'minimize' | 'zoom' };
+  | { type: 'window-action'; window: number; action: 'close' | 'minimize' | 'zoom' }
+  /** An Electron app's dialogs: an answer, a folder on the Mac to list, a folder to make (answered with `dialog-reply`). */
+  | { type: 'dialog-answer'; req: number; dialog: number; answer: AppDialogAnswer }
+  | { type: 'dialog-list'; req: number; path: string; hidden?: boolean }
+  | { type: 'dialog-mkdir'; req: number; path: string }
+  /** An Electron app: where its sound plays from now on (remembered for the project). */
+  | { type: 'sound'; mode: SoundMode };
 
 // ─── App (main process) ────────────────────────────────────────────────────
 

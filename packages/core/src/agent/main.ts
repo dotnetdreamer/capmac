@@ -7,7 +7,7 @@ import { AgentIO } from './io.js';
 import { opArchive, opDownload } from './ops/archive.js';
 import { opBuild } from './ops/build.js';
 import { opBoot, opDeploy, opLogs, opShutdown } from './ops/deploy.js';
-import { opElectronLaunch, opElectronPrepare, opElectronScreen, opElectronScreenshot } from './ops/electron.js';
+import { opElectronDialog, opElectronLaunch, opElectronPrepare, opElectronScreen, opElectronScreenshot } from './ops/electron.js';
 import { opClean, opExec, opKeychain, opOpenXcode, opPull, opRelay } from './ops/misc.js';
 import { opPrepare } from './ops/prepare.js';
 import { opRemoteInstall, opRemoteRevoke, opRemoteSet, opRemoteStatus, opRemoteUninstall } from './ops/remote.js';
@@ -56,6 +56,7 @@ const OPS: Record<string, Handler> = {
   'electron-launch': opElectronLaunch,
   'electron-screen': opElectronScreen,
   'electron-screenshot': opElectronScreenshot,
+  'electron-dialog': opElectronDialog,
   version: async () => ({ version: AGENT_VERSION, node: process.version, platform: process.platform, arch: process.arch }),
 };
 

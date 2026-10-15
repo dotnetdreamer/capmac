@@ -73,6 +73,43 @@
   .kbd.show { display: flex; }
   .kbd input { font: inherit; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; width: 260px; background: var(--bg); color: var(--text); }
   @media (max-width: 760px) { aside { display: none; } .device { max-height: 640px; } }
+  /* The app's dialogs (they stay off the Mac's screen while the app is in the background). */
+  .dlg-layer { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,.28); padding: 16px; z-index: 5; }
+  .dlg-layer.sheet { align-items: flex-start; padding-top: 0; }
+  .dlg { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); width: min(420px, 100%); max-height: 100%; display: flex; flex-direction: column; overflow: hidden; outline: none; text-align: left; }
+  .dlg-layer.sheet .dlg { border-top-left-radius: 0; border-top-right-radius: 0; border-top: 0; }
+  .dlg.files { width: min(640px, 100%); height: min(460px, 100%); }
+  .dlg .body { padding: 16px 18px 12px; overflow: auto; display: flex; gap: 12px; }
+  .dlg .icon { width: 34px; height: 34px; border-radius: 9px; flex: none; display: grid; place-items: center; font-weight: 700; font-size: 18px; color: #fff; background: var(--accent); }
+  .dlg .icon.warning { background: var(--warn); } .dlg .icon.error { background: var(--err); } .dlg .icon.info, .dlg .icon.none { background: var(--muted); }
+  .dlg .msg { font-weight: 600; font-size: 14px; margin: 0 0 4px; white-space: pre-wrap; word-break: break-word; }
+  .dlg .detail { color: var(--muted); font-size: 12.5px; white-space: pre-wrap; word-break: break-word; margin: 0; }
+  .dlg label.check { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 12.5px; cursor: pointer; }
+  .dlg .foot { display: flex; align-items: center; gap: 8px; padding: 10px 14px 14px; flex-wrap: wrap; }
+  .dlg .foot .note { color: var(--muted); font-size: 11.5px; margin-right: auto; }
+  .dlg .foot .buttons { display: flex; flex-direction: row-reverse; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+  .dlg button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .dlg .head { padding: 12px 14px 8px; border-bottom: 1px solid var(--border); }
+  .dlg .head .t { font-weight: 600; } .dlg .head .m { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .dlg .name { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 12.5px; }
+  .dlg .name input, .dlg .pathbar input { flex: 1; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; min-width: 0; }
+  .dlg .browser { flex: 1; display: flex; min-height: 0; }
+  .dlg .places { width: 128px; flex: none; border-right: 1px solid var(--border); padding: 6px; overflow: auto; }
+  .dlg .places button { width: 100%; border: 0; background: none; padding: 5px 8px; font-size: 12.5px; justify-content: flex-start; border-radius: 6px; }
+  .dlg .places button.on { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+  .dlg .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .dlg .pathbar { display: flex; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  .dlg .pathbar button { padding: 4px 8px; }
+  .dlg .list { flex: 1; overflow: auto; font-size: 12.5px; padding: 4px; outline: none; }
+  .dlg .row { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 6px; cursor: default; user-select: none; }
+  .dlg .row .n { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dlg .row .d { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+  .dlg .row.sel { background: var(--accent); color: #fff; } .dlg .row.sel .d { color: rgba(255,255,255,.8); }
+  .dlg .row.off { opacity: .4; }
+  .dlg .list .empty { padding: 20px; text-align: center; }
+  .dlg .err { color: var(--err); font-size: 12px; padding: 4px 14px 0; }
+  .dlg .opts { display: flex; align-items: center; gap: 10px; padding: 8px 14px 0; font-size: 12.5px; flex-wrap: wrap; }
+  .dlg .opts label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -82,6 +119,11 @@
   <span class="meta" id="meta">connecting…</span>
   <span class="spacer"></span>
   <select id="win" title="Window" hidden></select>
+  <select id="sound" title="Where the app's sound plays" aria-label="Sound" hidden>
+    <option value="off">🔇 Sound off</option>
+    <option value="mac">🔈 Play on the Mac</option>
+    <option value="pc">🔊 Play on this PC</option>
+  </select>
   <button id="home" title="Home (H)">⌂ Home</button>
   <button id="lock" title="Lock / side button">⏻</button>
   <button id="type" title="Type text (T)">⌨ Type</button>
@@ -190,6 +232,8 @@
   function setWaiting(value) {
     waiting = value;
     if (app && waiting) setOverlay('Waiting for the app…');
+    // A still page sends no new frame: the last one is current again.
+    else if (app && windows.length > 0 && framesTotal > 0) overlay.style.display = 'none';
   }
   function setOverlay(text) {
     overlay.textContent = text;
@@ -409,12 +453,278 @@
     if (e.key === 't' || e.key === 'T') { e.preventDefault(); $('type').click(); }
   });
 
+  // ─── The app's dialogs ──────────────────────────────────────────────────
+  // While the app is in the background on the Mac, its message boxes and file
+  // pickers stay off the Mac's screen and show here, over its window.
+  let shownDialog = null, layer = null;
+  function h(tag, attrs, ...children) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v === false || v == null) continue;
+      if (k.startsWith('on')) node[k] = v; else node.setAttribute(k, v === true ? '' : v);
+    }
+    for (const child of children.flat()) if (child != null && child !== false) node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    return node;
+  }
+  const join = (dir, name) => (dir.endsWith('/') ? dir : dir + '/') + name;
+  const base = (p) => p.replace(/\/+$/, '').split('/').pop() || p;
+  function setDialogs(list) {
+    const next = (list || [])[0] || null;
+    if (next && shownDialog && next.id === shownDialog.id) return;
+    if (layer) layer.remove();
+    layer = null; shownDialog = null;
+    if (!next) { screenEl.focus(); return; }
+    shownDialog = next;
+    layer = h('div', { class: 'dlg-layer' + (next.window !== null ? ' sheet' : '') });
+    // Keys, pastes and clicks in a dialog stay in it (they would go to the app).
+    for (const type of ['keydown', 'keyup', 'paste', 'compositionend', 'pointerdown', 'wheel']) layer.addEventListener(type, (e) => e.stopPropagation());
+    layer.append(next.kind === 'message' ? messageDialog(next) : fileDialog(next));
+    screenEl.append(layer);
+    const focus = layer.querySelector('[data-autofocus]') || layer.querySelector('.dlg');
+    setTimeout(() => focus && focus.focus(), 0);
+  }
+  function answerDialog(d, answer, onError) {
+    return post('/api/dialog/answer', { dialog: d.id, answer }).catch((err) => onError(String(err.message || err)));
+  }
+  const footNote = (d) => h('span', { class: 'note' }, d.blocking ? 'The app waits for your answer' : 'Shown here while the app is in the background on the Mac');
+
+  function messageDialog(d) {
+    const buttons = d.buttons.length ? d.buttons : ['OK'];
+    const check = d.checkboxLabel ? h('input', { type: 'checkbox', checked: d.checkboxChecked }) : null;
+    const error = h('div', { class: 'err', hidden: true });
+    let busy = false;
+    const choose = (i) => {
+      if (busy) return;
+      busy = true;
+      answerDialog(d, { kind: 'message', response: i, checkboxChecked: check ? check.checked : d.checkboxChecked }, (msg) => { busy = false; error.hidden = false; error.textContent = msg; });
+    };
+    const card = h('div', { class: 'dlg', tabindex: '-1', role: 'alertdialog', 'aria-modal': 'true', 'aria-label': d.message || d.title || 'Message' },
+      h('div', { class: 'body' },
+        h('div', { class: 'icon ' + d.type, 'aria-hidden': 'true' }, { warning: '!', error: '×', question: '?', info: 'i' }[d.type] || 'i'),
+        h('div', {},
+          h('p', { class: 'msg' }, d.message || d.title || ''),
+          d.detail ? h('p', { class: 'detail' }, d.detail) : null,
+          check ? h('label', { class: 'check' }, check, d.checkboxLabel) : null)),
+      error,
+      // First button on the right, as on a Mac.
+      h('div', { class: 'foot' }, footNote(d),
+        h('div', { class: 'buttons' }, buttons.map((label, i) => h('button', { type: 'button', class: i === d.defaultId ? 'primary' : '', 'data-autofocus': i === d.defaultId, onclick: () => choose(i) }, label)))));
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); choose(d.cancelId); }
+      else if (e.key === 'Enter' && !(e.target instanceof HTMLButtonElement)) { e.preventDefault(); choose(d.defaultId); }
+    });
+    return card;
+  }
+
+  function fileDialog(d) {
+    const save = d.kind === 'save';
+    const props = new Set(d.properties);
+    const multi = !save && props.has('multiSelections');
+    const pickDirs = !save && props.has('openDirectory');
+    const pickFiles = save || props.has('openFile') || !pickDirs;
+    let folder = null, selected = [], filter = 0, hidden = props.has('showHiddenFiles'), replace = false, busy = false;
+    const exts = () => {
+      const f = d.filters[filter];
+      return f && f.extensions.length && !f.extensions.includes('*') ? f.extensions.map((x) => x.toLowerCase()) : null;
+    };
+    const fits = (entry) => {
+      if (entry.dir) return true;
+      if (!pickFiles) return false;
+      const ex = exts();
+      return !ex || ex.includes((entry.name.split('.').pop() || '').toLowerCase());
+    };
+    const error = h('div', { class: 'err', hidden: true });
+    const showError = (msg) => { error.hidden = !msg; error.textContent = msg || ''; };
+    const list = h('div', { class: 'list', tabindex: '0', role: 'listbox', 'aria-multiselectable': multi });
+    const pathInput = h('input', { 'aria-label': 'Folder on the Mac', spellcheck: 'false' });
+    const places = h('div', { class: 'places' });
+    const nameInput = save ? h('input', { 'aria-label': d.nameFieldLabel || 'Save as', spellcheck: 'false', 'data-autofocus': true }) : null;
+    const confirmButton = h('button', { type: 'button', class: 'primary' }, d.buttonLabel || (save ? 'Save' : 'Open'));
+    const up = h('button', { type: 'button', title: 'Enclosing folder', 'aria-label': 'Enclosing folder' }, '‹');
+
+    async function open(path, select) {
+      try {
+        const r = await post('/api/dialog/list', { path, hidden });
+        folder = r.data;
+        selected = select ? [select] : [];
+        replace = false;
+        showError('');
+        render();
+      } catch (err) {
+        showError(String(err.message || err));
+      }
+    }
+    function render() {
+      if (!folder) return;
+      pathInput.value = folder.path;
+      list.dataset.folder = folder.path;
+      up.disabled = !folder.parent;
+      places.innerHTML = '';
+      for (const p of folder.places) places.append(h('button', { type: 'button', class: p.path === folder.path ? 'on' : '', onclick: () => open(p.path) }, p.name));
+      list.innerHTML = '';
+      if (folder.entries.length === 0) list.append(h('div', { class: 'empty' }, 'This folder is empty'));
+      folder.entries.forEach((entry) => {
+        const ok = fits(entry) || (save && !entry.dir);
+        const row = h('div', { class: 'row' + (selected.includes(entry.name) ? ' sel' : '') + (fits(entry) ? '' : ' off'), role: 'option', 'aria-selected': selected.includes(entry.name) },
+          h('span', { 'aria-hidden': 'true' }, entry.dir ? '📁' : '📄'),
+          h('span', { class: 'n' }, entry.name),
+          h('span', { class: 'd' }, entry.dir ? '' : size(entry.size)),
+          h('span', { class: 'd' }, entry.modified ? new Date(entry.modified).toLocaleDateString() : ''));
+        row.onclick = (e) => {
+          if (!ok) return;
+          if (save && !entry.dir) { nameInput.value = entry.name; replace = false; return; }
+          if (multi && (e.ctrlKey || e.metaKey)) selected = selected.includes(entry.name) ? selected.filter((n) => n !== entry.name) : [...selected, entry.name];
+          else selected = [entry.name];
+          render();
+        };
+        row.ondblclick = () => {
+          if (entry.dir) open(join(folder.path, entry.name));
+          else if (ok) { selected = [entry.name]; confirm(); }
+        };
+        list.append(row);
+      });
+      if (folder.truncated) list.append(h('div', { class: 'empty' }, 'Only the first entries are listed'));
+      confirmButton.textContent = replace ? 'Replace' : d.buttonLabel || (save ? 'Save' : 'Open');
+    }
+    const size = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n >= 1e6 ? (n / 1e6).toFixed(1) + ' MB' : n >= 1e3 ? Math.round(n / 1e3) + ' KB' : n + ' B');
+    function finish(paths) {
+      if (busy) return;
+      busy = true;
+      answerDialog(d, { kind: 'files', paths }, (msg) => { busy = false; showError(msg); });
+    }
+    function confirm() {
+      if (!folder) return;
+      if (save) {
+        let name = nameInput.value.trim();
+        if (!name) return showError('Type a name for the file');
+        if (name.includes('/')) return showError('A name cannot have a / in it');
+        const ex = exts();
+        if (ex && !/\.[^.]+$/.test(name)) name += '.' + ex[0];
+        if (folder.entries.some((e) => e.name === name) && !replace) {
+          replace = true;
+          showError(`“${name}” is in this folder already. Save again to replace it`);
+          return render();
+        }
+        return finish([join(folder.path, name)]);
+      }
+      const picks = selected.map((n) => folder.entries.find((e) => e.name === n)).filter(Boolean);
+      if (picks.length === 1 && picks[0].dir && !pickDirs) return open(join(folder.path, picks[0].name));
+      if (picks.length === 0) return pickDirs ? finish([folder.path]) : showError('Pick a file first');
+      finish(picks.filter((e) => fits(e) && (pickDirs || !e.dir)).map((e) => join(folder.path, e.name)));
+    }
+    up.onclick = () => folder && folder.parent && open(folder.parent);
+    pathInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); open(pathInput.value); } });
+    confirmButton.onclick = confirm;
+    list.addEventListener('keydown', (e) => {
+      if (!folder || !['ArrowDown', 'ArrowUp'].includes(e.key)) return;
+      e.preventDefault();
+      const names = folder.entries.filter((x) => fits(x)).map((x) => x.name);
+      const at = names.indexOf(selected[selected.length - 1]);
+      const next = names[Math.max(0, Math.min(names.length - 1, at + (e.key === 'ArrowDown' ? 1 : -1)))];
+      if (next) { selected = [next]; render(); }
+    });
+    const filterSelect = d.filters.length > 1 ? h('select', { 'aria-label': 'File type', onchange: (e) => { filter = Number(e.target.value); selected = []; render(); } }, d.filters.map((f, i) => h('option', { value: String(i) }, f.name || f.extensions.join(', ')))) : null;
+    const hiddenBox = h('input', { type: 'checkbox', checked: hidden, onchange: (e) => { hidden = e.target.checked; folder && open(folder.path); } });
+    const newFolder = save || props.has('createDirectory') ? h('button', { type: 'button', onclick: async () => {
+      const name = prompt('Name of the new folder', 'untitled folder');
+      if (!name || !folder) return;
+      try { await post('/api/dialog/mkdir', { path: join(folder.path, name.replace(/\//g, ':')) }); open(folder.path, name); } catch (err) { showError(String(err.message || err)); }
+    } }, 'New folder') : null;
+    const cancel = h('button', { type: 'button', onclick: () => finish([]) }, 'Cancel');
+    const what = save ? 'Save' : pickDirs && !props.has('openFile') ? 'Choose a folder' : 'Open';
+    const card = h('div', { class: 'dlg files', tabindex: '-1', role: 'dialog', 'aria-modal': 'true', 'aria-label': d.title || what },
+      h('div', { class: 'head' }, h('div', { class: 't' }, d.title || what), d.message ? h('div', { class: 'm' }, d.message) : null),
+      save ? h('div', { class: 'name' }, h('span', {}, d.nameFieldLabel || 'Save as'), nameInput) : null,
+      h('div', { class: 'browser' }, places, h('div', { class: 'main' }, h('div', { class: 'pathbar' }, up, pathInput), list)),
+      h('div', { class: 'opts' }, filterSelect, h('label', {}, hiddenBox, 'Show hidden files'), newFolder),
+      error,
+      h('div', { class: 'foot' }, footNote(d), h('div', { class: 'buttons' }, confirmButton, cancel)));
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); finish([]); }
+      else if (e.key === 'Enter' && !(e.target instanceof HTMLButtonElement) && e.target !== pathInput) { e.preventDefault(); confirm(); }
+    });
+    // Saving: the suggested name, in its folder. Opening: the suggested folder, else the project's.
+    const start = d.defaultPath || d.project || '~';
+    post('/api/dialog/list', { path: start, hidden }).then((r) => {
+      folder = r.data;
+      if (save && d.defaultPath && folder.path !== d.defaultPath.replace(/\/+$/, '')) nameInput.value = base(d.defaultPath);
+      render();
+    }, (err) => { showError(String(err.message || err)); open('~'); });
+    return card;
+  }
+
+  // ─── The app's sound ─────────────────────────────────────────────────────
+  // Off, on the Mac, or here: Opus packets from the app, decoded and played with a small cushion.
+  const soundSelect = $('sound');
+  let soundMode = null, audio = null;
+  function startAudio() {
+    if (audio) { if (audio.ctx.state === 'suspended') audio.ctx.resume().catch(() => {}); return; }
+    if (typeof AudioDecoder === 'undefined') return;
+    const ctx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
+    const state = { ctx, next: 0, ts: 0, decoder: null };
+    state.decoder = new AudioDecoder({
+      output: (data) => {
+        try {
+          const ch = data.numberOfChannels, n = data.numberOfFrames;
+          const buffer = ctx.createBuffer(ch, n, data.sampleRate);
+          if (data.format === 'f32-planar') {
+            for (let c = 0; c < ch; c++) { const plane = new Float32Array(n); data.copyTo(plane, { planeIndex: c }); buffer.copyToChannel(plane, c); }
+          } else {
+            const all = new Float32Array(n * ch); data.copyTo(all, { planeIndex: 0, format: 'f32' });
+            for (let c = 0; c < ch; c++) { const plane = new Float32Array(n); for (let i = 0; i < n; i++) plane[i] = all[i * ch + c]; buffer.copyToChannel(plane, c); }
+          }
+          const now = ctx.currentTime;
+          if (state.next < now + 0.01 || state.next > now + 0.72) state.next = now + 0.12;
+          const src = ctx.createBufferSource(); src.buffer = buffer; src.connect(ctx.destination); src.start(state.next);
+          state.next += buffer.duration;
+        } catch {} finally { data.close(); }
+      },
+      error: () => { stopAudio(); },
+    });
+    state.decoder.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 2 });
+    audio = state;
+  }
+  function stopAudio() {
+    if (!audio) return;
+    try { audio.decoder.close(); } catch {}
+    audio.ctx.close().catch(() => {});
+    audio = null;
+  }
+  function playPackets(packets) {
+    if (soundMode !== 'pc') return;
+    if (!audio) startAudio();
+    if (!audio || audio.decoder.state !== 'configured') return;
+    for (const b64 of packets) {
+      const bin = atob(b64), data = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) data[i] = bin.charCodeAt(i);
+      try { audio.decoder.decode(new EncodedAudioChunk({ type: 'key', timestamp: audio.ts, data })); audio.ts += 20000; } catch {}
+    }
+  }
+  function setSound(next) {
+    if (!next) return;
+    soundMode = next.mode;
+    soundSelect.hidden = !app;
+    soundSelect.value = next.mode;
+    soundSelect.querySelector('option[value="pc"]').disabled = next.toPc === false;
+    if (soundMode === 'pc') startAudio(); else stopAudio();
+  }
+  soundSelect.onchange = () => {
+    // The choice is a click: the page may play sound from now on.
+    if (soundSelect.value === 'pc') startAudio();
+    post('/api/sound', { mode: soundSelect.value }).catch(() => undefined);
+  };
+  // Browsers play sound only after a click on the page.
+  document.addEventListener('pointerdown', () => { if (soundMode === 'pc') startAudio(); }, true);
+
   // Window, cursor and clipboard news (app windows).
   const news = new EventSource('/api/events');
   news.onmessage = (m) => {
     let event;
     try { event = JSON.parse(m.data); } catch { return; }
-    if (event.type === 'hello') applyInfo(event);
+    if (event.type === 'dialogs') setDialogs(event.dialogs);
+    else if (event.type === 'audio') { playPackets(event.packets); return; }
+    else if (event.type === 'sound') setSound(event);
+    if (event.type === 'hello') { applyInfo(event); if (event.dialogs) setDialogs(event.dialogs); if (event.sound) setSound(event.sound); }
     else if (event.type === 'windows') setWindows(event.windows, event.watched);
     else if (event.type === 'waiting') setWaiting(event.waiting);
     else if (event.type === 'cursor') setCursor(event.cursor);

@@ -207,6 +207,39 @@ export function ask(question: string, defaultValue?: string): Promise<string> {
   });
 }
 
+/** Like `ask`, but `signal` takes the question back (it was answered elsewhere): resolves with null then. */
+export function askUnless(question: string, signal: AbortSignal): Promise<string | null> {
+  if (signal.aborted) return Promise.resolve(null);
+  clearStatus();
+  prompting += 1;
+  if (process.stdin.isTTY) process.stdin.setRawMode(false);
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise<string | null>((resolve) => {
+    let done = false;
+    const finish = (value: string | null) => {
+      if (done) return;
+      done = true;
+      signal.removeEventListener('abort', onAbort);
+      rl.close();
+      prompting -= 1;
+      restoreKeyMode();
+      resolve(value);
+    };
+    const onAbort = () => {
+      process.stdout.write('\n');
+      finish(null);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    // Ctrl+C still stops the command (readline would swallow it).
+    rl.on('SIGINT', () => {
+      process.stdout.write('\n');
+      finish(null);
+      process.emit('SIGINT');
+    });
+    rl.question(`${pc.cyan('?')} ${question} `, (answer) => finish(answer.trim()));
+  });
+}
+
 export async function confirm(question: string, defaultYes = true): Promise<boolean> {
   const answer = (await ask(`${question} ${pc.dim(defaultYes ? '[Y/n]' : '[y/N]')}`)).toLowerCase();
   if (!answer) return defaultYes;

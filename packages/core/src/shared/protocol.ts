@@ -3,7 +3,7 @@
  * The first JSON frame the client sends is always `{ t: 'params', op, ... }`.
  */
 
-import type { AppInputEvent, AppWindowInfo, HookEvent } from './electron.js';
+import type { AppDialog, AppDialogClosed, AppInputEvent, AppWindowInfo, HookEvent, SoundMode } from './electron.js';
 
 export const PROTOCOL_VERSION = 1;
 
@@ -302,6 +302,14 @@ export type AgentEvent =
   | { t: 'app-clipboard'; text: string }
   /** `electron-screen`: waiting for the app (not running, or restarting), or showing it again. */
   | { t: 'app-waiting'; waiting: boolean }
+  /** `electron-screen`: the app's dialogs waiting for an answer in CapMac (see AppDialog). */
+  | { t: 'app-dialogs'; dialogs: AppDialog[]; closed?: { id: number; how: AppDialogClosed } }
+  /** `electron-screen`: where the app's sound plays, and whether it can play on the PC. */
+  | { t: 'app-sound'; mode: SoundMode; toPc: boolean }
+  /** `electron-screen`: the app's sound, Opus packets (base64) in order, when it plays on the PC. */
+  | { t: 'app-audio'; packets: string[] }
+  /** `electron-screen`: the answer to a dialog request (`dialog-answer`, `dialog-list`, `dialog-mkdir`). */
+  | { t: 'app-dialog-reply'; req: number; ok: boolean; data?: unknown; error?: string }
   | ScreenInfo
   /** `watch-targets`: the simulators and devices changed. */
   | { t: 'targets'; data: TargetsResult }

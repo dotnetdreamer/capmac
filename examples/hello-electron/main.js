@@ -1,5 +1,6 @@
-// The main process: one window, a menu with a shortcut, and IPC the page can call.
-const { app, BrowserWindow, ipcMain, Menu, nativeTheme, screen } = require('electron');
+// The main process: one window, a menu with a shortcut, IPC the page can call, and native dialogs.
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen } = require('electron');
+const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
@@ -43,6 +44,42 @@ ipcMain.handle('ping', () => {
   return { pings, pid: process.pid, at: new Date().toLocaleTimeString() };
 });
 
+/** The Mac's own dialogs, each kind once. */
+async function showDialog(kind, win) {
+  switch (kind) {
+    case 'question': {
+      const buttons = ['Keep', 'Discard', 'Cancel'];
+      const r = await dialog.showMessageBox(win, { type: 'question', message: 'Keep your changes?', detail: 'dialog.showMessageBox, as a sheet on the window.', buttons, defaultId: 0, cancelId: 2, checkboxLabel: 'Don’t ask again' });
+      return `You picked “${buttons[r.response]}”${r.checkboxChecked ? ' and “Don’t ask again”' : ''}`;
+    }
+    case 'wait': {
+      const r = dialog.showMessageBoxSync({ type: 'warning', message: 'The main process waits for you', detail: 'dialog.showMessageBoxSync blocks the main process until you answer.', buttons: ['OK', 'Cancel'] });
+      return r === 0 ? 'You said OK' : 'You cancelled';
+    }
+    case 'open': {
+      const r = await dialog.showOpenDialog(win, { title: 'Open pictures', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif'] }, { name: 'All Files', extensions: ['*'] }] });
+      return r.canceled ? 'Nothing opened' : `Opened ${r.filePaths.join(', ')}`;
+    }
+    case 'save': {
+      const r = await dialog.showSaveDialog(win, { title: 'Save the note', defaultPath: path.join(app.getPath('documents'), 'hello-note.txt'), filters: [{ name: 'Text', extensions: ['txt'] }] });
+      if (r.canceled || !r.filePath) return 'Not saved';
+      fs.writeFileSync(r.filePath, `Saved by Hello Electron at ${new Date().toLocaleString()}\n`);
+      return `Saved ${r.filePath}`;
+    }
+    case 'error':
+      dialog.showErrorBox('Something went wrong', 'dialog.showErrorBox shows this, and the main process waits until you close it.');
+      return 'The error was shown';
+    default:
+      return 'Unknown dialog';
+  }
+}
+
+ipcMain.handle('dialog', async (event, kind) => {
+  const result = await showDialog(kind, BrowserWindow.fromWebContents(event.sender));
+  console.log(`Main process: ${result}`);
+  return result;
+});
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { role: 'appMenu' },
@@ -59,6 +96,23 @@ app.whenReady().then(() => {
           },
         },
       ],
+    },
+    {
+      label: 'Dialogs',
+      submenu: [
+        ['Ask a Question…', 'question', '1'],
+        ['Ask and Wait…', 'wait', '2'],
+        ['Open a File…', 'open', '3'],
+        ['Save a File…', 'save', '4'],
+        ['Show an Error', 'error', '5'],
+      ].map(([label, kind, key]) => ({
+        label,
+        accelerator: `CmdOrCtrl+Shift+${key}`,
+        click: (_item, win) => void showDialog(kind, win ?? undefined).then((result) => {
+          console.log(`Main process: ${result}`);
+          win?.webContents.send('dialog-result', result);
+        }),
+      })),
     },
     { role: 'viewMenu' },
     { role: 'windowMenu' },

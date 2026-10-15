@@ -1,5 +1,5 @@
 /** Routes engine event batches to the stores that show them. */
-import type { Envelope } from '../../shared/contract';
+import type { AppDialog, Envelope } from '../../shared/contract';
 import { t, tidy } from '../../shared/i18n';
 import { toast, useApp } from './app';
 import { consoleFor, type ConsoleLevel } from './console';
@@ -19,6 +19,16 @@ function devServerLevel(text: string): ConsoleLevel {
 function projectName(path: string): string {
   const recent = useApp.getState().settings?.recentProjects.find((p) => projectKey(p.path) === projectKey(path));
   return recent?.name ?? path.split(/[\\/]/).pop() ?? path;
+}
+
+/** Dialogs already announced, per project (each comes again with every change). */
+const announcedDialogs = new Map<string, Set<number>>();
+
+function dialogLine(dialog: AppDialog): string {
+  const app = dialog.app || t.common.theApp;
+  if (dialog.kind === 'message') return t.appDialog.asks(app, dialog.message || dialog.title || t.appDialog.message);
+  if (dialog.kind === 'save') return t.appDialog.wantsSave(app);
+  return dialog.properties.includes('openDirectory') && !dialog.properties.includes('openFile') ? t.appDialog.wantsFolder(app) : t.appDialog.wantsFile(app);
 }
 
 function showsProject(path: string): boolean {
@@ -55,6 +65,28 @@ export function handleBatch(batch: Envelope[]): void {
         case 'session-started':
           buffer.pushText('capmac', event.mode === 'live' ? t.console.liveStarted : event.mode === 'ipa' ? t.console.ipaStarted : t.console.runStarted, 'info');
           break;
+        case 'app-dialogs': {
+          // An Electron app asks something: it shows over the app's window, and in the console.
+          const seen = announcedDialogs.get(scope.projectPath) ?? new Set<number>();
+          announcedDialogs.set(scope.projectPath, seen);
+          const open = new Set(event.dialogs.map((d) => d.id));
+          for (const id of [...seen]) if (!open.has(id)) seen.delete(id);
+          if (event.closed?.how === 'mac') {
+            const gone = event.closed;
+            buffer.pushText('capmac', t.appDialog.movedToMac(event.dialogs[0]?.app || t.common.theApp), 'info');
+            seen.delete(gone.id);
+          }
+          for (const dialog of event.dialogs) {
+            if (seen.has(dialog.id)) continue;
+            seen.add(dialog.id);
+            buffer.pushText('capmac', `${dialogLine(dialog)} → ${t.appDialog.answerOver}`, 'warn');
+            if (!showsProject(scope.projectPath)) {
+              const path = scope.projectPath;
+              toast({ tone: 'caution', title: t.appDialog.waiting(dialog.app || projectName(path)), body: dialogLine(dialog), action: { label: t.common.open, run: () => useApp.getState().navigate({ name: 'project', path }) } });
+            }
+          }
+          break;
+        }
         case 'app':
           if (event.state === 'running') buffer.pushText('capmac', t.console.appRunning(event.name ?? t.common.theApp, event.target ?? t.common.theSimulator), 'info');
           if (event.state === 'exited') buffer.pushText('capmac', t.console.appExited(event.exitCode), 'info');

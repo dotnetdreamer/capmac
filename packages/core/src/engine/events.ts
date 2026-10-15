@@ -4,6 +4,7 @@
  */
 import type { AppLogKind, AppLogLevel } from '../shared/app-log.js';
 import type { ChangeKind } from '../shared/classify.js';
+import type { AppDialog, AppDialogClosed } from '../shared/electron.js';
 import type { Diagnostic, Target, TargetsResult } from '../shared/protocol.js';
 import type { Route } from '../shared/remote.js';
 import type { ErrorInfo } from './errors.js';
@@ -96,6 +97,12 @@ export type EngineEvent =
   | { type: 'tunnel'; state: 'up' | 'down'; liveUrl?: string; localUrl?: string }
   | { type: 'hmr'; state: 'connected' | 'disconnected' | 'update'; at: number; detail?: string }
   | { type: 'app'; state: 'launching' | 'running' | 'exited' | 'stopped'; name?: string; bundleId?: string; target?: string; exitCode?: number | null }
+  /**
+   * An Electron app's dialogs waiting for an answer in CapMac (it is in the
+   * background on the Mac, so they stay off the Mac's screen). `closed`: one
+   * that went, and why.
+   */
+  | { type: 'app-dialogs'; projectId: string; dialogs: AppDialog[]; closed?: { id: number; how: AppDialogClosed } }
   | { type: 'build-reused'; reason: 'native-unchanged' | 'web-patched' }
   | { type: 'build-log'; path: string }
   | { type: 'native-change'; paths: string[]; kinds: ChangeKind[] }

@@ -13,7 +13,7 @@
  */
 import type { FSWatcher } from 'node:fs';
 import path from 'node:path';
-import { CHROMIUM_LOG, type ElectronLaunchResult, type ElectronPlan, type ElectronPrepareResult, type HookEvent } from '../shared/electron.js';
+import { CHROMIUM_LOG, type AppDialog, type AppDialogAnswer, type SoundMode, type ElectronLaunchResult, type ElectronPlan, type ElectronPrepareResult, type HookEvent, type MacFolder } from '../shared/electron.js';
 import { PathMapper } from '../shared/paths.js';
 import type { AgentEvent, Target } from '../shared/protocol.js';
 import type { AgentCall } from './agent-client.js';
@@ -29,6 +29,7 @@ import type { MacSession } from './session.js';
 import type { ForwardObserver } from './ssh.js';
 import { syncToMac, type SyncSummary } from './sync-client.js';
 import { AgentEventTranslator } from './translate.js';
+import { soundFor } from './memory.js';
 import { isNoise, watchWrites } from './watch.js';
 
 /** The target id of the Mac's own desktop (where Electron apps run). */
@@ -92,6 +93,8 @@ export function describeFlavor(flavor: ElectronPlan['flavor']): string {
 
 const CONSOLE_LEVELS = { debug: 'debug', info: 'log', warning: 'warn', error: 'error' } as const;
 const CHROMIUM_LEVELS: Record<string, AppLogEntry['level']> = { ERROR: 'error', FATAL: 'error', WARNING: 'warn', INFO: 'debug' };
+/** Errors Chromium logs that change nothing for the app (a WebGL page reloading, for one): shown as debug. */
+const CHROMIUM_NOISE = /SharedImageManager::ProduceSkia|non-existent mailbox/;
 
 /** A launched app: its output streams in until it exits; it answers reload and module questions. */
 export class ElectronApp {
@@ -110,7 +113,7 @@ export class ElectronApp {
     this.waiting.delete(event.id);
   }
 
-  private control(action: 'reload' | 'modules' | 'input', extra: object = {}): Promise<unknown> {
+  private control(action: 'reload' | 'modules' | 'input' | 'sound', extra: object = {}): Promise<unknown> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -140,6 +143,11 @@ export class ElectronApp {
   /** Types into the dev command (Forge restarts the app on "rs"). */
   input(text: string): Promise<void> {
     return this.control('input', { text }).then(() => undefined);
+  }
+
+  /** Where the app's sound plays from now on. */
+  setSound(mode: SoundMode): Promise<void> {
+    return this.control('sound', { mode }).then(() => undefined);
   }
 
   /** Quits the app (and its dev command); resolves once it is gone. */
@@ -276,6 +284,9 @@ export class ElectronRunner {
           log(this.ctx, 'info', event.message);
         }
         break;
+      case 'dialogs':
+        this.ctx.emit({ type: 'app-dialogs', projectId: this.project.projectId, dialogs: event.dialogs, closed: event.closed });
+        break;
       default:
         break;
     }
@@ -289,7 +300,7 @@ export class ElectronRunner {
     }
     if (source === 'chromium') {
       const match = text.match(CHROMIUM_LOG);
-      const level = CHROMIUM_LEVELS[match?.[1] ?? ''] ?? 'debug';
+      const level = CHROMIUM_NOISE.test(text) ? 'debug' : CHROMIUM_LEVELS[match?.[1] ?? ''] ?? 'debug';
       const file = text.match(/:([\w.]+\(\d+\))\]/)?.[1];
       const message = match ? text.slice(match[0].length) : text;
       this.emitLog('electron', level, file ? `${message} (${file.replace('(', ':').replace(')', '')})` : message, stream);
@@ -304,7 +315,7 @@ export class ElectronRunner {
    * Launches the app (live reload: its dev command). `onReady` runs when its
    * first window opens; the returned app streams until it exits or is stopped.
    */
-  async launch(options: { mode: 'run' | 'live'; liveUrl?: string | null; restart?: boolean; signal?: AbortSignal; onReady?: () => void }): Promise<ElectronApp> {
+  async launch(options: { mode: 'run' | 'live'; liveUrl?: string | null; restart?: boolean; sound?: SoundMode; signal?: AbortSignal; onReady?: () => void }): Promise<ElectronApp> {
     const step: StepHandle = startStep(this.ctx, `Launching ${this.appName}`, 'launch');
     const appEvent = { name: this.appName, target: this.session.label };
     this.ctx.emit({ type: 'app', state: 'launching', ...appEvent });
@@ -312,7 +323,7 @@ export class ElectronRunner {
     const pending: Array<Extract<AgentEvent, { t: 'control-result' }>> = [];
     const call = await this.session.agent.start<ElectronLaunchResult>(
       'electron-launch',
-      { ...this.ref(), plan: this.plan, mode: options.mode, liveUrl: options.liveUrl ?? null, restart: options.restart ?? false },
+      { ...this.ref(), plan: this.plan, mode: options.mode, liveUrl: options.liveUrl ?? null, restart: options.restart ?? false, sound: options.sound ?? 'off' },
       {
         signal: options.signal,
         onEvent: (event) => {
@@ -370,6 +381,10 @@ export interface ElectronRunOptions {
   webBuild?: boolean;
   /** Called once the app's first window is open. */
   onReady?: () => void;
+  /** Where the app's sound plays (default: what was picked last for this project, else off). */
+  sound?: SoundMode;
+  /** The launched app, to talk to while it runs (its sound, say). */
+  onApp?: (app: ElectronApp) => void;
 }
 
 /**
@@ -387,7 +402,8 @@ export async function runElectronApp(project: ProjectInfo, link: MacLink, option
   await runner.sync({ live: false, signal });
   await runner.prepare({ live: false, full: options.full, signal });
   runner.announceTarget(true);
-  const app = await runner.launch({ mode: 'run', signal, onReady: options.onReady });
+  const app = await runner.launch({ mode: 'run', signal, onReady: options.onReady, sound: await soundFor(project.projectId, options.sound) });
+  options.onApp?.(app);
   try {
     return await app.done;
   } catch (err) {
@@ -414,6 +430,8 @@ export interface ElectronLiveOptions {
   full?: boolean;
   /** Sync and reload as you save (default true). */
   watch?: boolean;
+  /** Where the app's sound plays (default: what was picked last for this project, else off). */
+  sound?: SoundMode;
 }
 
 interface Work {
@@ -638,10 +656,13 @@ export class ElectronLiveSession {
     // The first launch opens behind whatever the Mac shows; later ones come back in front if someone was using the app there.
     const restart = this.launches > 0;
     this.launches += 1;
+    // A restart keeps the sound where it was; the first launch takes the option, else what was picked last.
+    const sound = await soundFor(this.project.projectId, this.launches === 1 ? this.options.sound : undefined);
     const app = await this.runner!.launch({
       mode: 'live',
       liveUrl: this.liveUrl,
       restart,
+      sound,
       signal,
       onReady: () => this.ctx.emit({ type: 'session', mode: 'live', state: 'running' }),
     });
@@ -678,6 +699,12 @@ export class ElectronLiveSession {
   /** Reloads the app's windows (a page change). */
   reload(): Promise<void> {
     return this.app ? this.app.reload() : Promise.resolve();
+  }
+
+  /** Where the app's sound plays, now and after restarts. */
+  async setSound(mode: SoundMode): Promise<void> {
+    await soundFor(this.project.projectId, mode);
+    await this.app?.setSound(mode);
   }
 
   private onLinkChange(state: string, session: MacSession | null): void {
@@ -739,6 +766,21 @@ export class ElectronLiveSession {
 function describeChange(paths: string[]): string {
   const names = paths.slice(0, 2).map((rel) => path.posix.basename(rel));
   return paths.length > 2 ? `${names.join(', ')} and ${paths.length - 2} more` : names.join(', ');
+}
+
+/** Answers one of the running app's dialogs (see AppDialog). */
+export async function answerAppDialog(session: MacSession, projectId: string, dialog: number, answer: AppDialogAnswer): Promise<void> {
+  await session.call('electron-dialog', { projectId, action: 'answer', dialog, answer });
+}
+
+/** The running app's dialogs waiting for an answer (oldest first). */
+export async function listAppDialogs(session: MacSession, projectId: string): Promise<AppDialog[]> {
+  return session.call<AppDialog[]>('electron-dialog', { projectId, action: 'dialogs' });
+}
+
+/** A folder on the Mac, for answering a file dialog ("~" is the home folder). */
+export async function listMacFolder(session: MacSession, projectId: string, path: string, hidden = false): Promise<MacFolder> {
+  return session.call<MacFolder>('electron-dialog', { projectId, action: 'list', path, hidden });
 }
 
 /** A PNG of the running app's window. */

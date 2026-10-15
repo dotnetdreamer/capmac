@@ -55,7 +55,7 @@ A typical check after changing code: \`capmac run --for 15\`, read the console f
 
 ## Electron apps
 
-In an Electron app's folder (plain Electron, electron-vite or Electron Forge), the same commands run the app on the Mac's desktop: \`capmac run --for 20\` or \`capmac run --no-logs\`, then \`capmac screenshot --electron\` for a PNG of its window. In a Capacitor project, add \`--electron\` to use its Electron platform instead of iOS. Console lines start with \`main\` (the main process) or \`js\` (the pages). The app opens behind the windows of whoever is using the Mac and never takes their keyboard, so running it does not disturb them.
+In an Electron app's folder (plain Electron, electron-vite or Electron Forge), the same commands run the app on the Mac's desktop: \`capmac run --for 20\` or \`capmac run --no-logs\`, then \`capmac screenshot --electron\` for a PNG of its window. In a Capacitor project, add \`--electron\` to use its Electron platform instead of iOS. Console lines start with \`main\` (the main process) or \`js\` (the pages). The app opens behind the windows of whoever is using the Mac and never takes their keyboard, so running it does not disturb them. If the app opens a message box or file dialog, the console prints it and the app waits: answer it with \`capmac dialog <button number or label>\`, \`capmac dialog \"~/path/on/the/mac\"\` or \`capmac dialog --cancel\` (\`capmac dialog\` alone lists what is open). The app's sound is off unless \`--sound mac\` (the Mac's speakers) or \`--sound pc\` (the browser viewer) is given; the choice is remembered for the project.
 
 ## Reading the output
 
@@ -126,6 +126,7 @@ Options shared by \`run\`, \`dev\` and \`build\`:
 |---|---|
 | \`capmac screenshot [file] [-t <simulator>]\` | Saves a PNG of a running simulator and prints its path (a temp file unless you give one). |
 | \`capmac screenshot --electron [file]\` | The same for the running Electron app's window. |
+| \`capmac dialog [answer] [--cancel] [--check] [--json]\` | The running Electron app's open dialogs, or an answer to the oldest: a button's number or label, or a path on the Mac. |
 | \`capmac logs [-t <simulator>]\` | Streams the app's system log. Runs until stopped. |
 | \`capmac screen [--electron]\` | The simulator, or the Electron app's window, in a browser, with input (for people, not agents). |
 | \`capmac targets [--json] [--electron]\` | Simulators and devices on the Mac, with their state; \`--electron\` adds the Mac's desktop. |

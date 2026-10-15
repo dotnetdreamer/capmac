@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AppScreenStream, ScreenStream, takeAppScreenshot, type AppLogEntry, type MacLink } from '@capmac/core/engine';
-import type { AppWindowInfo } from '@capmac/core/shared/electron';
+import { AppScreenStream, ScreenStream, soundFor, takeAppScreenshot, type AppLogEntry, type MacLink } from '@capmac/core/engine';
+import { isSoundMode, type AppWindowInfo, type SoundMode } from '@capmac/core/shared/electron';
 import type { InputEvent, ScreenInfo, Target } from '@capmac/core/shared/protocol';
 import { log, pc } from '../ui.js';
 
@@ -74,7 +74,7 @@ export class ScreenViewer {
       this.clients.clear();
     };
     if (source.kind === 'app') {
-      this.app = new AppScreenStream(link, source.projectId, { fps: 20, quality: 72 }, {
+      this.app = new AppScreenStream(link, source.projectId, { fps: 20, quality: 72, audio: true }, {
         onFrame: (jpeg) => this.broadcast(jpeg),
         onWindows: (windows, watched) => this.event({ type: 'windows', windows, watched }),
         onCursor: (cursor) => {
@@ -82,6 +82,10 @@ export class ScreenViewer {
           this.event({ type: 'cursor', cursor });
         },
         onClipboard: (text) => this.event({ type: 'clipboard', text }),
+        onDialogs: (dialogs, closed) => this.event({ type: 'dialogs', dialogs, closed }),
+        onSound: (mode, toPc) => this.event({ type: 'sound', mode, toPc }),
+        // The app's sound, when it plays on this PC: the page plays it.
+        onAudio: (packets) => this.event({ type: 'audio', packets: packets.map((p) => p.toString('base64')) }),
         onWaiting: (waiting) => this.event({ type: 'waiting', waiting }),
         onInfo: (info) => this.event({ type: 'info', screen: info }),
         onEnd,
@@ -146,10 +150,13 @@ export class ScreenViewer {
 
   private broadcast(jpeg: Buffer): void {
     this.latest = jpeg;
-    const head = Buffer.from(`--${BOUNDARY}\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpeg.length}\r\n\r\n`);
+    // Each frame ends with the next boundary: a browser shows a part only once that arrives,
+    // and a still window sends no next frame.
+    const head = Buffer.from(`Content-Type: image/jpeg\r\nContent-Length: ${jpeg.length}\r\n\r\n`);
+    const tail = Buffer.from(`\r\n--${BOUNDARY}\r\n`);
     for (const client of this.clients) {
       if (client.busy) continue; // slow browser: drop this frame, send the next
-      const ok = client.res.write(Buffer.concat([head, jpeg, Buffer.from('\r\n')]));
+      const ok = client.res.write(Buffer.concat([head, jpeg, tail]));
       if (!ok) {
         client.busy = true;
         client.res.once('drain', () => (client.busy = false));
@@ -184,7 +191,7 @@ export class ScreenViewer {
       target,
       mode: this.source.kind,
       screen: this.stream.info,
-      ...(app ? { windows: app.windows as AppWindowInfo[], watched: app.watched, waiting: app.waiting, cursor: this.cursor } : {}),
+      ...(app ? { windows: app.windows as AppWindowInfo[], watched: app.watched, waiting: app.waiting, cursor: this.cursor, dialogs: app.dialogs, sound: app.sound } : {}),
     };
   }
 
@@ -217,6 +224,7 @@ export class ScreenViewer {
           pragma: 'no-cache',
         });
         const client: StreamClient = { res, busy: false };
+        res.write(`--${BOUNDARY}\r\n`);
         this.clients.add(client);
         if (this.latest) this.broadcast(this.latest);
         req.on('close', () => {
@@ -269,6 +277,30 @@ export class ScreenViewer {
         res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}');
         return;
       }
+      if (req.method === 'POST' && url.pathname === '/api/sound' && this.app) {
+        const body = await this.readJson(req);
+        if (!isSoundMode(body.mode)) {
+          res.writeHead(400).end('Not a sound setting');
+          return;
+        }
+        await this.setSound(body.mode);
+        res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}');
+        return;
+      }
+      if (req.method === 'POST' && url.pathname.startsWith('/api/dialog/') && this.app) {
+        const body = await this.readJson(req);
+        await this.ensureStream();
+        let data: unknown = null;
+        if (url.pathname === '/api/dialog/answer') await this.app.answerDialog(Number(body.dialog), body.answer);
+        else if (url.pathname === '/api/dialog/list') data = await this.app.listFolder(String(body.path ?? '~'), Boolean(body.hidden));
+        else if (url.pathname === '/api/dialog/mkdir') data = await this.app.makeFolder(String(body.path ?? ''));
+        else {
+          res.writeHead(404).end('Not found');
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ok: true, data }));
+        return;
+      }
       if (req.method === 'POST' && url.pathname === '/api/window-action' && this.app) {
         const body = await this.readJson(req);
         if (typeof body.window === 'number' && ['close', 'minimize', 'zoom'].includes(body.action)) this.app.windowAction(body.window, body.action);
@@ -280,6 +312,13 @@ export class ScreenViewer {
       if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain' });
       res.end(String(err?.message ?? err));
     }
+  }
+
+  /** Where the Electron app's sound plays (remembered for the project, as Studio does). */
+  async setSound(mode: SoundMode): Promise<void> {
+    if (!this.app || this.source.kind !== 'app') return;
+    await soundFor(this.source.projectId, mode);
+    this.app.setSound(mode);
   }
 
   async close(): Promise<void> {

@@ -49,6 +49,18 @@ window.hello.onSayHello(() => {
   document.getElementById('echo').textContent = 'The Hello menu said hello';
 });
 
+// Native dialogs, shown by the main process.
+for (const kind of ['question', 'wait', 'open', 'save', 'error']) {
+  document.getElementById(`dlg-${kind}`).addEventListener('click', async () => {
+    const result = await window.hello.dialog(kind);
+    document.getElementById('dialog-result').textContent = result;
+  });
+}
+
+window.hello.onDialogResult((result) => {
+  document.getElementById('dialog-result').textContent = result;
+});
+
 // Something long enough to scroll.
 document.getElementById('list').innerHTML = Array.from({ length: 40 }, (_, i) => `<li>Item ${i + 1}</li>`).join('');
 

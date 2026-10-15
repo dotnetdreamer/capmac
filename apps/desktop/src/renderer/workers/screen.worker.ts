@@ -9,7 +9,7 @@
  * decoder falls behind, it drops to the next keyframe and asks for one.
  */
 import { parseVideoConfig, STREAM_HEADER_BYTES } from '@capmac/core/shared/stream';
-import type { ScreenPortMessage } from '../../shared/contract';
+import type { ScreenPortCommand, ScreenPortMessage } from '../../shared/contract';
 
 type InMessage =
   | { type: 'canvas'; canvas: OffscreenCanvas }
@@ -20,7 +20,9 @@ type InMessage =
   | { type: 'retry-smooth' }
   | { type: 'video-size'; maxSize: number }
   | { type: 'window'; window: number | null }
-  | { type: 'window-action'; window: number; action: 'close' | 'minimize' | 'zoom' };
+  | { type: 'window-action'; window: number; action: 'close' | 'minimize' | 'zoom' }
+  /** An app's dialogs and sound: a command for the engine, as it is. */
+  | { type: 'dialog'; command: Extract<ScreenPortCommand, { type: 'dialog-answer' | 'dialog-list' | 'dialog-mkdir' | 'sound' }> };
 
 const scope = self as unknown as { postMessage(message: unknown): void; onmessage: ((e: MessageEvent<InMessage>) => void) | null };
 
@@ -323,6 +325,9 @@ scope.onmessage = (e) => {
       break;
     case 'window-action':
       port?.postMessage({ type: 'window-action', window: message.window, action: message.action });
+      break;
+    case 'dialog':
+      port?.postMessage(message.command);
       break;
   }
 };

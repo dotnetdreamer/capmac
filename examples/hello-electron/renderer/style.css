@@ -117,3 +117,9 @@ input {
 code {
   font-size: 0.9em;
 }
+
+.buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
