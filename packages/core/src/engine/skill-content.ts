@@ -1,6 +1,6 @@
 /**
  * The capmac skill: what an AI coding agent (Claude Code, Codex, Copilot, …)
- * needs to know to build, run and check a Capacitor app's iOS side, or an
+ * needs to know to build, run and check a Capacitor app's iOS side, a Flutter app, or an
  * Electron app on the Mac, with the capmac CLI. Agent Skills format (agentskills.io): SKILL.md stays short; the
  * full command list is in references/, read only when needed.
  */
@@ -11,9 +11,9 @@ export const SKILL_NAME = 'capmac';
 export const SKILL_MARKER = 'capmac-skill-version:';
 
 const DESCRIPTION =
-  'Build, run and check the iOS side of a Capacitor or Ionic app, or an Electron app, from Windows, on a Mac paired with the CapMac CLI. ' +
-  'Use when asked to run or test an app on an iOS simulator or iPhone, or an Electron app on a Mac, read its console logs, take a screenshot of it, ' +
-  'fix Xcode or Swift build errors, export an .ipa, or when `npx cap run ios` or `ionic capacitor run ios` comes up on Windows.';
+  'Build, run and check the iOS side of a Capacitor or Ionic app, a Flutter app (iOS, Mac and Windows), or an Electron app, from Windows, on a Mac paired with the CapMac CLI. ' +
+  'Use when asked to run or test an app on an iOS simulator or iPhone, a Flutter or Electron app on a Mac, read its console logs, take a screenshot of it, ' +
+  'fix Xcode, Swift or Dart build errors, export an .ipa, or when `npx cap run ios` or `ionic capacitor run ios` comes up on Windows.';
 
 function skillMd(version: string): string {
   return `---
@@ -22,9 +22,9 @@ description: ${DESCRIPTION}
 ---
 <!-- ${SKILL_MARKER} ${version} -->
 
-# CapMac: iOS for Capacitor apps, and Electron apps on a Mac, from Windows
+# CapMac: iOS for Capacitor and Flutter apps, and Mac apps, from Windows
 
-CapMac drives a Mac over SSH. It syncs the project, builds it with Xcode on the Mac, runs the app on a simulator or iPhone, and brings build errors, console logs and screenshots back to this PC. It runs Electron apps on the Mac's desktop the same way (see below). Run every command from the app's folder (the one with \`capacitor.config.*\`, or an Electron app's \`package.json\`). Edit files on this PC only: the Mac's copy is overwritten on every sync.
+CapMac drives a Mac over SSH. It syncs the project, builds it with Xcode on the Mac, runs the app on a simulator or iPhone, and brings build errors, console logs and screenshots back to this PC. It runs Flutter apps and Electron apps the same way (see below). Run every command from the app's folder (the one with \`capacitor.config.*\`, a Flutter app's \`pubspec.yaml\`, or an Electron app's \`package.json\`). Edit files on this PC only: the Mac's copy is overwritten on every sync.
 
 ## First, check the setup
 
@@ -56,6 +56,10 @@ A typical check after changing code: \`capmac run --for 15\`, read the console f
 ## Electron apps
 
 In an Electron app's folder (plain Electron, electron-vite or Electron Forge), the same commands run the app on the Mac's desktop: \`capmac run --for 20\` or \`capmac run --no-logs\`, then \`capmac screenshot --electron\` for a PNG of its window. In a Capacitor project, add \`--app electron\` (or \`--electron\`) to use its Electron platform instead of iOS; \`capmac apps use electron\` makes that the default, in CapMac Studio too. Console lines start with \`main\` (the main process) or \`js\` (the pages). The app opens behind the windows of whoever is using the Mac and never takes their keyboard, so running it does not disturb them. If the app opens a message box or file dialog, the console prints it and the app waits: answer it with \`capmac dialog <button number or label>\`, \`capmac dialog \"~/path/on/the/mac\"\` or \`capmac dialog --cancel\` (\`capmac dialog\` alone lists what is open). The app's sound is off unless \`--sound mac\` (the Mac's speakers) or \`--sound pc\` (the browser viewer) is given; the choice is remembered for the project. \`capmac screen --electron\` shows the window in the browser as video, which needs far less data; \`--stream compatible\` sends pictures instead (for an old Electron or a browser without WebCodecs), and CapMac Studio uses the same choice.
+
+## Flutter apps
+
+In a Flutter app's folder, \`capmac run --for 20\` runs its iOS app in a simulator on the Mac (Flutter builds it there with \`flutter run\`; CapMac installs Flutter on the Mac the first time). \`--app mac\` runs its Mac app on the Mac's desktop (\`capmac screenshot --app mac\` takes a PNG of its window), and \`--app windows\` its Windows app on this PC, with no Mac. \`--mode profile\` or \`--mode release\` builds as people get it; \`--flavor\`, \`--main <file>\` and \`--dart-define KEY=VALUE\` are Flutter's own options. \`capmac dev\` hot-reloads the app on every save of Dart code (a hot restart when the change needs one); a change to \`pubspec.yaml\` or native code rebuilds it. Console lines start with \`dart\` (the app's \`print\`) or \`app\` (the engine and plugins). Dart compile errors use this PC's paths, \`C:\\path\\to\\lib\\main.dart:12:5: Error: …\`.
 
 ## Building without a Mac
 
@@ -111,8 +115,9 @@ Options shared by \`run\`, \`dev\` and \`build\`:
 
 | Option | Meaning |
 |---|---|
-| \`-a, --app <ios\\|electron>\` | Which of the project's apps (see \`capmac apps\`); default: the one picked with \`capmac apps use\` or in CapMac Studio. |
-| \`-t, --target <name\\|udid>\` | Simulator or device (see \`capmac targets\`); \`mac\` for the Electron app. |
+| \`-a, --app <ios\\|electron\\|mac\\|windows>\` | Which of the project's apps (see \`capmac apps\`); \`mac\` and \`windows\` are a Flutter app's; default: the one picked with \`capmac apps use\` or in CapMac Studio. |
+| \`-t, --target <name\\|udid>\` | Simulator or device (see \`capmac targets\`); \`mac\` for the Mac's desktop, \`pc\` for this PC (a Flutter app's Windows app). |
+| \`--mode <debug\\|profile\\|release>\`, \`--flavor <name>\`, \`--main <file>\`, \`--dart-define K=V\` | A Flutter app's build options. |
 | \`-e, --electron\` | The Electron app, on the Mac's desktop (needed only in a Capacitor project that has iOS too). |
 | \`-d, --device\` | A connected iPhone/iPad instead of a simulator. |
 | \`-c, --configuration <name>\` / \`--release\` | Xcode configuration (Debug by default). |

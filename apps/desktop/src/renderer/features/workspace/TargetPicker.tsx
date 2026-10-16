@@ -6,7 +6,7 @@ import { Popover, usePopover } from '../../ui/Popover';
 import { StatusDot, type Tone } from '../../ui/Feedback';
 import { Icon, type IconName } from '../../ui/Icon';
 import { Spinner } from '../../ui/Feedback';
-import { MAC_TARGET_ID } from '../../state/runs';
+import { MAC_TARGET_ID, PC_TARGET_ID } from '../../state/runs';
 
 /** What `capmac run` would pick when nothing is chosen: a booted iPhone, else the newest iPhone. */
 export function automaticTarget(targets: TargetsResult | null | undefined): Target | null {
@@ -20,8 +20,13 @@ export function macDesktopTarget(label: string, macos: string | null): Target {
   return { kind: 'mac', udid: MAC_TARGET_ID, name: label, os: macos ? `macOS ${macos}` : 'macOS', osVersion: macos ?? '', state: 'available', available: true };
 }
 
+/** This PC as a target (where a Flutter app's Windows app runs), like core's pcTarget. */
+export function thisPcTarget(): Target {
+  return { kind: 'pc', udid: PC_TARGET_ID, name: t.targets.pcName, os: 'Windows', osVersion: '', state: 'available', available: true };
+}
+
 export function targetTone(target: Target): Tone {
-  if (target.kind === 'mac') return 'ok';
+  if (target.kind === 'mac' || target.kind === 'pc') return 'ok';
   if (target.kind === 'simulator') return target.state === 'Booted' ? 'ok' : target.state === 'Booting' || target.state === 'Shutting Down' ? 'busy' : 'idle';
   if (target.state === 'connected') return 'ok';
   return target.available ? 'warn' : 'error';
@@ -29,7 +34,7 @@ export function targetTone(target: Target): Tone {
 
 export function targetState(target: Target): string {
   const s = t.targets.state;
-  if (target.kind === 'mac') return t.targets.macReady;
+  if (target.kind === 'mac' || target.kind === 'pc') return t.targets.macReady;
   if (target.kind === 'simulator') {
     return target.state === 'Booted' ? s.running : target.state === 'Shutdown' ? s.off : target.state === 'Booting' ? s.starting : target.state === 'Shutting Down' ? s.stopping : target.state;
   }
@@ -41,6 +46,7 @@ export function targetState(target: Target): string {
 
 export function targetGlyph(target: Target): IconName {
   if (target.kind === 'mac') return 'mac';
+  if (target.kind === 'pc') return 'desktop';
   return /iPad/i.test(target.name) || /iPad/i.test(target.model ?? '') ? 'tablet' : 'phone';
 }
 
@@ -49,7 +55,7 @@ export function targetGlyph(target: Target): IconName {
  * `onlyMac`: the project is an Electron app, so nothing else is offered;
  * `pc`: it builds on this PC, so the targets are the iPhones plugged into this PC.
  */
-export function TargetPicker({ targets, selected, auto, onSelect, loading, disabled, mac = null, onlyMac = false, pc = false }: { targets: TargetsResult | null; selected: Target | null; auto: boolean; onSelect: (target: Target | null) => void; loading: boolean; disabled?: boolean; mac?: Target | null; onlyMac?: boolean; pc?: boolean }) {
+export function TargetPicker({ targets, selected, auto, onSelect, loading, disabled, mac = null, onlyMac = false, macLabel, pc = false }: { targets: TargetsResult | null; selected: Target | null; auto: boolean; onSelect: (target: Target | null) => void; loading: boolean; disabled?: boolean; mac?: Target | null; onlyMac?: boolean; macLabel?: string; pc?: boolean }) {
   const popover = usePopover();
   const navigate = useApp((s) => s.navigate);
   // On this PC the words are about iPhones plugged in here, not the Mac's simulators.
@@ -80,13 +86,13 @@ export function TargetPicker({ targets, selected, auto, onSelect, loading, disab
       byRuntime.set(target.os, [...(byRuntime.get(target.os) ?? []), target]);
     }
     const result: Array<{ label: string; items: Target[] }> = [];
-    if (mac && match(mac)) result.push({ label: t.targets.macGroup, items: [mac] });
+    if (mac && match(mac)) result.push({ label: macLabel ?? t.targets.macGroup, items: [mac] });
     if (onlyMac) return result;
     if (devices.length) result.push({ label: words.devices, items: devices });
     if (booted.length) result.push({ label: t.targets.running, items: booted });
     for (const [os, items] of byRuntime) result.push({ label: t.targets.simulatorsFor(os), items });
     return result;
-  }, [targets, query, mac, onlyMac, words.devices]);
+  }, [targets, query, mac, onlyMac, macLabel, words.devices]);
   const flat = groups.flatMap((g) => g.items);
 
   const choose = (target: Target) => {
@@ -165,7 +171,7 @@ export function TargetPicker({ targets, selected, auto, onSelect, loading, disab
                     aria-selected={isSelected}
                     aria-disabled={unusable || undefined}
                     className={`target-option${i === active ? ' is-active' : ''}${isSelected ? ' is-selected' : ''}${unusable ? ' is-unusable' : ''}`}
-                    title={target.kind === 'mac' ? t.targets.macHint : undefined}
+                    title={target.kind === 'mac' ? (macLabel ? t.targets.macHintFlutter : t.targets.macHint) : undefined}
                     onPointerMove={() => i !== active && setActive(i)}
                     onClick={() => choose(target)}
                   >

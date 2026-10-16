@@ -4,9 +4,25 @@
  * the binary frame that follows a `frame`, `video` or `screenshot` message
  * delivered with it.
  */
+import { promises as fs } from 'node:fs';
 import net from 'node:net';
 import { encodeJson, FrameDecoder } from '../shared/frames.js';
 import type { HookMessage, HookRequest } from '../shared/electron.js';
+
+/** Where a native Mac app's module listens: a file next to the socket the Electron module would use. */
+export function tcpEndpointFile(socketPath: string): string {
+  return `${socketPath.replace(/\.sock$/, '')}.tcp`;
+}
+
+/** The port and token of a native Mac app's module, while one runs for the project. */
+export async function readTcpEndpoint(socketPath: string): Promise<{ port: number; token: string } | null> {
+  try {
+    const parsed = JSON.parse(await fs.readFile(tcpEndpointFile(socketPath), 'utf8'));
+    return Number.isInteger(parsed.port) && typeof parsed.token === 'string' ? { port: parsed.port, token: parsed.token } : null;
+  } catch {
+    return null;
+  }
+}
 
 export class HookConnection {
   private readonly decoder = new FrameDecoder();
@@ -47,10 +63,22 @@ export class HookConnection {
     });
   }
 
-  /** Connects to the app's socket; rejects when nothing listens there (the app is not running). */
-  static connect(socketPath: string, timeoutMs = 3000): Promise<HookConnection> {
+  /**
+   * Connects to the app's socket; rejects when nothing listens there (the app
+   * is not running). A native Mac app's module listens on a local TCP port
+   * instead (a sandboxed app may not make a socket file): the endpoint file
+   * next to the socket says which, and the first message is its token.
+   */
+  static async connect(socketPath: string, timeoutMs = 3000): Promise<HookConnection> {
+    const tcp = await readTcpEndpoint(socketPath);
+    const conn = await HookConnection.open(tcp ? { port: tcp.port, host: '127.0.0.1' } : { path: socketPath }, timeoutMs);
+    if (tcp) conn.socket.write(encodeJson({ t: 'auth', token: tcp.token }));
+    return conn;
+  }
+
+  private static open(target: net.NetConnectOpts, timeoutMs: number): Promise<HookConnection> {
     return new Promise((resolve, reject) => {
-      const socket = net.connect(socketPath);
+      const socket = net.connect(target);
       const timer = setTimeout(() => {
         socket.destroy();
         reject(new Error('timeout'));

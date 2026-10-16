@@ -32,8 +32,8 @@ const macName = text(100);
 const fsPath = text(4096);
 const udid = z.string().regex(/^[A-Za-z0-9-]{8,64}$/, 'not a device id');
 const id = z.string().regex(/^[a-z0-9-]{1,64}$/);
-/** The apps CapMac runs, by their id in a project (see core's apps.ts). */
-const runnableApp = z.enum(['ios', 'electron']);
+/** The apps CapMac runs, by their id in a project (see core's apps.ts): a Flutter app's Mac and Windows apps too. */
+const runnableApp = z.enum(['ios', 'electron', 'macos', 'windows']);
 export type RunnableApp = z.infer<typeof runnableApp>;
 /** Where a project's iOS app builds: a paired Mac, or this PC with no Mac (see core's backend.ts). */
 const buildBackend = z.enum(['mac', 'wsl']);
@@ -50,6 +50,8 @@ export const sessionOptionsSchema = z.object({
   osLogs: z.boolean().optional(),
   showSimulator: z.boolean().optional(),
   webBuild: z.boolean().optional(),
+  /** A Flutter app's Run: debug (the default), profile or release (`capmac run --mode`). */
+  flutterMode: z.enum(['debug', 'profile', 'release']).optional(),
 }).strict();
 
 /** Params of every engine method the renderer may call. */
@@ -84,8 +86,8 @@ export const engineMethods = {
   /** The app CapMac works on in this project from now on (the CLI too). */
   'projects.setApp': z.object({ path: fsPath, app: runnableApp }).strict(),
   'projects.syncSize': z.object({ path: fsPath }).strict(),
-  /** Copies a bundled sample to Documents\CapMac Studio: the Capacitor iOS app, or the Electron app. */
-  'projects.createSample': z.object({ kind: z.enum(['ios', 'electron']).optional() }).strict(),
+  /** Copies a bundled sample to Documents\CapMac Studio: the Capacitor iOS app, the Electron app, or the Flutter app. */
+  'projects.createSample': z.object({ kind: z.enum(['ios', 'electron', 'flutter']).optional() }).strict(),
   'projects.installDeps': z.object({ path: fsPath }).strict(),
   /** Where the project's iOS app builds from now on: a paired Mac, or this PC (`capmac backend`, the CLI too). */
   'projects.setBackend': z.object({ path: fsPath, backend: buildBackend }).strict(),
@@ -103,8 +105,9 @@ export const engineMethods = {
   }).strict(),
   'sessions.stop': z.object({ sessionId: id }).strict(),
   'sessions.rebuild': z.object({ sessionId: id, clean: z.boolean().optional() }).strict(),
+  /** Live reload: start the app again (a Flutter app: a hot restart). */
   'sessions.relaunch': z.object({ sessionId: id }).strict(),
-  /** An Electron app in live reload: reload its windows. */
+  /** Live reload: an Electron app reloads its windows; a Flutter app hot-reloads. */
   'sessions.reload': z.object({ sessionId: id }).strict(),
   'builds.ipa': z.object({
     projectPath: fsPath,
@@ -185,8 +188,8 @@ export interface DiscoveredMac {
 }
 
 export interface ProjectSummary {
-  /** A Capacitor app, or an Electron app on its own. */
-  kind: 'capacitor' | 'electron';
+  /** A Capacitor app, an Electron app on its own, or a Flutter app. */
+  kind: 'capacitor' | 'electron' | 'flutter';
   path: string;
   appName: string;
   appId: string;
@@ -201,7 +204,9 @@ export interface ProjectSummary {
   devCommand: string | null;
   /** The Electron app (the project itself, or Capacitor's Electron platform), which runs on the Mac's desktop. */
   electron: { flavor: ElectronFlavor; rel: string; name: string; electronRange: string | null } | null;
-  /** Its apps: the iOS app and the Electron app, when it has them. */
+  /** A Flutter app: which of its platform folders are there, its entry point, and the Flutter it asks for. */
+  flutter: { name: string; platforms: { ios: boolean; macos: boolean; windows: boolean }; target: string; flavor: string | null; wants: string | null } | null;
+  /** Its apps: the iOS app, the Electron app, a Flutter app's Mac and Windows apps, when it has them. */
   apps: ProjectApp[];
   /** The app Run and Live use: the one picked for the project, else the iOS app, else the Electron app. */
   app: RunnableApp;

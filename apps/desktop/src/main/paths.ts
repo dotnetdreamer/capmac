@@ -47,6 +47,11 @@ export function electronSampleDir(): string | null {
   return firstExisting(app.isPackaged ? [resources('sample-electron')] : [path.join(appRoot(), '..', '..', 'examples', 'hello-electron'), outDir('sample-electron')]);
 }
 
+/** The Flutter sample ("Try the Flutter sample"), found the same way. */
+export function flutterSampleDir(): string | null {
+  return firstExisting(app.isPackaged ? [resources('sample-flutter')] : [path.join(appRoot(), '..', '..', 'examples', 'hello-flutter'), outDir('sample-flutter')]);
+}
+
 /** node-datachannel (WebRTC for remote access), shipped next to app.asar; in development it comes from node_modules. */
 export function remoteModulesDir(): string | null {
   if (!app.isPackaged) return null;

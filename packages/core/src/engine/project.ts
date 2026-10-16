@@ -6,25 +6,29 @@ import path from 'node:path';
 import { toPosixRel } from '../shared/paths.js';
 import { loadProjectConfig, type ProjectConfig } from './config.js';
 import { capacitorElectronDir, dependsOnElectron, describeElectronApp, readPackageJson, type ElectronProject } from './electron-project.js';
+import { describeFlutterProject, flutterDisplayName, flutterSyncRoot, isFlutterProjectDir, type FlutterProject } from './flutter/project.js';
 import { adoptMemory, recallAll, type ProjectMemory } from './memory.js';
 
 export type { ElectronProject } from './electron-project.js';
+export type { FlutterProject } from './flutter/project.js';
 
 export const CAP_CONFIG_FILES = ['capacitor.config.ts', 'capacitor.config.mts', 'capacitor.config.js', 'capacitor.config.mjs', 'capacitor.config.cjs', 'capacitor.config.json'];
 const LOCKFILES = ['package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lockb', 'bun.lock'];
 
 export type PackageManager = 'npm' | 'yarn' | 'pnpm' | 'bun';
 
-/** A Capacitor app (capacitor.config.*), or an Electron app on its own (a package.json that depends on electron). */
-export type ProjectKind = 'capacitor' | 'electron';
+/** A Capacitor app (capacitor.config.*), an Electron app on its own (a package.json that depends on electron), or a Flutter app (pubspec.yaml). */
+export type ProjectKind = 'capacitor' | 'electron' | 'flutter';
 
 /**
  * The apps CapMac runs, by the id `--app` takes: a Capacitor project's iOS
  * app, and the Electron app (Capacitor's Electron platform, or the project
- * itself). One project can have both.
+ * itself); a Flutter project's iOS app, its Mac app (`macos`, on the Mac's
+ * desktop) and its Windows app (`windows`, on this PC). One project can have several.
  */
-export type RunnableApp = 'ios' | 'electron';
-export const isRunnableApp = (value: unknown): value is RunnableApp => value === 'ios' || value === 'electron';
+export type RunnableApp = 'ios' | 'electron' | 'macos' | 'windows';
+export const RUNNABLE_APPS: readonly RunnableApp[] = ['ios', 'electron', 'macos', 'windows'];
+export const isRunnableApp = (value: unknown): value is RunnableApp => RUNNABLE_APPS.includes(value as RunnableApp);
 
 /** Where a project's iOS app builds: on a paired Mac, or on this PC in WSL with no Mac (see backend.ts). */
 export type BuildBackend = 'mac' | 'wsl';
@@ -55,6 +59,8 @@ export interface ProjectInfo {
   scripts: Record<string, string>;
   /** The Electron app: the project itself, or Capacitor's Electron platform; null when there is none. */
   electron: ElectronProject | null;
+  /** A Flutter project's details (its apps, ids and options); null for other projects. */
+  flutter?: FlutterProject | null;
   /** The app picked for this project (CapMac Studio's app picker, `capmac apps use`), if any. */
   chosenApp?: RunnableApp | null;
 }
@@ -82,9 +88,10 @@ export function findCapacitorDir(start: string): string | null {
 }
 
 /**
- * The project `start` is in: the nearest folder with capacitor.config.*, or
- * with a package.json that depends on electron. Inside Capacitor's Electron
- * platform (electron/), that is the Capacitor project around it.
+ * The project `start` is in: the nearest folder with capacitor.config.*, a
+ * Flutter app's pubspec.yaml, or a package.json that depends on electron.
+ * Inside Capacitor's Electron platform (electron/), that is the Capacitor
+ * project around it.
  */
 export function findProjectDir(start: string): { dir: string; kind: ProjectKind } | null {
   let dir = path.resolve(start);
@@ -92,6 +99,7 @@ export function findProjectDir(start: string): { dir: string; kind: ProjectKind 
     // Capacitor's Electron platform keeps a copy of capacitor.config: the project is the folder above.
     if (isElectronPlatform(dir)) return { dir: path.dirname(dir), kind: 'capacitor' };
     if (hasCapacitorConfig(dir)) return { dir, kind: 'capacitor' };
+    if (isFlutterProjectDir(dir)) return { dir, kind: 'flutter' };
     if (dependsOnElectron(readPackageJson(dir))) return { dir, kind: 'electron' };
     const parent = path.dirname(dir);
     if (parent === dir) return null;
@@ -240,7 +248,7 @@ async function noProjectError(cwd: string): Promise<ProjectError> {
   }
   if (search?.projects.length) return nothingToRun(search);
   return new ProjectError(
-    'No Capacitor or Electron app found here (no capacitor.config.*, or package.json that depends on electron, in this folder or its parents).',
+    'No Capacitor, Flutter or Electron app found here (no capacitor.config.*, Flutter pubspec.yaml, or package.json that depends on electron, in this folder or its parents).',
     'Run capmac from your app’s folder.',
   );
 }
@@ -309,10 +317,42 @@ async function loadElectronProject(dir: string): Promise<ProjectInfo> {
   };
 }
 
+/** A Flutter app: one project, an app per platform folder (ios/, macos/, windows/). */
+async function loadFlutterProject(dir: string): Promise<ProjectInfo> {
+  const flutter = describeFlutterProject(dir);
+  if (!flutter) throw new ProjectError('This pubspec.yaml is not a Flutter app’s.', 'CapMac runs Flutter apps: a pubspec.yaml that depends on the Flutter SDK (flutter: sdk: flutter).');
+  const syncRoot = flutterSyncRoot(dir, flutter);
+  const config = await loadProjectConfig(dir);
+  const projectId = projectIdFor(flutter.name, dir);
+  return {
+    kind: 'flutter',
+    capDir: dir,
+    configFile: path.join(dir, 'pubspec.yaml'),
+    syncRoot,
+    projectRel: toPosixRel(syncRoot, dir),
+    appId: flutter.ios?.bundleId ?? flutter.macos?.bundleId ?? flutter.name,
+    appName: flutterDisplayName(flutter),
+    // Flutter builds its own assets; there is no web folder to copy.
+    webDir: '',
+    iosDir: 'ios',
+    scheme: flutter.options.flavor ?? 'Runner',
+    iosPackageManager: !flutter.ios ? 'unknown' : flutter.ios.plugins === 'SPM' ? 'SPM' : 'CocoaPods',
+    hasIos: flutter.platforms.ios,
+    packageManager: 'npm',
+    projectId,
+    config,
+    scripts: {},
+    electron: null,
+    flutter,
+    chosenApp: await recallApp(projectId, dir, [flutter.name]),
+  };
+}
+
 export async function loadProject(cwd: string): Promise<ProjectInfo> {
   const found = findProjectDir(cwd);
   if (!found) throw await noProjectError(cwd);
   if (found.kind === 'electron') return loadElectronProject(found.dir);
+  if (found.kind === 'flutter') return loadFlutterProject(found.dir);
   const capDir = found.dir;
   const configFile = CAP_CONFIG_FILES.map((f) => path.join(capDir, f)).find((f) => existsSync(f))!;
   const resolved = (await evaluateWithCli(capDir)) ?? (await evaluateStatically(configFile));
@@ -390,12 +430,28 @@ export function requireIos(project: ProjectInfo): void {
   if (project.kind === 'electron') {
     throw new ProjectError('This is an Electron app: it has no iOS app to build.', 'It runs on the Mac’s desktop: `capmac run` launches it there.');
   }
+  if (project.kind === 'flutter') {
+    if (!project.hasIos) throw new ProjectError('This Flutter app has no iOS app yet (ios/Runner.xcodeproj is missing).', 'Add it on Windows with `flutter create --platforms ios .`, then run again.');
+    return;
+  }
   if (!project.hasIos) {
     throw new ProjectError(`This app has no iOS platform yet (${project.iosDir}/App is missing).`, 'Add it with `npx cap add ios` (or `npx cap add ios --packagemanager SPM`), then run again.');
   }
 }
 
+/** A Flutter project's details, for code that only runs Flutter apps. */
+export function requireFlutter(project: ProjectInfo, app?: 'ios' | 'macos' | 'windows'): FlutterProject {
+  const flutter = project.kind === 'flutter' ? project.flutter : null;
+  if (!flutter) throw new ProjectError('This is not a Flutter app.', 'Run capmac in the folder with your Flutter app’s pubspec.yaml.');
+  if (app && !flutter.platforms[app]) {
+    const what = app === 'ios' ? 'an iOS app' : app === 'macos' ? 'a Mac app' : 'a Windows app';
+    throw new ProjectError(`This Flutter app has no ${what.slice(what.indexOf(' ') + 1)} yet (${app}/ is missing).`, `Add ${what} on Windows with \`flutter create --platforms ${app} .\`, then run again.`);
+  }
+  return flutter;
+}
+
 export function requireElectron(project: ProjectInfo): ElectronProject {
+  if (project.kind === 'flutter') throw new ProjectError('This is a Flutter app: it has no Electron app.', 'Its Mac app runs on the Mac’s desktop: `capmac run --app macos`.');
   if (project.electron) return project.electron;
   throw new ProjectError(
     'This app has no Electron platform.',
@@ -405,11 +461,11 @@ export function requireElectron(project: ProjectInfo): ElectronProject {
 
 /** What a command says about which app it is for (its flags). */
 export interface AppOptions {
-  /** `--app`: the app's id ('ios' or 'electron'). */
+  /** `--app`: the app's id ('ios', 'electron', 'macos' or 'windows'). */
   app?: string;
   /** `--electron`: the Electron app. */
   electron?: boolean;
-  /** A simulator or device (the iOS app), or "mac" (the Electron app). */
+  /** A simulator or device (the iOS app), "mac" (the Mac desktop app) or "pc" (a Flutter app's Windows app, on this PC). */
   target?: string;
   /** A device or a simulator: places only the iOS app runs. */
   device?: boolean;
@@ -417,32 +473,71 @@ export interface AppOptions {
 }
 
 const MAC_TARGET = /^(mac|macos|electron|mac-desktop|this mac)$/i;
+const PC_TARGET = /^(pc|this pc|this-pc|windows|pc-desktop)$/i;
+
+/** The apps a project has, by id: the ones `--app` takes for it. */
+export function projectApps(project: ProjectInfo): RunnableApp[] {
+  if (project.kind === 'electron') return ['electron'];
+  if (project.kind === 'flutter') {
+    const platforms = project.flutter?.platforms;
+    return (['ios', 'macos', 'windows'] as const).filter((app) => platforms?.[app]);
+  }
+  // A Capacitor project always has room for its iOS app (it can be added from CapMac).
+  return project.electron ? ['ios', 'electron'] : ['ios'];
+}
+
+/** `--app` as people type it: the Mac app is "mac" too, the Windows app "pc" or "win". */
+function appNamed(project: ProjectInfo, name: string): RunnableApp | null {
+  const wanted = name.trim().toLowerCase();
+  if (isRunnableApp(wanted)) return wanted;
+  if (MAC_TARGET.test(wanted)) return project.kind === 'flutter' ? 'macos' : 'electron';
+  if (PC_TARGET.test(wanted) || wanted === 'win') return 'windows';
+  if (wanted === 'iphone' || wanted === 'ipad') return 'ios';
+  return null;
+}
 
 /**
  * Which of the project's apps a command is for: the one asked for (`--app`),
  * the project itself when it is an Electron app, a place only one app runs
- * (`--electron`, `--target mac`, a simulator or a device), else the app
- * picked for the project, else its iOS app, else its Electron app.
+ * (`--electron`, `--target mac`, `--target pc`, a simulator or a device), else
+ * the app picked for the project, else its iOS app, else its first other app.
  */
 export function appFor(project: ProjectInfo, options: AppOptions = {}): RunnableApp {
+  const apps = projectApps(project);
   if (options.app !== undefined) {
-    const wanted = options.app.trim().toLowerCase();
-    if (isRunnableApp(wanted)) return wanted;
-    const apps = project.kind === 'electron' ? 'electron' : project.electron ? 'ios, electron' : 'ios';
-    throw new ProjectError(`There is no app called "${options.app}" here.`, `This project's apps: ${apps}. See them with \`capmac apps\`.`);
+    const wanted = appNamed(project, options.app);
+    // An app the project could have but does not yet is fine here: running it says how to add it.
+    const kinds: readonly RunnableApp[] = project.kind === 'flutter' ? ['ios', 'macos', 'windows'] : ['ios', 'electron'];
+    if (wanted && kinds.includes(wanted)) return wanted;
+    throw new ProjectError(`There is no app called "${options.app}" here.`, `This project's apps: ${apps.join(', ') || 'none yet'}. See them with \`capmac apps\`.`);
   }
   if (project.kind === 'electron') return 'electron';
-  if (options.electron) return 'electron';
-  if (options.target) return MAC_TARGET.test(options.target.trim()) ? 'electron' : 'ios';
+  if (options.electron) {
+    if (project.kind === 'flutter') throw new ProjectError('This is a Flutter app: it has no Electron app.', 'Its Mac app is `--app macos`.');
+    return 'electron';
+  }
+  if (options.target) {
+    const target = options.target.trim();
+    if (MAC_TARGET.test(target)) return project.kind === 'flutter' ? 'macos' : 'electron';
+    if (project.kind === 'flutter' && PC_TARGET.test(target)) return 'windows';
+    return 'ios';
+  }
   if (options.device || options.simulator) return 'ios';
-  // An app picked before still exists (a Capacitor project always has room for its iOS app).
-  if (project.chosenApp === 'ios' || (project.chosenApp === 'electron' && project.electron)) return project.chosenApp;
+  // An app picked before that still exists.
+  if (project.chosenApp && apps.includes(project.chosenApp)) return project.chosenApp;
+  if (project.kind === 'flutter') return apps[0] ?? 'ios';
   return project.electron && !project.hasIos ? 'electron' : 'ios';
 }
 
-/** Whether a command is for the Electron app, on the Mac's desktop, rather than a simulator or device (see appFor). */
+/** Whether a command is for an app that runs on the Mac's desktop (Electron, or a Flutter app's Mac app) rather than a simulator or device (see appFor). */
 export function runsOnMac(project: ProjectInfo, options: AppOptions = {}): boolean {
-  return appFor(project, options) === 'electron';
+  const app = appFor(project, options);
+  return app === 'electron' || app === 'macos';
+}
+
+/** Whether a command is for a Flutter app's Windows app, which runs on this PC (see appFor). */
+export function runsOnPc(project: ProjectInfo, options: AppOptions = {}): boolean {
+  return appFor(project, options) === 'windows';
 }
 
 /** Whether the iOS app adopts the UIScene lifecycle (required when building with the iOS 27 SDK). */

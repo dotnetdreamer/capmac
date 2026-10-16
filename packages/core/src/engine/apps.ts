@@ -14,25 +14,26 @@ import { existsSync, promises as fs, readFileSync, type Dirent } from 'node:fs';
 import path from 'node:path';
 import { toPosixRel } from '../shared/paths.js';
 import { allDependencies, capacitorElectronDir, dependsOnElectron, describeElectronApp, electronProductName, readPackageJson, type ElectronProject } from './electron-project.js';
+import { describeFlutterProject, flutterDisplayName, type FlutterProject } from './flutter/project.js';
 import { recallAll, remember, type ProjectMemory } from './memory.js';
-import { appFor, CAP_CONFIG_FILES, evaluatedCapacitorName, findSyncRoot, isElectronPlatform, isRunnableApp, loadProject, ProjectError, projectIdFor, projectMemory, readCapacitorConfig, requireElectron, type ProjectInfo, type RunnableApp } from './project.js';
+import { appFor, CAP_CONFIG_FILES, evaluatedCapacitorName, findSyncRoot, isElectronPlatform, isRunnableApp, loadProject, ProjectError, projectIdFor, projectMemory, readCapacitorConfig, requireElectron, requireFlutter, type ProjectInfo, type RunnableApp } from './project.js';
 
-/** What an app is to CapMac: an iOS app (simulators, iPhones and iPads) or a Mac desktop app. */
-export type AppPlatform = 'ios' | 'mac';
+/** What an app is to CapMac: an iOS app (simulators, iPhones and iPads), a Mac desktop app, or a Windows desktop app (a Flutter app's, run on this PC). */
+export type AppPlatform = 'ios' | 'mac' | 'windows';
 
-/** The frameworks CapMac recognises. It runs Capacitor and Electron apps today. */
+/** The frameworks CapMac recognises. It runs Capacitor, Flutter and Electron apps today. */
 export type AppFramework = 'capacitor' | 'electron' | 'flutter' | 'react-native' | 'expo' | 'tauri' | 'maui' | 'cordova' | 'nativescript' | 'xcode';
 
 export interface ProjectApp {
   /**
-   * The app's id in its project: 'ios' or 'electron' for the apps CapMac
-   * runs (what `--app` takes, and what CapMac remembers), 'ios' or 'macos'
-   * for the ones it only recognises.
+   * The app's id in its project: 'ios', 'electron', 'macos' or 'windows' for
+   * the apps CapMac runs (what `--app` takes, and what CapMac remembers),
+   * 'ios' or 'macos' for the ones it only recognises.
    */
   id: string;
   platform: AppPlatform;
   framework: AppFramework;
-  /** How it is built: an iOS app's package manager ('SPM', 'CocoaPods'), an Electron app's tool ('capacitor', 'electron-vite', 'forge', 'plain'). */
+  /** How it is built: an Apple app's plugin or package manager ('SPM', 'CocoaPods', 'SPM+CocoaPods'), an Electron app's tool ('capacitor', 'electron-vite', 'forge', 'plain'). */
   flavor: string | null;
   /** The app's name, as on the Home Screen or in the Dock. */
   name: string;
@@ -184,9 +185,33 @@ async function capacitorApps(parts: CapacitorParts): Promise<ProjectApp[]> {
   return apps;
 }
 
+/**
+ * A Flutter project's apps: one per platform folder CapMac runs. The iOS app
+ * runs on simulators and iPhones (through the Mac, or built on this PC), the
+ * Mac app on the Mac's desktop, the Windows app on this PC.
+ */
+async function flutterApps(dir: string, flutter: FlutterProject): Promise<ProjectApp[]> {
+  const apps: ProjectApp[] = [];
+  const version = flutter.pubspec.environment.flutter ?? null;
+  const iosIcon = flutter.platforms.ios ? await iconInAssets(path.join(dir, 'ios', 'Runner', 'Assets.xcassets')) : null;
+  const macIcon = flutter.platforms.macos ? await iconInAssets(path.join(dir, 'macos', 'Runner', 'Assets.xcassets')) : null;
+  const name = flutterDisplayName(flutter);
+  if (flutter.platforms.ios) {
+    apps.push({ id: 'ios', platform: 'ios', framework: 'flutter', flavor: flutter.ios?.plugins ?? null, name: flutter.ios?.displayName ?? name, rel: 'ios', version, icon: iosIcon, status: 'ready', evidence: ['pubspec.yaml', 'ios/Runner.xcodeproj'] });
+  }
+  if (flutter.platforms.macos) {
+    apps.push({ id: 'macos', platform: 'mac', framework: 'flutter', flavor: flutter.macos?.plugins ?? null, name: flutter.macos?.displayName ?? name, rel: 'macos', version, icon: macIcon, status: 'ready', evidence: ['pubspec.yaml', 'macos/Runner.xcodeproj'] });
+  }
+  if (flutter.platforms.windows) {
+    apps.push({ id: 'windows', platform: 'windows', framework: 'flutter', flavor: null, name, rel: 'windows', version, icon: iosIcon ?? macIcon, status: 'ready', evidence: ['pubspec.yaml', 'windows/CMakeLists.txt'] });
+  }
+  return apps;
+}
+
 /** The apps of a project CapMac has loaded (names as the project's own tools see them). */
 export async function appsOf(project: ProjectInfo): Promise<ProjectApp[]> {
   if (project.kind === 'electron') return project.electron ? [electronApp(project.electron)] : [];
+  if (project.kind === 'flutter') return project.flutter ? flutterApps(project.capDir, project.flutter) : [];
   return capacitorApps({
     dir: project.capDir,
     configFile: project.configFile,
@@ -202,6 +227,7 @@ export async function chooseApp(project: ProjectInfo, app: string): Promise<Runn
   const id = appFor(project, { app });
   if (id === 'ios' && project.kind === 'electron') throw new ProjectError('This is an Electron app: it has no iOS app.', 'It runs on the Mac’s desktop: `capmac run` launches it there.');
   if (id === 'electron') requireElectron(project);
+  if (project.kind === 'flutter' && id !== 'electron') requireFlutter(project, id);
   await remember(project.projectId, { app: id });
   return id;
 }
@@ -261,13 +287,10 @@ const electron: Detector = (dir, names, nested) => {
 
 const flutter: Detector = async (dir, names) => {
   if (!names.has('pubspec.yaml')) return null;
-  const pubspec = readText(path.join(dir, 'pubspec.yaml')) ?? '';
-  if (!/^\s*sdk:\s*flutter\b/m.test(pubspec) && !/^flutter\s*:/m.test(pubspec)) return null;
-  const name = pubspec.match(/^name:\s*["']?([^"'\s#]+)/m)?.[1] ?? path.basename(dir);
-  const apps: ProjectApp[] = [];
-  if (names.has('ios')) apps.push(recognised('ios', 'ios', 'flutter', name, 'ios', ['pubspec.yaml', 'ios/Runner.xcodeproj'], null, await iconInAssets(path.join(dir, 'ios', 'Runner', 'Assets.xcassets'))));
-  if (names.has('macos')) apps.push(recognised('macos', 'mac', 'flutter', name, 'macos', ['pubspec.yaml', 'macos/Runner.xcodeproj'], null, await iconInAssets(path.join(dir, 'macos', 'Runner', 'Assets.xcassets'))));
-  return { framework: 'flutter', name, idName: name, apps, claims: ['ios', 'macos', 'android', 'web', 'windows', 'linux', 'build'] };
+  const project = describeFlutterProject(dir);
+  if (!project) return null;
+  // The id comes from the package name, as loadProject makes it.
+  return { framework: 'flutter', name: flutterDisplayName(project), idName: project.name, apps: await flutterApps(dir, project), claims: ['ios', 'macos', 'android', 'web', 'windows', 'linux', 'build'] };
 };
 
 const reactNative: Detector = (dir, names) => {
@@ -590,6 +613,11 @@ function mayHaveOldPick(found: DetectedProject, memory: Record<string, ProjectMe
 /** The app CapMac works on in a project findApps found: appFor's rule, without loading the project. Null when it runs none of its apps. */
 export function currentApp(project: DetectedProject): RunnableApp | null {
   const has = (id: string) => project.apps.some((a) => a.id === id && canRun(a));
+  if (project.framework === 'flutter') {
+    const runnable = project.apps.filter(canRun).map((a) => a.id).filter(isRunnableApp);
+    if (project.chosen && runnable.includes(project.chosen)) return project.chosen;
+    return runnable[0] ?? null;
+  }
   if (!has('ios') && !has('electron')) return null;
   if (project.framework === 'electron') return 'electron';
   if (project.chosen === 'ios' || (project.chosen === 'electron' && has('electron'))) return project.chosen;
@@ -639,13 +667,13 @@ export function nothingToRun(search: AppSearch): ProjectError {
   const others = [...new Set(search.projects.map((p) => frameworkName(p.framework)))];
   if (others.length === 1) {
     const name = others[0]!;
-    return new ProjectError(`CapMac found ${/^[aeiox]/i.test(name) ? 'an' : 'a'} ${name} app here, but it can't run ${name} apps yet.`, 'It runs Capacitor, Ionic and Electron apps today.');
+    return new ProjectError(`CapMac found ${/^[aeiox]/i.test(name) ? 'an' : 'a'} ${name} app here, but it can't run ${name} apps yet.`, 'It runs Capacitor, Ionic, Flutter and Electron apps today.');
   }
   if (others.length > 1) {
-    return new ProjectError(`CapMac found ${others.slice(0, -1).join(', ')} and ${others.at(-1)} apps here, but it can't run those yet.`, 'It runs Capacitor, Ionic and Electron apps today.');
+    return new ProjectError(`CapMac found ${others.slice(0, -1).join(', ')} and ${others.at(-1)} apps here, but it can't run those yet.`, 'It runs Capacitor, Ionic, Flutter and Electron apps today.');
   }
   return new ProjectError(
-    'No Capacitor or Electron app found here (no capacitor.config.*, or package.json that depends on electron, in this folder, the ones above it or the ones inside it).',
-    'Pick your app’s folder: the one with capacitor.config.ts, or your Electron app’s package.json.',
+    'No Capacitor, Flutter or Electron app found here (no capacitor.config.*, Flutter pubspec.yaml, or package.json that depends on electron, in this folder, the ones above it or the ones inside it).',
+    'Pick your app’s folder: the one with capacitor.config.ts, your Flutter app’s pubspec.yaml, or your Electron app’s package.json.',
   );
 }

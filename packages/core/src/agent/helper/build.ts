@@ -283,3 +283,49 @@ export async function helperState(source: string, env: NodeJS.ProcessEnv): Promi
   if (error !== null) return { state: 'failed', xcode: xcode.version, input, detail: compilerSummary(error, 4).join('\n') };
   return { state: 'not-built', xcode: xcode.version, input };
 }
+
+// ─── The module for native Mac apps (apphook) ───────────────────────────────
+
+const APP_HOOK_FRAMEWORKS = ['AppKit', 'CoreMedia', 'CoreVideo', 'ImageIO', 'IOKit', 'IOSurface', 'QuartzCore', 'VideoToolbox'];
+
+/**
+ * CapMac's module for native Mac apps, compiled with the Mac's own clang on
+ * first use (for both Mac architectures, so it loads into any build of the
+ * app) and cached like the stream helper. ScreenCaptureKit is linked weakly:
+ * the module still loads on a macOS without it, and then shows no window.
+ */
+export async function ensureAppHook(source: string, env: NodeJS.ProcessEnv, options: { signal?: AbortSignal; onBuild?: () => void } = {}): Promise<string> {
+  const xcode = await selectedXcode(env);
+  if (!xcode) throw new AgentError('Showing a Mac app’s window needs Xcode, and the Mac has only the Command Line Tools selected.', 'STREAM_UNSUPPORTED', 'Run `sudo xcode-select -s /Applications/Xcode.app` on the Mac.');
+  const hash = createHash('sha256').update(source).update('\0apphook\0').update(xcode.developerDir).update('\0').update(xcode.build || xcode.version).digest('hex').slice(0, 16);
+  const dir = helperDir(hash);
+  const dylib = path.join(dir, 'capmac-apphook.dylib');
+  const errorLog = path.join(dir, 'error.log');
+  if (await fs.stat(dylib).then((s) => s.isFile(), () => false)) {
+    const now = new Date();
+    await fs.utimes(dir, now, now).catch(() => undefined);
+    return dylib;
+  }
+  const cached = await fs.readFile(errorLog, 'utf8').catch(() => null);
+  if (cached !== null) throw new AgentError('CapMac’s module for Mac apps does not compile with this Xcode.', 'HELPER_BUILD_FAILED', 'Updating CapMac usually fixes this after an Xcode update.', compilerSummary(cached));
+  options.onBuild?.();
+  await fs.mkdir(dir, { recursive: true });
+  const file = path.join(dir, 'apphook.m');
+  await fs.writeFile(file, source);
+  const tmp = path.join(dir, `capmac-apphook.${process.pid}.tmp`);
+  const args = ['clang', '-dynamiclib', '-fobjc-arc', '-O2', '-arch', 'arm64', '-arch', 'x86_64', '-mmacosx-version-min=12.0', '-Wno-objc-method-access', ...APP_HOOK_FRAMEWORKS.flatMap((f) => ['-framework', f]), '-weak_framework', 'ScreenCaptureKit', file, '-o', tmp];
+  const r = await run('xcrun', args, { env: { ...env, DEVELOPER_DIR: xcode.developerDir }, signal: options.signal, timeoutMs: 180_000 });
+  if (r.cancelled) {
+    await fs.rm(tmp, { force: true });
+    throw new AgentError('Cancelled', 'CANCELLED');
+  }
+  if (r.code !== 0) {
+    await fs.rm(tmp, { force: true });
+    const output = `${r.stderr}\n${r.stdout}`.trim() || `clang exited with ${r.code ?? r.signal}`;
+    if (!r.timedOut) await fs.writeFile(errorLog, output).catch(() => undefined);
+    throw new AgentError('CapMac’s module for Mac apps does not compile with this Xcode.', 'HELPER_BUILD_FAILED', 'Updating CapMac usually fixes this after an Xcode update.', compilerSummary(output));
+  }
+  await fs.rename(tmp, dylib);
+  await removeOldBuilds(hash);
+  return dylib;
+}

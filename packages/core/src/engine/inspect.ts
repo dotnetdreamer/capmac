@@ -6,7 +6,7 @@ import { scanProject } from './scan.js';
 import { scanOptionsFor } from './sync-client.js';
 
 export interface ProjectSummary {
-  /** A Capacitor app, or an Electron app on its own. */
+  /** A Capacitor app, an Electron app on its own, or a Flutter app. */
   kind: ProjectInfo['kind'];
   /** Folder with capacitor.config.* (or the Electron app's package.json). */
   path: string;
@@ -33,7 +33,16 @@ export interface ProjectSummary {
     name: string;
     electronRange: string | null;
   } | null;
-  /** Its apps: the iOS app and the Electron app, when it has them (see apps.ts). */
+  /** A Flutter app's details: its platform folders, entry point and the Flutter version it asks for. */
+  flutter: {
+    name: string;
+    platforms: NonNullable<ProjectInfo['flutter']>['platforms'];
+    target: string;
+    flavor: string | null;
+    /** The Flutter version the project pins (FVM, capmac.json), else its pubspec constraint. */
+    wants: string | null;
+  } | null;
+  /** Its apps: the iOS app, the Electron app, a Flutter app's Mac and Windows apps, when it has them (see apps.ts). */
   apps: ProjectApp[];
   /** The app Run and Live use: the one picked for the project, else the iOS app, else the Electron app. */
   app: RunnableApp;
@@ -51,7 +60,7 @@ export async function inspectProject(dir: string): Promise<ProjectSummary> {
 export async function summarizeProject(project: ProjectInfo): Promise<ProjectSummary> {
   const electron = project.electron;
   // An Electron app's dev command runs on the Mac: nothing to install on this PC for it.
-  const devCommand = project.kind === 'electron'
+  const devCommand = project.kind !== 'capacitor'
     ? null
     : project.config.web?.devUrl ?? project.config.web?.dev ?? (project.scripts.dev ? 'dev' : project.scripts.start ? 'start' : project.scripts.serve ? 'serve' : null);
   const apps = await appsOf(project);
@@ -71,6 +80,9 @@ export async function summarizeProject(project: ProjectInfo): Promise<ProjectSum
     hasNodeModules: hasInstalledDependencies(project),
     devCommand,
     electron: electron ? { flavor: electron.flavor, rel: electron.rel, name: electron.name, electronRange: electron.electronRange } : null,
+    flutter: project.flutter
+      ? { name: project.flutter.name, platforms: project.flutter.platforms, target: project.flutter.target, flavor: project.flutter.options.flavor ?? null, wants: project.flutter.wantsFlutter.exact ?? project.flutter.wantsFlutter.constraint }
+      : null,
     apps,
     app,
     appChosen: project.chosenApp === app,

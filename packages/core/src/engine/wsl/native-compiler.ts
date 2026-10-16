@@ -9,7 +9,8 @@ import { linkWithObjCStubs } from './objc-stubs.js';
 import { embedWslSwiftRuntimes } from './swift-runtime.js';
 
 export interface WslNativeSource { path: string; flags?: string[] }
-export interface WslNativeFramework { path?: string; name?: string; weak?: boolean; embed?: boolean }
+/** `link: false`: embedded only (Flutter's App.framework, which Flutter's engine opens itself). */
+export interface WslNativeFramework { path?: string; name?: string; weak?: boolean; embed?: boolean; link?: boolean }
 export interface WslNativeTarget {
   id: string;
   name: string;
@@ -291,6 +292,9 @@ export async function buildNativeWithToolchain(plan: WslNativeBuildPlan, executo
     await run(['python3', '-c', 'import pathlib,shutil,sys; root=pathlib.Path(sys.argv[1]); lib=root/"usr/lib"; lib.mkdir(parents=True,exist_ok=True); (lib/"swift").symlink_to(sys.argv[2],target_is_directory=True); bindir=root/"usr/bin"; bindir.mkdir(parents=True,exist_ok=True); [(bindir/name).symlink_to(shutil.which(tool) or tool) for name,tool in zip(["swiftc","clang","ar"],sys.argv[3:])]', toolchainDirectory, tools.swiftResourcePath, tools.swiftcPath, tools.clangPath ?? 'clang', tools.archivePath ?? 'llvm-ar']);
   }
 
+  // A Capacitor app's Info.plist gets CAPACITOR_DEBUG (it turns on the web view's inspector); other apps, such as Flutter's, don't.
+  const capacitor = ordered.some((target) => /Capacitor|Cordova/.test(target.name) || target.frameworks.some((framework) => /Capacitor|Cordova/.test(framework.path ?? framework.name ?? '')));
+
   // All products/header interfaces are prepared first so Clang can resolve
   // public headers while Swift emits the generated Objective-C interface.
   for (const target of ordered) {
@@ -318,7 +322,7 @@ export async function buildNativeWithToolchain(plan: WslNativeBuildPlan, executo
       PLUGINS_FOLDER_PATH: `${target.productName}/PlugIns`,
       IPHONEOS_DEPLOYMENT_TARGET: rawString(target.settings.IPHONEOS_DEPLOYMENT_TARGET) || '15.0',
       PRODUCT_BUNDLE_IDENTIFIER: rawString(target.settings.PRODUCT_BUNDLE_IDENTIFIER) || `dev.capmac.${target.moduleName}`,
-      CAPACITOR_DEBUG: rawString(target.settings.CAPACITOR_DEBUG) || (plan.graph.configuration === 'Debug' || /\bDEBUG(?:=1)?\b/.test(rawString(target.settings.SWIFT_ACTIVE_COMPILATION_CONDITIONS) + ' ' + rawString(target.settings.GCC_PREPROCESSOR_DEFINITIONS)) ? 'true' : 'false'),
+      ...(capacitor || target.settings.CAPACITOR_DEBUG !== undefined ? { CAPACITOR_DEBUG: rawString(target.settings.CAPACITOR_DEBUG) || (plan.graph.configuration === 'Debug' || /\bDEBUG(?:=1)?\b/.test(rawString(target.settings.SWIFT_ACTIVE_COMPILATION_CONDITIONS) + ' ' + rawString(target.settings.GCC_PREPROCESSOR_DEFINITIONS)) ? 'true' : 'false') } : {}),
       PACKAGE_TYPE: packageType, PRODUCT_BUNDLE_PACKAGE_TYPE: packageType,
       APPLICATION_EXTENSION_API_ONLY: rawString(target.settings.APPLICATION_EXTENSION_API_ONLY) || (target.productType === 'appExtension' ? 'YES' : 'NO'),
       LD_ENTRY_POINT: rawString(target.settings.LD_ENTRY_POINT) || (target.productType === 'appExtension' ? '_NSExtensionMain' : ''),
@@ -556,6 +560,7 @@ export async function buildNativeWithToolchain(plan: WslNativeBuildPlan, executo
       if (settings.LD_ENTRY_POINT) linkFlags.push(...nativeLinkerArguments(['-e', settings.LD_ENTRY_POINT]));
       if (settings.APPLICATION_EXTENSION_API_ONLY === 'YES') linkFlags.push(...nativeLinkerArguments(['-application_extension']));
       for (const framework of target.frameworks) {
+        if (framework.link === false) continue;
         if (framework.path) {
           const location = await frameworkLocation(framework.path, output);
           if (location.endsWith('.framework')) linkFlags.push(...nativeLinkerArguments(['-F', path.posix.dirname(location), framework.weak ? '-weak_framework' : '-framework', path.posix.basename(location, '.framework')]));

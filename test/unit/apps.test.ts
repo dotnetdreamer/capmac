@@ -144,9 +144,6 @@ describe('the apps in a folder', () => {
   });
 
   it('recognises apps CapMac cannot run yet, so it can say what it found', async () => {
-    write('flutter_app/pubspec.yaml', 'name: dash_app\ndependencies:\n  flutter:\n    sdk: flutter\n');
-    write('flutter_app/ios/Runner.xcodeproj/project.pbxproj');
-    write('flutter_app/macos/Runner.xcodeproj/project.pbxproj');
     write('rn/package.json', { name: 'RnApp', dependencies: { 'react-native': '0.82.0' } });
     write('rn/app.json', { name: 'RnApp', displayName: 'Rn App' });
     write('rn/ios/RnApp.xcodeproj/project.pbxproj');
@@ -169,7 +166,6 @@ describe('the apps in a folder', () => {
     expect(summary).toEqual({
       cordova: ['cordova', 'Cordova App', ['ios:ios:unsupported']],
       expo: ['expo', 'Expo App', ['ios:ios:unsupported']],
-      flutter_app: ['flutter', 'dash_app', ['ios:ios:unsupported', 'macos:mac:unsupported']],
       maui: ['maui', 'Maui App', ['ios:ios:unsupported', 'macos:mac:unsupported']],
       native: ['xcode', 'Native', ['ios:ios:unsupported', 'macos:mac:unsupported']],
       rn: ['react-native', 'Rn App', ['ios:ios:unsupported']],
@@ -177,7 +173,16 @@ describe('the apps in a folder', () => {
       tauri: ['tauri', 'Screenshots', ['ios:ios:unsupported', 'macos:mac:unsupported']],
     });
     expect(search.suggested).toBeNull();
-    expect(nothingToRun(search).message).toBe("CapMac found Cordova, Expo, Flutter, .NET MAUI, Xcode, React Native and Tauri apps here, but it can't run those yet.");
+    expect(nothingToRun(search).message).toBe("CapMac found Cordova, Expo, .NET MAUI, Xcode, React Native and Tauri apps here, but it can't run those yet.");
+  });
+
+  it('runs a Flutter app it finds in a folder inside', async () => {
+    write('flutter_app/pubspec.yaml', 'name: dash_app\ndependencies:\n  flutter:\n    sdk: flutter\n');
+    write('flutter_app/ios/Runner.xcodeproj/project.pbxproj');
+    write('flutter_app/macos/Runner.xcodeproj/project.pbxproj');
+    const search = await findApps(dir);
+    expect(search.projects.map((p) => [p.rel, p.framework, p.name, p.apps.map((a) => `${a.id}:${a.platform}:${a.status}`)])).toEqual([['flutter_app', 'flutter', 'Dash App', ['ios:ios:ready', 'macos:mac:ready']]]);
+    expect(search.suggested).toEqual({ dir: at('flutter_app'), app: 'ios' });
   });
 
   it('tells `capmac run` in a folder without an app of its own what is there instead', async () => {
@@ -185,18 +190,20 @@ describe('the apps in a folder', () => {
     capacitorProject('apps/mobile', { electron: false });
     await expect(loadProject(dir)).rejects.toThrow(/no app in this folder itself, but there are apps in the folders inside it/);
     rmSync(at('apps'), { recursive: true });
-    write('flutter/pubspec.yaml', 'name: dash\nflutter:\n  uses-material-design: true\n');
-    await expect(loadProject(at('flutter'))).rejects.toThrow("CapMac found a Flutter app here, but it can't run Flutter apps yet.");
+    write('native/App.xcodeproj/project.pbxproj', 'productType = "com.apple.product-type.application"; SDKROOT = iphoneos;');
+    await expect(loadProject(at('native'))).rejects.toThrow("CapMac found an Xcode app here, but it can't run Xcode apps yet.");
   });
 
   it('says what it found when it cannot run it, or that there was nothing', async () => {
-    write('pubspec.yaml', 'name: dash\nflutter:\n  uses-material-design: true\n');
-    expect(nothingToRun(await findApps(dir)).message).toBe("CapMac found a Flutter app here, but it can't run Flutter apps yet.");
-    rmSync(at('pubspec.yaml'));
+    write('package.json', { name: 'expo-app', dependencies: { expo: '~54.0.0' } });
+    write('app.json', { expo: { name: 'Expo App' } });
+    expect(nothingToRun(await findApps(dir)).message).toBe("CapMac found an Expo app here, but it can't run Expo apps yet.");
+    rmSync(at('package.json'));
+    rmSync(at('app.json'));
     write('App.xcodeproj/project.pbxproj', 'productType = "com.apple.product-type.application"; SDKROOT = iphoneos;');
     expect(nothingToRun(await findApps(dir)).message).toBe("CapMac found an Xcode app here, but it can't run Xcode apps yet.");
     rmSync(at('App.xcodeproj'), { recursive: true });
-    expect(nothingToRun(await findApps(dir)).message).toMatch(/^No Capacitor or Electron app found here/);
+    expect(nothingToRun(await findApps(dir)).message).toMatch(/^No Capacitor, Flutter or Electron app found here/);
   });
 });
 

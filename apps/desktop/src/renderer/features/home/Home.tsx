@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { RecentProject } from '../../../shared/contract';
-import { appKind, canRun } from '../../lib/apps';
+import { appGlyph, appKind, canRun } from '../../lib/apps';
 import { appOf, forgetProject, openProject, pickProject, startSession, stopSession } from '../../state/actions';
 import { useApp } from '../../state/app';
 import { call, errorInfo } from '../../state/engine';
@@ -75,7 +75,17 @@ function ProjectCard({ recent }: { recent: RecentProject }) {
         </p>
       ) : (
         <div className="project-card__meta" title={current ? t.apps.current(appKind(current)) : undefined}>
-          {summary && (summary.hasIos || !summary.electron) && (
+          {summary?.kind === 'flutter' && (
+            <>
+              <Badge tone="neutral">{t.home.flutter}</Badge>
+              {summary.apps.filter(canRun).map((a) => (
+                <Badge key={a.id} tone={appTone(a.id)} icon={several ? appGlyph(a) : undefined}>
+                  {t.home.flutterApp[a.id] ?? appKind(a)}
+                </Badge>
+              ))}
+            </>
+          )}
+          {summary && summary.kind !== 'flutter' && (summary.hasIos || !summary.electron) && (
             <Badge tone={appTone('ios')} icon={several ? 'phone' : undefined}>
               {summary.iosPackageManager === 'unknown' ? (summary.hasIos ? 'iOS' : t.home.noIos) : summary.iosPackageManager}
             </Badge>
@@ -151,7 +161,7 @@ function EmptyArt() {
 }
 
 /** Copies a bundled sample to Documents, opens it and runs it. */
-async function runSample(kind: 'ios' | 'electron'): Promise<void> {
+async function runSample(kind: 'ios' | 'electron' | 'flutter'): Promise<void> {
   try {
     const { path } = await call('projects.createSample', { kind });
     // Without a Mac, open it: the workspace shows how to pair one.
@@ -161,12 +171,12 @@ async function runSample(kind: 'ios' | 'electron'): Promise<void> {
   }
 }
 
-function SampleButton({ variant = 'standard', kind = 'ios' }: { variant?: 'standard' | 'subtle'; kind?: 'ios' | 'electron' }) {
+function SampleButton({ variant = 'standard', kind = 'ios' }: { variant?: 'standard' | 'subtle'; kind?: 'ios' | 'electron' | 'flutter' }) {
   const [busy, setBusy] = useState(false);
   return (
     <Button
       variant={variant}
-      icon={kind === 'electron' ? 'desktop' : 'rocket'}
+      icon={kind === 'electron' ? 'desktop' : kind === 'flutter' ? 'sparkle' : 'rocket'}
       busy={busy}
       onClick={async () => {
         setBusy(true);
@@ -174,12 +184,12 @@ function SampleButton({ variant = 'standard', kind = 'ios' }: { variant?: 'stand
         setBusy(false);
       }}
     >
-      {kind === 'electron' ? t.home.trySampleElectron : t.home.trySample}
+      {kind === 'electron' ? t.home.trySampleElectron : kind === 'flutter' ? t.home.trySampleFlutter : t.home.trySample}
     </Button>
   );
 }
 
-/** The samples, from the page header: the iOS app and the Electron app. */
+/** The samples, from the page header: the iOS app, the Electron app and the Flutter app. */
 function SampleMenu() {
   const menu = usePopover();
   return (
@@ -192,10 +202,11 @@ function SampleMenu() {
       <Menu
         state={menu}
         label={t.home.trySampleMenu}
-        width={220}
+        width={280}
         items={[
           { id: 'ios', label: t.home.sampleIos, icon: 'phone', onSelect: () => void runSample('ios') },
           { id: 'electron', label: t.home.sampleElectron, icon: 'desktop', onSelect: () => void runSample('electron') },
+          { id: 'flutter', label: t.home.sampleFlutter, icon: 'sparkle', onSelect: () => void runSample('flutter') },
         ]}
       />
     </>
@@ -235,6 +246,7 @@ export function Home() {
                   </Button>
                   <SampleButton />
                   <SampleButton kind="electron" />
+                  <SampleButton kind="flutter" />
                 </>
               }
             >

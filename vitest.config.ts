@@ -3,11 +3,12 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   plugins: [
     {
-      // The agent ships the stream helper's Objective-C source as text (esbuild's text loader).
+      // The agent ships the stream helper's Objective-C source as text (esbuild's text loader), the WSL
+      // backend its Ruby, shell, Python and C helpers.
       name: 'objc-source-as-text',
       enforce: 'pre',
       transform(code, id) {
-        if (id.endsWith('.m') || id.endsWith('.rb')) return { code: `export default ${JSON.stringify(code)};`, map: null };
+        if (/\.(m|rb|sh|py|c)$/.test(id)) return { code: `export default ${JSON.stringify(code)};`, map: null };
       },
     },
   ],

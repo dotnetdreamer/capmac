@@ -185,6 +185,19 @@ export function PcBanner({ path, entry }: { path: string; entry: PcEntry }) {
 }
 
 /** Where the simulator shows on a Mac: the iPhone plugged into this PC, which shows the app itself. */
+/** A Flutter app's Windows app: it runs on this PC in its own window, so the pane says where it is. */
+export function WindowsAppPane({ run, name }: { run: RunState | undefined; name: string }) {
+  const running = Boolean(run?.onPc && run.app?.state === 'running');
+  return (
+    <div className="pc-pane">
+      <EmptyState icon="desktop" title={running ? t.workspace.windowsAppRunning(run?.app?.name ?? name) : t.workspace.windowsAppTitle} compact>
+        <p>{t.workspace.windowsAppBody}</p>
+        {!running && <p className="faint">{t.workspace.windowsAppIdle}</p>}
+      </EmptyState>
+    </div>
+  );
+}
+
 export function PcDevicePane({ target, run, entry }: { target: Target | null; run: RunState | undefined; entry: PcEntry }) {
   const devices = entry.devices;
   if (!target) {

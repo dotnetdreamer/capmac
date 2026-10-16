@@ -11,10 +11,11 @@ const WHERE: Record<BuildBackend, string> = { mac: 'on your paired Mac', wsl: 'o
 let saved: Promise<BuildBackend> | undefined;
 
 /** The backend a command uses: its --backend, else the project's pick, else the Mac. */
-export function commandBackend(flag: unknown, app?: unknown): Promise<BuildBackend> {
+export function commandBackend(flag: unknown, app?: unknown, target?: unknown): Promise<BuildBackend> {
   if (flag === 'mac' || flag === 'wsl') return Promise.resolve(flag);
-  // An Electron app runs on the Mac's desktop, whatever builds the iOS app.
-  if (app === 'electron') return Promise.resolve('mac');
+  // Desktop apps run where they run, whatever builds the iOS app: Electron and Mac apps on the Mac, a Flutter app's Windows app here.
+  if (typeof app === 'string' && /^(electron|macos|mac|windows|win|pc)$/i.test(app)) return Promise.resolve('mac');
+  if (typeof target === 'string' && /^(mac|macos|electron|mac-desktop|this mac|pc|this pc|windows|pc-desktop)$/i.test(target.trim())) return Promise.resolve('mac');
   saved ??= backendIn(process.cwd()).catch(() => 'mac' as const);
   return saved;
 }

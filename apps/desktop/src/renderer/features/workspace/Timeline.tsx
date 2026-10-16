@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { t, tidy } from '../../../shared/i18n';
 import { formatDuration } from '../../lib/format';
 import { Rich } from '../../ui/Rich';
-import { CAP_ELECTRON_PHASES, ELECTRON_PHASES, IPA_PHASES, isBusy, PC_IPA_PHASES, PC_PHASES, phaseLabel, RUN_PHASES, type PhaseState, type RunState, type TimelinePhase } from '../../state/runs';
+import { CAP_ELECTRON_PHASES, ELECTRON_PHASES, FLUTTER_IPA_PHASES, FLUTTER_MAC_PHASES, FLUTTER_PC_PHASES, FLUTTER_PHASES, IPA_PHASES, isBusy, PC_IPA_PHASES, PC_PHASES, phaseLabel, RUN_PHASES, type PhaseState, type RunState, type TimelinePhase } from '../../state/runs';
 import { ProgressBar, Spinner } from '../../ui/Feedback';
 import { Icon } from '../../ui/Icon';
 
@@ -20,6 +20,7 @@ const SHORT_DETAIL: Array<[RegExp, string]> = [
   [/app unchanged/i, t.timeline.short.unchanged],
   [/already on the Mac/i, t.timeline.short.upToDate],
   [/built by the dev command/i, t.timeline.short.devCommand],
+  [/^Flutter .* is ready/i, t.timeline.short.ready],
 ];
 
 function shortDetail(state: PhaseState): string | null {
@@ -62,19 +63,23 @@ function useNow(enabled: boolean): number {
  * itself); `macSelected`: the toolbar's target is the Mac's desktop;
  * `pcSelected`: the project builds on this PC. A run says for itself where it ran.
  */
-export function Timeline({ run, electron = null, macSelected = false, pcSelected = false }: { run: RunState | undefined; electron?: 'capacitor' | 'plain' | null; macSelected?: boolean; pcSelected?: boolean }) {
+export function Timeline({ run, electron = null, macSelected = false, pcSelected = false, flutter = false, pcDesktopSelected = false }: { run: RunState | undefined; electron?: 'capacitor' | 'plain' | null; macSelected?: boolean; pcSelected?: boolean; flutter?: boolean; pcDesktopSelected?: boolean }) {
   const busy = isBusy(run);
   const ran = Boolean(run?.sessionId || run?.runNumber);
   const onMac = ran ? Boolean(run?.onMac) : macSelected;
   const pc = ran ? run?.backend === 'wsl' : pcSelected;
-  const PHASE_LABELS = Object.fromEntries((['web', 'sync', 'deps', 'electron', 'cap', 'build', 'boot', 'install', 'launch', 'archive', 'export', 'download'] as TimelinePhase[]).map((p) => [p, phaseLabel(p, onMac, pc)])) as Record<TimelinePhase, string>;
+  // A Flutter app's Windows app: built and opened on this PC.
+  const onPcDesktop = ran ? Boolean(run?.onPc) : pcDesktopSelected;
+  const PHASE_LABELS = Object.fromEntries((['web', 'sync', 'deps', 'electron', 'cap', 'build', 'boot', 'install', 'launch', 'archive', 'export', 'download'] as TimelinePhase[]).map((p) => [p, phaseLabel(p, onMac || onPcDesktop, pc, flutter)])) as Record<TimelinePhase, string>;
   const now = useNow(busy);
   const hasCurrent = Boolean(run && Object.keys(run.phases).length > 1);
   // Started, before its build steps: this run, saying what it does meanwhile.
   const starting = busy && !hasCurrent;
   const showingPrevious = !hasCurrent && !starting && Boolean(run?.previous);
   const phases: Partial<Record<TimelinePhase, PhaseState>> = hasCurrent || starting ? run!.phases : run?.previous?.phases ?? {};
-  const order = pc ? (run?.mode === 'ipa' ? PC_IPA_PHASES : PC_PHASES) : run?.mode === 'ipa' ? IPA_PHASES : onMac ? (electron === 'capacitor' ? CAP_ELECTRON_PHASES : ELECTRON_PHASES) : RUN_PHASES;
+  const order = flutter && !pc
+    ? run?.mode === 'ipa' ? FLUTTER_IPA_PHASES : onPcDesktop ? FLUTTER_PC_PHASES : onMac ? FLUTTER_MAC_PHASES : FLUTTER_PHASES
+    : pc ? (run?.mode === 'ipa' ? PC_IPA_PHASES : PC_PHASES) : run?.mode === 'ipa' ? IPA_PHASES : onMac ? (electron === 'capacitor' ? CAP_ELECTRON_PHASES : ELECTRON_PHASES) : RUN_PHASES;
   const runningPhase = order.find((p) => phases[p]?.status === 'running');
   const running = runningPhase ? phases[runningPhase] : undefined;
   const failed = order.find((p) => phases[p]?.status === 'failed');

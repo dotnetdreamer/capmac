@@ -7,8 +7,8 @@ import path from 'node:path';
 import { appsOf, canRun, chooseApp, currentApp, describeFlavor, findApps, frameworkName, loadProject, nothingToRun, restoreAppChoices, type DetectedProject, type ProjectApp, type ProjectInfo, type RunnableApp } from '@capmac/core/engine';
 import { log, pc } from '../ui.js';
 
-const KIND: Record<string, string> = { ios: 'iOS app', electron: 'Electron app', macos: 'Mac app' };
-const WHERE: Record<string, string> = { ios: 'runs in the iPhone and iPad simulators, and on a real iPhone', electron: 'runs on the Mac’s desktop' };
+const KIND: Record<string, string> = { ios: 'iOS app', electron: 'Electron app', macos: 'Mac app', windows: 'Windows app' };
+const WHERE: Record<string, string> = { ios: 'runs in the iPhone and iPad simulators, and on a real iPhone', electron: 'runs on the Mac’s desktop', macos: 'runs on the Mac’s desktop', windows: 'runs on this PC' };
 
 export const appKind = (app: Pick<ProjectApp, 'id' | 'platform'>) => KIND[app.id] ?? (app.platform === 'ios' ? KIND.ios! : KIND.macos!);
 
@@ -65,7 +65,7 @@ export async function appsCommand(options: { json?: boolean }): Promise<void> {
     const other = here.apps.find((a) => canRun(a) && a.id !== current);
     log.line();
     if (current && other) {
-      log.line(`\`capmac run\` and CapMac Studio use the ${appKind({ id: current, platform: current === 'ios' ? 'ios' : 'mac' })}${here.chosen ? '' : ' (the default)'}.`);
+      log.line(`\`capmac run\` and CapMac Studio use the ${appKind({ id: current, platform: current === 'ios' ? 'ios' : current === 'windows' ? 'windows' : 'mac' })}${here.chosen ? '' : ' (the default)'}.`);
       log.dim(`Switch with \`capmac apps use ${other.id}\`, or for one command: \`capmac run --app ${other.id}\`.`);
     }
     return;
@@ -85,13 +85,14 @@ export async function appsCommand(options: { json?: boolean }): Promise<void> {
 export async function appsUseCommand(app: string): Promise<void> {
   const project = await loadProject(process.cwd());
   const id = await chooseApp(project, app);
-  log.success(`${pc.bold(project.appName)}: \`capmac run\`, \`capmac dev\` and CapMac Studio use the ${appKind({ id, platform: id === 'ios' ? 'ios' : 'mac' })} from now on.`);
+  log.success(`${pc.bold(project.appName)}: \`capmac run\`, \`capmac dev\` and CapMac Studio use the ${appKind({ id, platform: id === 'ios' ? 'ios' : id === 'windows' ? 'windows' : 'mac' })} from now on.`);
 }
 
 /** Before a run: which app, when the project has more than one (and how to pick the other). */
 export async function announceApp(project: ProjectInfo, app: RunnableApp): Promise<void> {
   const apps = (await appsOf(project)).filter(canRun);
   if (apps.length < 2) return;
-  const other = apps.find((a) => a.id !== app);
-  log.dim(`${project.appName} has ${apps.length} apps: this is the ${appKind({ id: app, platform: app === 'ios' ? 'ios' : 'mac' })}${other ? ` (the other: \`--app ${other.id}\`, or \`capmac apps use ${other.id}\`)` : ''}.`);
+  const others = apps.filter((a) => a.id !== app);
+  const pick = others.length === 1 ? `the other: \`--app ${others[0]!.id}\`, or \`capmac apps use ${others[0]!.id}\`` : `the others: ${others.map((a) => `\`--app ${a.id}\``).join(', ')}, or \`capmac apps use <app>\``;
+  log.dim(`${project.appName} has ${apps.length} apps: this is the ${appKind({ id: app, platform: app === 'ios' ? 'ios' : app === 'windows' ? 'windows' : 'mac' })}${others.length ? ` (${pick})` : ''}.`);
 }

@@ -12,6 +12,10 @@ import type { WslBuildPlan } from './compiler.js';
 import { findCocoaPodsDirectory, inspectCocoaPods, prepareCocoaPodsProject } from './cocoapods.js';
 import { buildNativeWithToolchain } from './native-compiler.js';
 import { prepareXcodeProject } from './xcode.js';
+import { prepareFlutterIos, type WslFlutterMode } from './flutter.js';
+import { classifyFlutterChange } from '../flutter/changes.js';
+import { flutterLogEntry } from '../flutter/runner.js';
+import { watchWrites } from '../watch.js';
 import { inspectWslResourceTools, installWslResourceTools } from './resources.js';
 import { ensureWslWifiPairing, inspectWslDeviceTools, installWslApp, launchWslApp, listWslDevices, selectWslDevice, stopWslApp, streamWslDeviceLogs, wslDeviceTarget, type WslDevice } from './device.js';
 import { chooseLiveHost, startWslLiveRelay } from './live.js';
@@ -43,7 +47,8 @@ function toolchainConfig(options: WslOptions, native = false): WslToolchainConfi
 async function projectAndOptions(input: WslOptions): Promise<{ project: ProjectInfo; options: WslOptions }> {
   validateWslOptions(input);
   const project = await loadProject(input.cwd ?? process.cwd());
-  if (project.kind !== 'capacitor') throw new UserError('The first WSL project adapter supports Capacitor iOS applications.', 'The shared compiler accepts native build plans; native project import and Flutter adapters are future work.');
+  if (project.kind === 'electron') throw new UserError('An Electron app runs on a Mac’s desktop: it has no iPhone app to build on this PC.');
+  if (project.kind === 'flutter' && !project.flutter?.platforms.ios) throw new UserError('This Flutter app has no iOS app.', 'Add one with `flutter create --platforms ios .` in its folder.');
   const options = await loadWslOptions(input, project.capDir);
   return { project, options };
 }
@@ -55,7 +60,7 @@ export async function doctorWsl(input: WslOptions, _ctx: EngineContext, signal: 
   try { project = await loadProject(cwd); cwd = project.capDir; } catch { /* Setup can be checked before opening a project. */ }
   const options = await loadWslOptions(input, cwd);
   const [toolchain, device, server] = await Promise.all([
-    inspectWslToolchain(toolchainConfig(options, project?.kind === 'capacitor'), { signal }),
+    inspectWslToolchain(toolchainConfig(options, project?.kind === 'capacitor' || project?.kind === 'flutter'), { signal }),
     inspectWslDeviceTools({ python: options.python, signal }),
     inspectAppleDeviceServer(signal),
   ]);
@@ -69,7 +74,11 @@ export async function doctorWsl(input: WslOptions, _ctx: EngineContext, signal: 
     const file = options[key] ? path.resolve(cwd, options[key]!) : undefined;
     checks.push({ id: key, level: file && existsSync(file) ? 'ok' : 'fail', label, detail: file ?? 'not configured', fix: 'Run `capmac wsl setup` in your app’s folder: it sets up signing with your Apple Account. To use your own files, add --certificate <file.p12> --profile <file.mobileprovision>.' });
   }
-  if (project) {
+  if (project?.kind === 'flutter') {
+    checks.push({ id: 'project', level: project.flutter?.platforms.ios ? 'ok' : 'fail', label: 'Flutter iOS app',
+      detail: project.flutter?.platforms.ios ? 'Flutter compiles the Dart code in WSL; the first build also gets Flutter for Linux, Dart’s iPhone compiler (built once, about 5 minutes) and Flutter’s iPhone engine.' : 'This Flutter app has no ios/ folder.',
+      fix: project.flutter?.platforms.ios ? undefined : 'Add it with `flutter create --platforms ios .`' });
+  } else if (project) {
     try {
       if (project.iosPackageManager === 'CocoaPods') {
         checks.push({ id: 'project', level: 'ok', label: 'Capacitor CocoaPods project', detail: 'Builds the original native application and the dependency graph produced by CocoaPods.' });
@@ -157,8 +166,47 @@ async function checkedToolchain(options: WslOptions, ctx: EngineContext, signal:
   return report as WslToolchainReport & { distro: string; tools: NonNullable<WslToolchainReport['tools']> };
 }
 
+/** A Flutter app's build mode here: release, or profile when asked (debug builds need Xcode's debugger on the iPhone). */
+function flutterModeOf(options: WslOptions): WslFlutterMode {
+  if (options.mode === 'debug') throw new UserError('On this PC a Flutter app runs on the iPhone in release or profile mode.', 'Debug builds need Xcode’s debugger: use `--mode profile` here, or a paired Mac for debug runs and hot reload.');
+  if (options.mode && options.mode !== 'release' && options.mode !== 'profile') throw new UserError(`Unknown Flutter mode "${options.mode}".`, 'Use release or profile.');
+  return options.mode === 'profile' || options.configuration === 'Profile' ? 'profile' : 'release';
+}
+
+/** A Flutter app's iOS app: Flutter's work done in WSL (see flutter.ts), then the Runner project built and signed like any app. */
+async function buildFlutterProject(project: ProjectInfo, options: WslOptions, ctx: EngineContext, signal: AbortSignal, cachedPassword?: string): Promise<WslBuildResult> {
+  const mode = flutterModeOf(options);
+  const toolchain = await checkedToolchain(options, ctx, signal, true);
+  if (!options.unsigned && (!options.certificate || !options.profile)) throw new UserError('Apple development signing is not configured.', 'Run `capmac wsl setup` in your app’s folder: it sets up signing with your Apple Account. Or build with --unsigned to check the build first.');
+  const signing: WslBuildPlan['signing'] = {
+    certificatePath: options.certificate ? path.resolve(project.capDir, options.certificate) : '',
+    provisioningProfilePath: options.profile ? path.resolve(project.capDir, options.profile) : '',
+    password: options.unsigned ? '' : cachedPassword ?? await password(options, ctx, project.capDir),
+    extensionProfiles: Object.fromEntries(Object.entries(options.extensionProfiles ?? {}).map(([id, file]) => [id, path.resolve(project.capDir, file)])),
+  };
+  const generated = path.join(project.capDir, '.capmac', 'wsl');
+  const executor = new WslExecutor(toolchain.distro);
+  return withPodsBuildLock(generated, async () => {
+    if (options.clean) await withStep(ctx, 'Removing earlier native build files', 'other', async () => {
+      await fs.rm(path.join(generated, 'flutter-inputs'), { recursive: true, force: true });
+      await executor.run(['sh', '-c', 'rm -rf "$HOME/.cache/capmac/module-cache" "$HOME/.cache/capmac/flutter-builds/$1"', 'sh', project.projectId], { signal, allowFailure: true });
+    });
+    const plan = await prepareFlutterIos(project, {
+      executor, tools: toolchain.tools, directory: path.join(generated, 'flutter-inputs'), mode,
+      outputDirectory: path.resolve(project.capDir, options.out ?? '.capmac/wsl/output'), signing, rubyPath: options.ruby, xcodeVersion: options.xcodeVersion,
+    }, ctx, signal);
+    const built = await withStep(ctx, options.unsigned ? 'Compiling the native app in WSL' : 'Building and signing the native app in WSL', 'build', () => buildNativeWithToolchain({ ...plan, unsigned: options.unsigned }, executor, toolchain.tools, {
+      signal, onOutput: (text, stream) => ctx.emit({ type: 'tool-output', text, stream }),
+    }));
+    const result = { appPath: built.appPath, ipaPath: built.ipaPath, bundleId: built.bundleIdentifier, processName: built.executableName, signed: built.signed };
+    await fs.writeFile(path.join(generated, 'last-build.json'), `${JSON.stringify(result, null, 2)}\n`);
+    return result;
+  });
+}
+
 async function buildProject(project: ProjectInfo, options: WslOptions, ctx: EngineContext, signal: AbortSignal, liveUrl?: string, cachedPassword?: string): Promise<WslBuildResult> {
   throwIfAborted(signal);
+  if (project.kind === 'flutter') return buildFlutterProject(project, options, ctx, signal, cachedPassword);
   const pods = project.iosPackageManager === 'CocoaPods';
   if (!pods && project.iosPackageManager !== 'SPM') throw new UserError('No CocoaPods or SPM iOS project was detected.');
   const toolchain = await checkedToolchain(options, ctx, signal, true);
@@ -254,10 +302,16 @@ async function deploy(built: WslBuildResult, device: WslDevice, options: WslOpti
   ctx.emit({ type: 'app', state: 'running', bundleId: built.bundleId, target: device.name });
 }
 
-function logOptions(options: WslOptions, ctx: EngineContext, signal: AbortSignal, processName = 'App') {
+/** A Flutter app's Dart print() reaches the iPhone's log as "flutter: …": those lines are the console's. */
+function appLogEntry(text: string, flutter: boolean) {
+  const dart = flutter ? /\bflutter: (.*)$/.exec(text) : null;
+  return (dart ? flutterLogEntry(`flutter: ${dart[1]}`) : null) ?? { text, kind: 'native' as const, level: 'info' as const, stream: 'stdout' as const, ts: Date.now() };
+}
+
+function logOptions(options: WslOptions, ctx: EngineContext, signal: AbortSignal, processName = 'App', flutter = false) {
   return {
     python: options.python, signal, processName,
-    onLog: (text: string) => ctx.emit({ type: 'app-log' as const, entry: { text, kind: 'native' as const, level: 'info' as const, stream: 'stdout' as const, ts: Date.now() } }),
+    onLog: (text: string) => ctx.emit({ type: 'app-log' as const, entry: appLogEntry(text, flutter) }),
     // Over Wi-Fi, a locked or asleep iPhone drops its logs until it is unlocked again.
     onLocked: () => log(ctx, 'info', 'Unlock your iPhone to see the app’s logs. They come back as soon as you do.'),
   };
@@ -270,14 +324,71 @@ export async function runWsl(input: WslOptions, ctx: EngineContext, signal: Abor
   const built = await buildProject(project, options, ctx, signal);
   await deploy(built, device, options, ctx, signal);
   if (options.logs !== false) {
-    try { await streamWslDeviceLogs(device, logOptions(options, ctx, signal, built.processName)); }
+    try { await streamWslDeviceLogs(device, logOptions(options, ctx, signal, built.processName, project.kind === 'flutter')); }
     finally { await stopWslApp(built.bundleId, device, { python: options.python }).catch(() => undefined); }
+  }
+}
+
+/**
+ * Live mode for a Flutter app on this PC: each save rebuilds the app and opens
+ * it again on the iPhone. (Hot reload needs a debug build, and an iPhone runs
+ * those only under Xcode's debugger: that is a paired Mac's.)
+ */
+async function devWslFlutter(project: ProjectInfo, options: WslOptions, ctx: EngineContext, signal: AbortSignal): Promise<void> {
+  const device = await chooseDevice(options, ctx, signal);
+  await checkedToolchain(options, ctx, signal, true);
+  const signingPassword = await password(options, ctx, project.capDir);
+  log(ctx, 'info', `Live on this PC: each save rebuilds ${project.appName} and opens it again on ${device.name}. Hot reload needs a paired Mac.`);
+  const lifetime = new AbortController();
+  const abort = () => lifetime.abort();
+  throwIfAborted(signal);
+  signal.addEventListener('abort', abort, { once: true });
+  let pending = false;
+  let building = false;
+  let first = true;
+  let activeBuild: Promise<void> = Promise.resolve();
+  let launched: WslBuildResult | undefined;
+  let watcher: FSWatcher | undefined;
+  const rebuild = async () => {
+    building = true;
+    try {
+      do {
+        pending = false;
+        const fresh = await loadProject(project.capDir);
+        const built = await buildProject(fresh, first ? options : { ...options, clean: false }, ctx, lifetime.signal, undefined, signingPassword);
+        first = false;
+        await deploy(built, device, options, ctx, lifetime.signal);
+        launched = built;
+      } while (pending && !lifetime.signal.aborted);
+    } finally { building = false; }
+  };
+  try {
+    if (options.watch !== false) watcher = watchWrites(project.syncRoot, (rel) => classifyFlutterChange(rel, project.projectRel) !== 'ignore', (paths) => {
+      ctx.emit({ type: 'native-change', kinds: ['native'], paths });
+      if (building) { pending = true; return; }
+      activeBuild = rebuild().catch((error) => { if (!isCancelled(error)) ctx.emit({ type: 'error', error: toErrorInfo(error) }); });
+    }, 300);
+    activeBuild = rebuild();
+    await activeBuild;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      if (lifetime.signal.aborted) reject(new CancelledError());
+      else lifetime.signal.addEventListener('abort', () => reject(new CancelledError()), { once: true });
+    });
+    const logs = options.logs === false ? cancelled : streamWslDeviceLogs(device, logOptions(options, ctx, lifetime.signal, launched?.processName, true));
+    await Promise.race([logs, cancelled]);
+  } finally {
+    lifetime.abort();
+    watcher?.close();
+    await activeBuild.catch(() => undefined);
+    signal.removeEventListener('abort', abort);
+    if (launched) await stopWslApp(launched.bundleId, device, { python: options.python }).catch(() => undefined);
   }
 }
 
 export async function devWsl(input: WslOptions, ctx: EngineContext, signal: AbortSignal): Promise<void> {
   const { project, options } = await projectAndOptions(input);
   if (options.unsigned) throw new UserError('Use `capmac wsl build --unsigned` to validate compilation; live development requires signing.');
+  if (project.kind === 'flutter') return devWslFlutter(project, options, ctx, signal);
   const device = await chooseDevice(options, ctx, signal);
   // Preflight before starting a server. Missing SDKs must not leave a background web process behind.
   await checkedToolchain(options, ctx, signal, true);

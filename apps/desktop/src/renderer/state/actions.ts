@@ -8,7 +8,7 @@ import { call, errorInfo } from './engine';
 import { resolveMac, useMacs } from './macs';
 import { pcReady, usePc } from './pc';
 import { projectKey, useProjects } from './projects';
-import { emptyRun, isActive, MAC_TARGET_ID, useRuns } from './runs';
+import { emptyRun, isActive, MAC_TARGET_ID, PC_TARGET_ID, useRuns } from './runs';
 
 export function projectPrefs(path: string): { mac?: string; target?: string } {
   return useApp.getState().settings?.projectPrefs[projectKey(path)] ?? {};
@@ -116,7 +116,7 @@ export async function setApp(path: string, app: RunnableApp): Promise<ProjectSum
     return null;
   }
   // The Mac's desktop was how the Electron app used to be picked: targets are the iOS app's now.
-  if (projectPrefs(path).target === MAC_TARGET_ID) setProjectPrefs(path, { target: undefined });
+  if (projectPrefs(path).target === MAC_TARGET_ID || projectPrefs(path).target === PC_TARGET_ID) setProjectPrefs(path, { target: undefined });
   await useProjects.getState().put(path, summary);
   return summary;
 }
@@ -149,7 +149,7 @@ export async function setBackend(path: string, backend: BuildBackend, mac?: stri
 }
 
 /** On this PC: set up first, then build for the iPhone picked (when it is plugged in), else the one that is. */
-async function startOnPc(path: string, mode: 'run' | 'live' | 'build', picked: string | undefined, options: { clean?: boolean }): Promise<void> {
+async function startOnPc(path: string, mode: 'run' | 'live' | 'build', picked: string | undefined, options: { clean?: boolean; flutterMode?: 'debug' | 'profile' | 'release' }): Promise<void> {
   const pc = usePc.getState();
   const status = pc.byKey[projectKey(path)]?.status ?? (await pc.refresh(path));
   if (!pcReady(status)) {
@@ -160,19 +160,29 @@ async function startOnPc(path: string, mode: 'run' | 'live' | 'build', picked: s
   const plugged = usePc.getState().byKey[projectKey(path)]?.devices?.devices ?? [];
   const target = picked && plugged.some((device) => device.udid === picked) ? picked : undefined;
   try {
-    await call('sessions.start', { projectPath: path, mode, app: 'ios', backend: 'wsl', target, options: { clean: options.clean } });
+    await call('sessions.start', { projectPath: path, mode, app: 'ios', backend: 'wsl', target, options: { clean: options.clean, flutterMode: options.flutterMode } });
   } catch (err) {
     failStart(path, errorInfo(err));
   }
 }
 
-/** `build`: on this PC, build the app and its .ipa without installing it. */
-export async function startSession(path: string, mode: 'run' | 'live' | 'build', options: { clean?: boolean; full?: boolean } = {}): Promise<void> {
+/** `build`: on this PC, build the app and its .ipa without installing it. `flutterMode`: a Flutter app's Run in profile or release mode. */
+export async function startSession(path: string, mode: 'run' | 'live' | 'build', options: { clean?: boolean; full?: boolean; flutterMode?: 'debug' | 'profile' | 'release' } = {}): Promise<void> {
   const prefs = projectPrefs(path);
   const summary = useProjects.getState().byKey[projectKey(path)]?.summary;
   const app = appOf(summary, prefs);
-  // The Electron app runs on the Mac's desktop; the iOS app builds where the project builds.
-  if (summary?.backend === 'wsl' && app !== 'electron') return startOnPc(path, mode, prefs.target, options);
+  // A Flutter app's Windows app builds and runs on this PC: no Mac.
+  if (app === 'windows') {
+    if (mode === 'build') return;
+    try {
+      await call('sessions.start', { projectPath: path, mode, app, options: { flutterMode: options.flutterMode } });
+    } catch (err) {
+      failStart(path, errorInfo(err));
+    }
+    return;
+  }
+  // Desktop apps run on the Mac's desktop; the iOS app builds where the project builds.
+  if (summary?.backend === 'wsl' && app === 'ios') return startOnPc(path, mode, prefs.target, options);
   if (mode === 'build') return;
   const mac = macFor(path);
   if (!mac) {
@@ -186,7 +196,7 @@ export async function startSession(path: string, mode: 'run' | 'live' | 'build',
   }
   const settings = useApp.getState().settings;
   try {
-    await call('sessions.start', { projectPath: path, mode, mac, app, target: app === 'electron' || prefs.target === MAC_TARGET_ID ? undefined : prefs.target, options: { ...options, osLogs: settings?.osLogs } });
+    await call('sessions.start', { projectPath: path, mode, mac, app, target: app !== 'ios' || prefs.target === MAC_TARGET_ID || prefs.target === PC_TARGET_ID ? undefined : prefs.target, options: { ...options, osLogs: settings?.osLogs } });
   } catch (err) {
     failStart(path, errorInfo(err));
   }
@@ -218,7 +228,7 @@ export async function relaunch(path: string): Promise<void> {
   else await startSession(path, run?.mode === 'live' ? 'live' : 'run');
 }
 
-/** An Electron app in live reload: reloads its windows. */
+/** Live reload: an Electron app reloads its windows; a Flutter app hot-reloads. */
 export async function reloadApp(path: string): Promise<void> {
   const run = useRuns.getState().byKey[projectKey(path)];
   if (!run?.sessionId || run.mode !== 'live') return;
