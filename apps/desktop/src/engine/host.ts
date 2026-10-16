@@ -37,6 +37,7 @@ import {
   remoteSettings,
   requireIos,
   resolveHost,
+  restoreAppChoices,
   soundFor,
   revokeRemotePc,
   runApp,
@@ -744,7 +745,7 @@ const handlers: Handlers = {
     watches.get(mac)?.watch.refresh();
   },
   'projects.inspect': ({ path: dir }) => inspectProject(dir),
-  'projects.detect': ({ path: dir }) => findApps(dir),
+  'projects.detect': async ({ path: dir }) => restoreAppChoices(await findApps(dir)),
   'projects.setApp': async ({ path: dir, app }) => {
     // The project as it is now, from the same load: no second look at its config.
     const project = await loadProject(dir);

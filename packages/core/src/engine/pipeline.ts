@@ -161,7 +161,8 @@ export class Pipeline {
       simulator: options.simulator,
       last: options.device ? memory.lastDevice : memory.lastTarget,
     });
-    await remember(this.project.projectId, target.kind === 'device' ? { lastDevice: target.udid } : { lastTarget: target.udid });
+    // Only a convenience for next time: a run never fails for it.
+    await remember(this.project.projectId, target.kind === 'device' ? { lastDevice: target.udid } : { lastTarget: target.udid }).catch(() => undefined);
     this.ctx.emit({ type: 'target', target });
     return target;
   }

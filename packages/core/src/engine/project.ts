@@ -6,7 +6,7 @@ import path from 'node:path';
 import { toPosixRel } from '../shared/paths.js';
 import { loadProjectConfig, type ProjectConfig } from './config.js';
 import { capacitorElectronDir, dependsOnElectron, describeElectronApp, readPackageJson, type ElectronProject } from './electron-project.js';
-import { recallAll, remember, type ProjectMemory } from './memory.js';
+import { adoptMemory, recallAll, type ProjectMemory } from './memory.js';
 
 export type { ElectronProject } from './electron-project.js';
 
@@ -202,6 +202,12 @@ export function readCapacitorConfig(configFile: string): { appId?: string; appNa
   }
 }
 
+/** The name a Capacitor project's CLI evaluates (CapMac 0.1 made its id from it), without loading or migrating the project. Null when the CLI can't run here. */
+export async function evaluatedCapacitorName(dir: string): Promise<string | null> {
+  const evaluated = await evaluateWithCli(dir);
+  return evaluated ? evaluated.appName || path.basename(dir) : null;
+}
+
 function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'app';
 }
@@ -256,9 +262,9 @@ export async function projectMemory(projectId: string, dir: string, oldNames: st
   if (pickedUnder) {
     // Loaded here: apps.ts builds on this module.
     const { onlyProjectWithId } = await import('./apps.js');
-    if (!(await onlyProjectWithId(pickedUnder, syncRoot, dir))) delete memory.app;
+    if (!(await onlyProjectWithId(pickedUnder, syncRoot, dir, { evaluateNames: adopt }))) delete memory.app;
   }
-  if (adopt) await remember(projectId, memory).catch(() => undefined);
+  if (adopt) return adoptMemory(projectId, memory).catch(() => memory);
   return memory;
 }
 

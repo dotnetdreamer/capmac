@@ -21,6 +21,8 @@ export interface BuildRecord {
   nativeGen: number;
   webGen: number;
   at: number;
+  /** The app was found from the scheme's build settings (older CapMacs guessed it from the folder), so it is reused without asking again. */
+  resolved?: boolean;
 }
 
 export interface ProjectState {

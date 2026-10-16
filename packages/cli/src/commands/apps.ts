@@ -4,7 +4,7 @@
  * `capmac apps use <app>` picks it, for the CLI and CapMac Studio alike.
  */
 import path from 'node:path';
-import { appsOf, canRun, chooseApp, currentApp, describeFlavor, findApps, frameworkName, loadProject, nothingToRun, type DetectedProject, type ProjectApp, type ProjectInfo, type RunnableApp } from '@capmac/core/engine';
+import { appsOf, canRun, chooseApp, currentApp, describeFlavor, findApps, frameworkName, loadProject, nothingToRun, restoreAppChoices, type DetectedProject, type ProjectApp, type ProjectInfo, type RunnableApp } from '@capmac/core/engine';
 import { log, pc } from '../ui.js';
 
 const KIND: Record<string, string> = { ios: 'iOS app', electron: 'Electron app', macos: 'Mac app' };
@@ -47,7 +47,7 @@ function printApps(project: DetectedProject, indent: string): void {
 }
 
 export async function appsCommand(options: { json?: boolean }): Promise<void> {
-  const search = await findApps(process.cwd());
+  const search = await restoreAppChoices(await findApps(process.cwd()));
   if (options.json) {
     process.stdout.write(`${JSON.stringify({ ...search, projects: search.projects.map((p) => ({ ...p, current: currentApp(p) })) }, null, 2)}\n`);
     return;
