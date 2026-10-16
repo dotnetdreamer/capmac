@@ -109,7 +109,7 @@ function wslOptions(cmd: Command): Command {
     .option('--xcode-version <version>', 'Xcode version matching the supplied Apple SDK, for build-script metadata')
     .option('--linker <path>', 'Mach-O linker in WSL (default: ld64.lld)')
     .option('--signer <path>', 'zsign executable in WSL (default: zsign)')
-    .option('--python <path>', 'Windows Python executable with pymobiledevice3 (auto-detected)')
+    .option('--python <path>', 'your own Windows Python with pymobiledevice3 (default: the one CapMac sets up)')
     .option('--certificate <file>', 'Apple signing certificate and private key (.p12)')
     .option('--profile <file>', 'development provisioning profile for your app and iPhone (.mobileprovision)')
     .option('--extension-profile <bundle-id=path...>', 'provisioning profiles for embedded application extensions')

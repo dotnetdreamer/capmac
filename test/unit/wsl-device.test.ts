@@ -1,13 +1,13 @@
 import { EventEmitter } from 'node:events';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CancelledError } from '../../packages/core/src/engine/errors.js';
 import {
-  inspectWslDeviceTools, installWslApp, launchWslApp, listWslDevices, selectWslDevice,
-  stopWslApp, streamWslDeviceLogs,
+  ensureWslWifiPairing, inspectWslDeviceTools, installWslApp, LAUNCH_APP, launchWslApp, listWslDevices, selectWslDevice,
+  stopWslApp, streamWslDeviceLogs, WIFI_COMMAND, WIFI_IPHONES,
 } from '../../packages/core/src/engine/wsl/device.js';
 
 interface Reply { stdout?: string[]; stderr?: string; code?: number | null; hold?: boolean; error?: Error }
@@ -21,12 +21,19 @@ const info = [{ DeviceClass: 'iPhone', DeviceName: device.name, UniqueDeviceID: 
 const probeOk: Reply = { stdout: ['{"python":"3.13.2","pymobiledevice3":"11.32.0"}'] };
 let directories: string[] = [];
 
-beforeEach(() => {
+let home: string;
+
+beforeEach(async () => {
+  // Wi-Fi pairings and remembered iPhones live in a home folder of the test's own.
+  home = await mkdtemp(path.join(os.tmpdir(), 'capmac-home-'));
+  directories.push(home);
+  vi.spyOn(os, 'homedir').mockReturnValue(home);
+  vi.stubEnv('LOCALAPPDATA', home);
   boundary.replies = [];
   boundary.probe = undefined;
   boundary.spawn.mockReset();
   boundary.spawn.mockImplementation((_file: string, args: string[]) => {
-    const reply = args.includes('-c') ? boundary.probe ?? probeOk : boundary.replies.shift() ?? {};
+    const reply = probing(args) ? boundary.probe ?? probeOk : boundary.replies.shift() ?? {};
     const child = Object.assign(new EventEmitter(), {
       stdout: new PassThrough(), stderr: new PassThrough(),
       kill: vi.fn(() => { queueMicrotask(() => child.emit('close', null)); return true; }),
@@ -42,14 +49,19 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.mocked(os.homedir).mockRestore();
   vi.useRealTimers();
   vi.unstubAllEnvs();
   await Promise.all(directories.map((directory) => rm(directory, { recursive: true, force: true })));
   directories = [];
 });
 
+function probing(args: string[]): boolean {
+  return args.includes('-c') && String(args[args.indexOf('-c') + 1]).includes('importlib.metadata');
+}
+
 function commands(): Array<{ file: string; args: string[]; options: Record<string, unknown> }> {
-  return boundary.spawn.mock.calls.filter((call) => !(call[1] as string[]).includes('-c')).map(([file, args, spawnOptions]) => ({ file, args, options: spawnOptions }));
+  return boundary.spawn.mock.calls.filter((call) => !probing(call[1] as string[])).map(([file, args, spawnOptions]) => ({ file, args, options: spawnOptions }));
 }
 
 describe('host iPhone tooling', () => {
@@ -82,7 +94,7 @@ describe('host iPhone tooling', () => {
 describe('USB device discovery', () => {
   it('parses pymobiledevice3 JSON and filters unsupported device classes', async () => {
     boundary.replies.push({ stdout: [JSON.stringify([...info, { ...info[0], DeviceClass: 'AppleTV' }])] });
-    await expect(listWslDevices(options)).resolves.toEqual([{ ...device, productType: 'iPhone17,3' }]);
+    await expect(listWslDevices(options)).resolves.toEqual([{ ...device, productType: 'iPhone17,3', connection: 'usb' }]);
     expect(commands()[0]?.args).toEqual(['-m', 'pymobiledevice3', '--no-color', 'usbmux', 'list', '--usb']);
   });
 
@@ -131,13 +143,23 @@ describe('install and launch', () => {
     expect(boundary.spawn).not.toHaveBeenCalled();
   });
 
-  it('mounts developer services before modern launch with an unprivileged userspace tunnel', async () => {
+  it('mounts developer services, then opens the app through one unprivileged userspace tunnel', async () => {
     await launchWslApp('com.example.app', device, options);
-    expect(commands().map((call) => call.args.slice(3))).toEqual([
-      ['mounter', 'auto-mount', '--udid', udid],
-      ['developer', 'core-device', 'launch-application', '--userspace', 'com.example.app'],
-    ]);
+    expect(commands()[0]?.args.slice(3)).toEqual(['mounter', 'auto-mount', '--udid', udid]);
+    expect(commands()[1]?.args).toEqual(['-c', LAUNCH_APP, 'launch', udid, 'usb', 'com.example.app']);
     expect(commands()[1]?.options.env).toHaveProperty('PYMOBILEDEVICE3_UDID', udid);
+  });
+
+  it('waits while the iPhone is locked, and says so once', async () => {
+    const onLocked = vi.fn();
+    const onLog = vi.fn();
+    boundary.replies.push({}, { stdout: ['CAPMAC_LOCKED\n'] });
+    await launchWslApp('com.example.app', device, { ...options, onLocked, onLog });
+    expect(onLocked).toHaveBeenCalledOnce();
+    expect(onLog).not.toHaveBeenCalledWith('CAPMAC_LOCKED');
+    // Any other refusal stops with Apple's reason.
+    boundary.replies.push({}, { code: 1, stderr: 'Failed to invoke com.apple.coredevice.feature.launchapplication: The application failed to launch. (code 10002) Unable to launch because of an invalid signature.' });
+    await expect(launchWslApp('com.example.app', device, options)).rejects.toMatchObject({ message: 'Opening the app failed (exit 1).', details: [expect.stringContaining('invalid signature')] });
   });
 
   it('uses the selected tunneld device for iOS 17.0–17.3 and DVT for iOS 16', async () => {
@@ -171,6 +193,115 @@ describe('install and launch', () => {
   it('does not kill anything when the exact process lookup is invalid', async () => {
     boundary.replies.push({ stdout: [''] });
     await expect(stopWslApp('com.example.app', device, options)).rejects.toThrow('Could not determine');
+    expect(commands()).toHaveLength(1);
+  });
+});
+
+describe('Wi-Fi', () => {
+  const wifi = { ...device, connection: 'network' as const };
+
+  it('lists iPhones paired for Wi-Fi on this network, named from when they were plugged in, and the cable wins', async () => {
+    await mkdir(path.join(home, '.pymobiledevice3'));
+    await writeFile(path.join(home, '.pymobiledevice3', `remote_${udid}.plist`), 'pairing');
+    const other = '00008110-001A2B3C4D5E003E';
+    boundary.replies.push({ stdout: [JSON.stringify(info)] }, { stdout: [JSON.stringify([udid])] });
+    expect(await listWslDevices(options)).toEqual([{ ...device, productType: 'iPhone17,3', connection: 'usb' }]);
+    expect(commands().at(-1)?.args).toEqual(['-c', WIFI_IPHONES]);
+    // Unplugged, the same iPhone is on the Wi-Fi; one never seen over the cable has no name yet.
+    boundary.replies.push({ stdout: ['[]'] }, { stdout: [JSON.stringify([udid, other])] });
+    expect(await listWslDevices(options)).toEqual([
+      { udid, name: device.name, productVersion: '18.5', productType: 'iPhone17,3', connection: 'network' },
+      { udid: other, name: 'iPhone', connection: 'network' },
+    ]);
+    // A search that misses a sleepy iPhone keeps one seen a moment ago; after 30 seconds it is gone.
+    boundary.replies.push({ stdout: [JSON.stringify(info)] }, { code: 1, stderr: 'OSError' });
+    expect((await listWslDevices(options)).map((item) => `${item.udid} ${item.connection}`)).toEqual([`${udid} usb`, `${other} network`]);
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now + 31_000);
+    boundary.replies.push({ stdout: [JSON.stringify(info)] }, { stdout: ['[]'] });
+    expect(await listWslDevices(options)).toHaveLength(1);
+    vi.mocked(Date.now).mockRestore();
+  });
+
+  it('looks for nothing on the Wi-Fi before an iPhone was paired for it', async () => {
+    boundary.replies.push({ stdout: ['[]'] });
+    expect(await listWslDevices(options)).toEqual([]);
+    expect(commands()).toHaveLength(1);
+  });
+
+  it('installs, opens, stops and streams logs over Wi-Fi', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'capmac-device-'));
+    directories.push(directory);
+    const ipa = path.join(directory, 'App.ipa');
+    await writeFile(ipa, 'fixture');
+    await installWslApp(ipa, wifi, options);
+    // Over Wi-Fi every command goes through the no-admin tunnel, reaching the iPhone by RemotePairing.
+    expect(commands()[0]?.args.slice(0, 2)).toEqual(['-c', WIFI_COMMAND]);
+    expect(commands()[0]?.args.slice(3)).toEqual(['apps', 'install', '--userspace', '--udid', udid, ipa]);
+    boundary.replies.push({}, { stdout: ['CAPMAC_PID 4321\n'] });
+    await launchWslApp('com.example.app', wifi, options);
+    expect(commands()[1]?.args.slice(3)).toEqual(['mounter', 'auto-mount', '--userspace', '--udid', udid]);
+    expect(commands()[2]?.args).toEqual(['-c', LAUNCH_APP, 'launch', udid, 'wifi', 'com.example.app']);
+    await stopWslApp('com.example.app', wifi, options);
+    expect(commands()[3]?.args).toEqual(['-c', LAUNCH_APP, 'stop', udid, 'wifi', '4321']);
+    // Stopped once: nothing left to stop.
+    await stopWslApp('com.example.app', wifi, options);
+    expect(commands()).toHaveLength(4);
+    // A stream the iPhone dropped (locked, asleep) comes back while the run lasts; Stop ends the wait.
+    const run = new AbortController();
+    const onLocked = vi.fn(() => run.abort());
+    boundary.replies.push({ code: 1, stderr: 'ERROR Connection was terminated abruptly' });
+    await expect(streamWslDeviceLogs(wifi, { ...options, onLocked, signal: run.signal })).rejects.toBeInstanceOf(CancelledError);
+    expect(onLocked).toHaveBeenCalledOnce();
+    expect(commands()[4]?.args.slice(3)).toEqual(['syslog', 'live', '--userspace', '--udid', udid]);
+    // Any other failure ends it.
+    boundary.replies.push({ code: 1, stderr: 'InvalidServiceError' });
+    await expect(streamWslDeviceLogs(wifi, options)).rejects.toMatchObject({ message: 'The iPhone log stream ended.', hint: expect.stringContaining('Wi-Fi') });
+  });
+
+  it('waits for an asleep iPhone to come back on the Wi-Fi, and says so once', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'capmac-device-'));
+    directories.push(directory);
+    const ipa = path.join(directory, 'App.ipa');
+    await writeFile(ipa, 'fixture');
+    const onLocked = vi.fn();
+    const onLog = vi.fn();
+    boundary.replies.push({ stdout: ['CAPMAC_LOCKED\n', 'Installation succeed.\n'] });
+    await installWslApp(ipa, wifi, { ...options, onLocked, onLog });
+    expect(onLocked).toHaveBeenCalledOnce();
+    expect(onLog).toHaveBeenCalledWith('Installation succeed.');
+    expect(onLog).not.toHaveBeenCalledWith('CAPMAC_LOCKED');
+  });
+
+  it('tries a Wi-Fi command again when a locked iPhone drops the tunnel, and asks for it', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'capmac-device-'));
+    directories.push(directory);
+    const ipa = path.join(directory, 'App.ipa');
+    await writeFile(ipa, 'fixture');
+    const onLocked = vi.fn();
+    const dropped = { code: 1, stderr: 'pymobiledevice3.remote.tunnel_service.RemotePairingTcpTunnel WARNING got ConnectionResetError\nERROR Connection was terminated abruptly' };
+    boundary.replies.push(dropped, { stdout: ['Installation succeed.\n'] });
+    await installWslApp(ipa, wifi, { ...options, onLocked });
+    expect(onLocked).toHaveBeenCalledOnce();
+    expect(commands()).toHaveLength(2);
+    // Three drops in a row stop it, with a Wi-Fi hint rather than a Trust one.
+    boundary.replies.push(dropped, dropped, dropped);
+    await expect(installWslApp(ipa, wifi, { ...options, onLocked })).rejects.toMatchObject({ hint: expect.stringContaining('dropped the Wi-Fi connection') });
+    expect(commands()).toHaveLength(5);
+    // Over the cable, a failure is not tried again.
+    boundary.replies.push(dropped);
+    await expect(installWslApp(ipa, device, options)).rejects.toBeInstanceOf(Error);
+    expect(commands()).toHaveLength(6);
+  });
+
+  it('pairs a plugged-in iPhone for Wi-Fi once, with no prompt on it', async () => {
+    await expect(ensureWslWifiPairing(device, options)).resolves.toBe(true);
+    expect(commands().map((call) => call.args.slice(3))).toEqual([['lockdown', 'remotepairing', '--pair', '--udid', udid]]);
+    await mkdir(path.join(home, '.pymobiledevice3'));
+    await writeFile(path.join(home, '.pymobiledevice3', `remote_${udid}.plist`), 'pairing');
+    await expect(ensureWslWifiPairing(device, options)).resolves.toBe(false);
+    await expect(ensureWslWifiPairing({ ...device, productVersion: '16.7' }, options)).resolves.toBe(false);
+    await expect(ensureWslWifiPairing(wifi, options)).resolves.toBe(false);
     expect(commands()).toHaveLength(1);
   });
 });

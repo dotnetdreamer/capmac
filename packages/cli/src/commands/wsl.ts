@@ -68,11 +68,12 @@ export async function wslTargetsCommand(options: WslCommandOptions): Promise<voi
     return;
   }
   if (!devices.length) {
-    log.info('No iPhones found. Connect and unlock your iPhone, then accept the Trust prompt.');
+    log.info('No iPhones found. Connect and unlock your iPhone, then accept the Trust prompt. After its first run, it also connects over Wi-Fi.');
     return;
   }
   for (const device of devices) {
-    log.line(`${pc.bold(device.name)}${device.productVersion ? pc.dim(` · iOS ${device.productVersion}`) : ''}`);
+    const via = device.connection === 'network' ? 'Wi-Fi' : 'USB';
+    log.line(`${pc.bold(device.name)}${pc.dim(`${device.productVersion ? ` · iOS ${device.productVersion}` : ''} · ${via}`)}`);
     log.dim(`  ${device.udid}`);
   }
   log.line();

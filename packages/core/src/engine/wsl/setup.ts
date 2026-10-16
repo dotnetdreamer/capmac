@@ -17,7 +17,7 @@ import { readSigningTargets, setUpAutomaticSigning } from './apple-auto-signing.
 import { chooseAppleSignIn, signInOnAppleWebsite } from './apple-web.js';
 import { installAppleDevices, startAppleDeviceServer } from './apple-devices.js';
 import { listWslDevices } from './device.js';
-import { bootstrapWslDependencies, ensureManagedWslDistro, MANAGED_XCODE_VERSION } from './bootstrap.js';
+import { bootstrapWslDependencies, devicePythonCurrent, ensureManagedWslDistro, MANAGED_XCODE_VERSION } from './bootstrap.js';
 import { setupSDKFromXcode } from './sdk.js';
 import { SDK_IMPORT_VERSION } from './sdk-runtime.js';
 import { loadWslOptions, saveWslOptions, settingsPath, type WslOptions } from './settings.js';
@@ -66,7 +66,7 @@ function setupNeeds(options: WslOptions, cwd: string) {
     && (!extracted || options.sdkImporter === String(SDK_IMPORT_VERSION));
   const signingFiles = [options.certificate, options.profile, ...Object.values(options.extensionProfiles ?? {})];
   const signing = signingFiles.every((file) => !!file && existsSync(path.resolve(cwd, file)));
-  const tools = !!(options.distro && options.swift && options.linker && options.signer);
+  const tools = !!(options.distro && options.swift && options.linker && options.signer) && devicePythonCurrent(options.python);
   return { sdk, signing, tools };
 }
 

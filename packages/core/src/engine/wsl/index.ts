@@ -2,7 +2,7 @@
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { FSWatcher } from 'node:fs';
-import { log, throwIfAborted, withStep, type EngineContext } from '../context.js';
+import { log, throwIfAborted, withStep, type EngineContext, type StepHandle } from '../context.js';
 import { startDevServer, type DevServer } from '../devserver.js';
 import { CancelledError, isCancelled, toErrorInfo, UserError } from '../errors.js';
 import { buildWeb } from '../pipeline.js';
@@ -13,7 +13,7 @@ import { findCocoaPodsDirectory, inspectCocoaPods, prepareCocoaPodsProject } fro
 import { buildNativeWithToolchain } from './native-compiler.js';
 import { prepareXcodeProject } from './xcode.js';
 import { inspectWslResourceTools, installWslResourceTools } from './resources.js';
-import { inspectWslDeviceTools, installWslApp, launchWslApp, listWslDevices, selectWslDevice, stopWslApp, streamWslDeviceLogs, wslDeviceTarget, type WslDevice } from './device.js';
+import { ensureWslWifiPairing, inspectWslDeviceTools, installWslApp, launchWslApp, listWslDevices, selectWslDevice, stopWslApp, streamWslDeviceLogs, wslDeviceTarget, type WslDevice } from './device.js';
 import { chooseLiveHost, startWslLiveRelay } from './live.js';
 import { loadWslOptions, saveWslOptions, settingsPath, validateWslOptions, type WslOptions } from './settings.js';
 import { inspectWslToolchain, WslExecutor, type WslToolchainConfig, type WslToolchainReport } from './toolchain.js';
@@ -152,7 +152,7 @@ async function password(options: WslOptions, ctx: EngineContext, capDir: string)
 }
 
 async function checkedToolchain(options: WslOptions, ctx: EngineContext, signal: AbortSignal, native = false): Promise<WslToolchainReport & { distro: string; tools: NonNullable<WslToolchainReport['tools']> }> {
-  const report = await withStep(ctx, 'Checking the WSL iOS toolchain', 'other', () => inspectWslToolchain(toolchainConfig(options, native), { signal, reuseProbe: true, onOutput: (text, stream) => ctx.emit({ type: 'tool-output', text, stream }) }));
+  const report = await withStep(ctx, 'Checking this PC’s build tools', 'other', () => inspectWslToolchain(toolchainConfig(options, native), { signal, reuseProbe: true, onOutput: (text, stream) => ctx.emit({ type: 'tool-output', text, stream }) }));
   if (!report.ready || !report.distro || !report.tools) throw new UserError('The WSL iOS toolchain is not ready.', 'Run `capmac wsl doctor` or `capmac wsl setup` for the exact missing requirements.', report.checks.filter((check) => !check.ok).map((check) => `${check.name}: ${check.message}`));
   return report as WslToolchainReport & { distro: string; tools: NonNullable<WslToolchainReport['tools']> };
 }
@@ -238,13 +238,29 @@ async function pickDevice(options: WslOptions, ctx: EngineContext, signal: Abort
 async function deploy(built: WslBuildResult, device: WslDevice, options: WslOptions, ctx: EngineContext, signal: AbortSignal): Promise<void> {
   if (built.signed === false) throw new UserError('An unsigned build cannot be installed on an iPhone.', 'Configure signing and rebuild without --unsigned.');
   const hooks = { python: options.python, signal, onLog: (text: string) => ctx.emit({ type: 'tool-output' as const, stream: 'stdout' as const, text }) };
-  await withStep(ctx, `Installing on ${device.name}`, 'install', () => installWslApp(built.ipaPath, device, hooks));
-  await withStep(ctx, `Launching on ${device.name}`, 'launch', () => launchWslApp(built.bundleId, device, hooks));
+  // A locked iPhone opens no apps, and an asleep one leaves the Wi-Fi: wait for the user, however long it takes.
+  const unlock = (step: StepHandle, then: string) => () => {
+    step.update(`Unlock your iPhone to ${then}`);
+    log(ctx, 'info', `Unlock ${device.name} to ${then}. CapMac goes on as soon as you do.`);
+  };
+  await withStep(ctx, `Installing on ${device.name}`, 'install', (step) => installWslApp(built.ipaPath, device, { ...hooks, onLocked: unlock(step, 'install the app') }));
+  // Once over the cable, the iPhone is paired for Wi-Fi too (no prompt on it), so later runs need no cable.
+  const wifi = await ensureWslWifiPairing(device, hooks).catch((error: unknown) => {
+    log(ctx, 'note', `${device.name} could not be set up for Wi-Fi runs: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  });
+  if (wifi) log(ctx, 'info', `${device.name} can now also run your app over Wi-Fi, without the cable.`);
+  await withStep(ctx, `Launching on ${device.name}`, 'launch', (step) => launchWslApp(built.bundleId, device, { ...hooks, onLocked: unlock(step, 'open the app') }));
   ctx.emit({ type: 'app', state: 'running', bundleId: built.bundleId, target: device.name });
 }
 
 function logOptions(options: WslOptions, ctx: EngineContext, signal: AbortSignal, processName = 'App') {
-  return { python: options.python, signal, processName, onLog: (text: string) => ctx.emit({ type: 'app-log' as const, entry: { text, kind: 'native' as const, level: 'info' as const, stream: 'stdout' as const, ts: Date.now() } }) };
+  return {
+    python: options.python, signal, processName,
+    onLog: (text: string) => ctx.emit({ type: 'app-log' as const, entry: { text, kind: 'native' as const, level: 'info' as const, stream: 'stdout' as const, ts: Date.now() } }),
+    // Over Wi-Fi, a locked or asleep iPhone drops its logs until it is unlocked again.
+    onLocked: () => log(ctx, 'info', 'Unlock your iPhone to see the app’s logs. They come back as soon as you do.'),
+  };
 }
 
 export async function runWsl(input: WslOptions, ctx: EngineContext, signal: AbortSignal): Promise<void> {

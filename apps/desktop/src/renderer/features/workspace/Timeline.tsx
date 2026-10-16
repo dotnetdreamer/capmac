@@ -70,18 +70,20 @@ export function Timeline({ run, electron = null, macSelected = false, pcSelected
   const PHASE_LABELS = Object.fromEntries((['web', 'sync', 'deps', 'electron', 'cap', 'build', 'boot', 'install', 'launch', 'archive', 'export', 'download'] as TimelinePhase[]).map((p) => [p, phaseLabel(p, onMac, pc)])) as Record<TimelinePhase, string>;
   const now = useNow(busy);
   const hasCurrent = Boolean(run && Object.keys(run.phases).length > 1);
-  const showingPrevious = !hasCurrent && Boolean(run?.previous);
-  const phases: Partial<Record<TimelinePhase, PhaseState>> = hasCurrent ? run!.phases : run?.previous?.phases ?? {};
+  // Started, before its build steps: this run, saying what it does meanwhile.
+  const starting = busy && !hasCurrent;
+  const showingPrevious = !hasCurrent && !starting && Boolean(run?.previous);
+  const phases: Partial<Record<TimelinePhase, PhaseState>> = hasCurrent || starting ? run!.phases : run?.previous?.phases ?? {};
   const order = pc ? (run?.mode === 'ipa' ? PC_IPA_PHASES : PC_PHASES) : run?.mode === 'ipa' ? IPA_PHASES : onMac ? (electron === 'capacitor' ? CAP_ELECTRON_PHASES : ELECTRON_PHASES) : RUN_PHASES;
   const runningPhase = order.find((p) => phases[p]?.status === 'running');
   const running = runningPhase ? phases[runningPhase] : undefined;
   const failed = order.find((p) => phases[p]?.status === 'failed');
 
   let elapsed: number | null = null;
-  if (run?.startedAt && hasCurrent) elapsed = (busy ? now : run.endedAt ?? now) - run.startedAt;
+  if (run?.startedAt && (hasCurrent || starting)) elapsed = (busy ? now : run.endedAt ?? now) - run.startedAt;
   else if (showingPrevious) elapsed = run?.previous?.ms ?? null;
 
-  if (!run || (!hasCurrent && !showingPrevious)) {
+  if (!run || (!hasCurrent && !showingPrevious && !starting)) {
     return (
       <div className="timeline timeline--empty">
         <ol className="tl-steps" aria-label={t.timeline.steps}>
@@ -130,11 +132,18 @@ export function Timeline({ run, electron = null, macSelected = false, pcSelected
           );
         })}
       </ol>
-      {running && (
+      {running ? (
         <div className="tl-progress">
           <ProgressBar value={running.fraction ?? null} label={t.timeline.progress(PHASE_LABELS[runningPhase!])} />
           <span className="tl-progress__text mono truncate">{running.progress ?? running.title ?? ''}</span>
         </div>
+      ) : (
+        starting && (
+          <div className="tl-progress">
+            <ProgressBar value={null} label={t.timeline.preparing} />
+            <span className="tl-progress__text mono truncate">{run.preparing?.title ?? t.timeline.preparing}</span>
+          </div>
+        )
       )}
       {!running && run.notes.some((n) => n.level === 'warn') && !showingPrevious && (
         <ul className="tl-notes">

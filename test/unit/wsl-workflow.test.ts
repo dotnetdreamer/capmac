@@ -56,6 +56,7 @@ vi.mock('../../packages/core/src/engine/wsl/device.js', async (importOriginal) =
   selectWslDevice: boundary.selectDevice, listWslDevices: boundary.listDevices,
   installWslApp: boundary.install, launchWslApp: boundary.launch,
   streamWslDeviceLogs: boundary.logs, stopWslApp: boundary.stopApp,
+  ensureWslWifiPairing: async () => false,
 }));
 vi.mock('../../packages/core/src/engine/devserver.js', () => ({ startDevServer: boundary.startServer }));
 vi.mock('../../packages/core/src/engine/wsl/live.js', () => ({

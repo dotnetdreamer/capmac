@@ -11,14 +11,14 @@ import { SDK_IMPORT_VERSION } from '../../packages/core/src/engine/wsl/sdk-runti
 const boundary = vi.hoisted(() => ({
   login: vi.fn(), catalog: vi.fn(), download: vi.fn(), close: vi.fn(), distro: vi.fn(), bootstrap: vi.fn(), sdk: vi.fn(),
   project: vi.fn(), targets: vi.fn(), signing: vi.fn(), devices: vi.fn(), server: vi.fn(), installDevices: vi.fn(), order: [] as string[],
-  chooseSignIn: vi.fn(), websiteLogin: vi.fn(),
+  chooseSignIn: vi.fn(), websiteLogin: vi.fn(), pythonCurrent: vi.fn(),
 }));
 vi.mock('../../packages/core/src/engine/wsl/apple-account.js', () => ({ loginAppleAccount: boundary.login }));
 vi.mock('../../packages/core/src/engine/wsl/apple-web.js', () => ({ chooseAppleSignIn: boundary.chooseSignIn, signInOnAppleWebsite: boundary.websiteLogin }));
 vi.mock('../../packages/core/src/engine/wsl/apple-auto-signing.js', () => ({ readSigningTargets: boundary.targets, setUpAutomaticSigning: boundary.signing }));
 vi.mock('../../packages/core/src/engine/wsl/device.js', () => ({ listWslDevices: boundary.devices }));
 vi.mock('../../packages/core/src/engine/project.js', () => ({ loadProject: boundary.project }));
-vi.mock('../../packages/core/src/engine/wsl/bootstrap.js', () => ({ ensureManagedWslDistro: boundary.distro, bootstrapWslDependencies: boundary.bootstrap, MANAGED_XCODE_VERSION: '26.6' }));
+vi.mock('../../packages/core/src/engine/wsl/bootstrap.js', () => ({ ensureManagedWslDistro: boundary.distro, bootstrapWslDependencies: boundary.bootstrap, devicePythonCurrent: boundary.pythonCurrent, MANAGED_XCODE_VERSION: '26.6' }));
 vi.mock('../../packages/core/src/engine/wsl/sdk.js', () => ({ setupSDKFromXcode: boundary.sdk }));
 vi.mock('../../packages/core/src/engine/wsl/apple-devices.js', () => ({ startAppleDeviceServer: boundary.server, installAppleDevices: boundary.installDevices }));
 vi.mock('../../packages/core/src/engine/wsl/toolchain.js', () => ({ WslExecutor: class { constructor(readonly distro: string) {} } }));
@@ -49,6 +49,7 @@ beforeEach(async () => {
   boundary.bootstrap.mockImplementation(async () => { boundary.order.push('tools'); return installed; });
   boundary.sdk.mockResolvedValue(imported);
   boundary.server.mockResolvedValue('running');
+  boundary.pythonCurrent.mockReturnValue(true);
   boundary.targets.mockResolvedValue([app, widget]);
   boundary.devices.mockResolvedValue([{ udid: '00008120-0001', name: 'Test iPhone' }]);
   boundary.signing.mockImplementation(async () => { boundary.order.push('signing'); return { certificate: 'C:\\Signing\\development.p12', profile: 'C:\\Signing\\dev.example.app.mobileprovision', extensionProfiles: { 'dev.example.app.widget': 'C:\\Signing\\dev.example.app.widget.mobileprovision' } }; });
@@ -252,5 +253,11 @@ describe('what setup has put in place', () => {
     expect((await wslSetupState(directory)).sdk).toBe(false);
     await writeFile(path.join(directory, '.capmac', 'wsl.json'), JSON.stringify({ sdk: extracted, xcodeVersion: '26.6', sdkImporter: String(SDK_IMPORT_VERSION) }));
     expect((await wslSetupState(directory)).sdk).toBe(true);
+    // iPhone tools in a Python CapMac set up earlier are set up again, in its own Python.
+    await writeFile(path.join(directory, '.capmac', 'wsl.json'), JSON.stringify({ distro: 'CapMac-Ubuntu', swift: '/tools/swiftc', linker: '/usr/bin/ld64.lld-18', signer: '/tools/zsign', python: 'C:\\old\\python.exe' }));
+    expect((await wslSetupState(directory)).tools).toBe(true);
+    boundary.pythonCurrent.mockReturnValue(false);
+    expect((await wslSetupState(directory)).tools).toBe(false);
+    expect(boundary.pythonCurrent).toHaveBeenLastCalledWith('C:\\old\\python.exe');
   });
 });

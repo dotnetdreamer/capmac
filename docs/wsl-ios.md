@@ -27,8 +27,8 @@ capmac backend wsl
 
 Setup does everything in one run:
 
-1. **Build tools.** It creates a separate `CapMac-Ubuntu` WSL distribution (your own distributions are untouched) and installs Swift 6.3.3 (signature-checked), the linker, the code signer, CocoaPods and the asset/storyboard compilers inside it. On a new PC this is the longest step, and it needs no sign-in.
-2. **iPhone connection.** Windows talks to an iPhone over USB through Apple's own device server. If the Apple Devices app is missing, setup offers to install it from the Microsoft Store, then starts its device server in the background without opening a window.
+1. **Build tools.** It creates a separate `CapMac-Ubuntu` WSL distribution (your own distributions are untouched) and installs Swift 6.3.3 (signature-checked), the linker, the code signer, CocoaPods and the asset/storyboard compilers inside it. On Windows it also brings its own Python for the iPhone tools: python.org's 3.13 build (checksum-checked) with [pymobiledevice3](https://github.com/doronz88/pymobiledevice3), in `%LOCALAPPDATA%\CapMac\device-tools`, so there is no Python to install and yours is not touched. On a new PC this is the longest step, and it needs no sign-in.
+2. **iPhone connection.** Windows talks to an iPhone over USB through Apple's own device server. If the Apple Devices app is missing, setup offers to install it from the Microsoft Store, then starts its device server in the background without opening a window. After the first run over the cable, the iPhone also runs over Wi-Fi (see [Connect the iPhone](#connect-the-iphone)).
 3. **One Apple sign-in.** Setup first asks who does the Apple part:
    - **Let CapMac do it** (recommended). CapMac opens Apple's website in your default browser when it is Chromium-based (Edge, Chrome, Brave, Vivaldi), else in Edge, on a profile of its own under `%LOCALAPPDATA%\CapMac\AppleWeb`, apart from your everyday one. You sign in there the way you always sign in to Apple (CapMac never sees the password or the code); the dialog closes by itself once you are in, and CapMac closes the window. Everything after that happens without a window: CapMac's Apple session is made from that browser's sign-in, and what Apple makes only on its website for some accounts (certificates, profiles, new iPhones: its API answers HTTP 421) is made there, in a hidden copy of the browser. The sign-in is kept, protected for your Windows user, so later setups need no sign-in at all. **Restart** in the waiting dialog, or "with a fresh sign-in" in the choice, forgets it and opens a clean window. Closing the window stops setup. If a step on the website fails, the dialog says why and offers another try or doing it by hand, and CapMac keeps notes and a picture of Apple's page (never its sign-in page) in `AppleWeb\last-attempt`.
    - **Do it myself.** Enter your Apple Account email and password, then the two-factor code, in the terminal or in CapMac Studio's dialogs; they are kept in memory only. When Apple won't make the certificate for this sign-in, you make it on Apple's website from the request CapMac saves in Downloads, and CapMac picks the certificate up from there.
@@ -36,11 +36,15 @@ Setup does everything in one run:
    If you belong to several developer teams, you pick one. The sign-in covers:
    - **Signing**, like Xcode's "Automatically manage signing". Setup reads your app and its extensions (such as widgets) from the Xcode project, shows the account changes it is about to make, and asks first: a development certificate for this PC, missing App IDs, capabilities such as Push Notifications or App Groups, and a plugged-in iPhone the team does not know yet. Nothing is removed or revoked. The certificate is kept in `%LOCALAPPDATA%\CapMac\Signing\<team>`, with its password protected for your Windows user, so builds never ask for it; its private key never leaves this PC. A certificate Apple already made from CapMac's request (say, in an earlier run) is found and used without asking again.
    - **Xcode 26.6**, downloaded from Apple's developer site (about 2.3 GB; an interrupted download continues on the next run), granted the way Apple's downloads page grants it. Only the iPhone SDK, the Swift resources and Apple's compiler runtime are taken from it.
-4. **Next:** `capmac wsl doctor` to check everything, then `capmac wsl run` with your iPhone plugged in and unlocked.
+4. **Next:** `capmac wsl doctor` to check everything, then `capmac wsl run` with your iPhone plugged in (or, after its first run, on the same Wi-Fi).
 
 Run `capmac wsl setup --apple-login` to sign in again, for example after adding a plugin that needs a new capability. If setup stops, `.capmac/wsl/setup-status.json` records the step, without any account data.
 
 Xcode and Linux Swift are a matched pair: Swift has to read the module interfaces that Apple's compiler wrote. CapMac pins Xcode 26.6 with Swift 6.3.3 and replaces an SDK imported from another Xcode release. Swift's own `ld64.lld` is built without iOS support, so the linker is Ubuntu's `ld64.lld`.
+
+Libraries that Apple's compiler built (prebuilt SDKs such as Google Mobile Ads) call Objective-C methods through `_objc_msgSend$<selector>` stubs that the linker makes. In a large app, `ld64.lld` 18 points many of those stubs at the wrong method name, and the app then stops at launch with "unrecognized selector". So when a link made such stubs, CapMac writes them itself, the way the compiler writes ordinary method calls, links again, and checks every stub before the app is signed; an app whose stubs would call the wrong method is never signed.
+
+Xcode's archive keeps a linked file's contents at its first link only and gives the other links a placeholder of the same size; the SDK import fills those from the real copy. An SDK imported by an older CapMac is imported again by the next setup, from the Xcode download it kept.
 
 `doctor` exits with status 1 when something is missing; scripts can use `capmac wsl doctor --json`. The same backend is reachable as `capmac doctor`, `capmac build`, `capmac run` or `capmac dev` once `capmac backend wsl` picked it, or with `--backend wsl` on any of them. WSL commands never pair with a Mac or turn on the Mac command takeover.
 
@@ -137,24 +141,22 @@ CI can supply the SDK, certificate, and profile through `CAPMAC_IOS_SDK`, `CAPMA
 
 ## Connect the iPhone
 
-Connect the iPhone directly to Windows. Install Apple's USB drivers through Apple Devices, unlock the iPhone, trust the development computer, and enable Developer Mode when iOS requests it. Device communication runs on Windows; USB passthrough to WSL is not required.
-
-Install the verified [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) version in your Windows Python environment:
-
-```powershell
-py -3 -m pip install "pymobiledevice3==11.32.0"
-```
-
-Use `--python C:\Path\To\python.exe` if Python is not on `PATH`, or if you use a dedicated virtual environment. List connected phones through CapMac:
+Connect the iPhone directly to Windows. Install Apple's USB drivers through Apple Devices, unlock the iPhone, trust the development computer, and enable Developer Mode when iOS requests it. Device communication runs on Windows; USB passthrough to WSL is not required. Setup installs the device tools ([pymobiledevice3](https://github.com/doronz88/pymobiledevice3) 11.32.0) in CapMac's own Python; to use your own Python with pymobiledevice3 instead, pass `--python C:\Path\To\python.exe` to setup. List the iPhones CapMac can reach, and how:
 
 ```powershell
 capmac wsl targets
 ```
 
-For iOS 17.4 and newer, CapMac uses pymobiledevice3's userspace tunnel automatically. iOS 17.0–17.3 requires a tunnel service started separately from an administrator PowerShell prompt:
+For iOS 17.4 and newer, CapMac opens apps through pymobiledevice3's userspace tunnel, which needs no administrator rights. While the iPhone is locked, iOS opens no apps: the run waits and says "Unlock your iPhone to open the app", however long it takes (Stop ends the wait).
+
+### Over Wi-Fi
+
+After the first run over the cable, the iPhone also runs over Wi-Fi, with no cable, when it and the PC are on the same network. In that first run, after installing, CapMac pairs the iPhone for Wi-Fi over the trusted cable (RemotePairing, as Xcode does; there is no prompt on the iPhone), and the run says so. Unplugged, the iPhone then shows as "Connected · Wi-Fi" in Studio and as `Wi-Fi` in `capmac wsl targets`, and `capmac wsl run` installs, opens, logs and stops the app over Wi-Fi through the same no-administrator tunnel. An asleep iPhone leaves the network: a run waits up to five minutes for it ("Unlock your iPhone to install the app") and goes on once it is unlocked. If Windows asks whether Python may use the network, allow it on private networks; CapMac finds the iPhone with mDNS. Wi-Fi needs iOS 17 or later.
+
+iOS 17.0–17.3 requires a tunnel service started separately from an administrator PowerShell prompt:
 
 ```powershell
-py -3 -m pymobiledevice3 remote tunneld
+& "$env:LOCALAPPDATA\CapMac\device-tools\11.32.0-python-3.13.16\python.exe" -I -m pymobiledevice3 remote tunneld
 ```
 
 Leave that service running while CapMac launches the app. CapMac does not elevate itself. The [pymobiledevice3 documentation](https://github.com/doronz88/pymobiledevice3) covers device services and pairing; CapMac includes actionable hints when these prerequisites fail.

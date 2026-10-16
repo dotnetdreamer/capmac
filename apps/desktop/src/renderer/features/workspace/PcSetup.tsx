@@ -108,7 +108,14 @@ export function PcSetupDialog({ path, open, onClose }: { path: string; open: boo
           <Button icon="health" busy={entry.checking} onClick={() => void pc.check(path)}>
             {t.pc.check}
           </Button>
-          <Button onClick={onClose}>{t.common.close}</Button>
+          {/* Everything is in place: nothing left to do here. */}
+          {ready && !entry.running ? (
+            <Button variant="accent" onClick={onClose} data-autofocus>
+              {t.common.done}
+            </Button>
+          ) : (
+            <Button onClick={onClose}>{t.common.close}</Button>
+          )}
         </>
       }
     >

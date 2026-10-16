@@ -1,5 +1,6 @@
 /** Managed open-source prerequisites. Apple SDK/signing setup remains separate. */
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -204,14 +205,100 @@ print(json.dumps({'python':str(python)}))
 
 const HOST_PYTHON_PROBE = 'import importlib.metadata,importlib.util,json,sys; print(json.dumps({"executable":sys.executable,"version":list(sys.version_info[:2]),"venv":importlib.util.find_spec("venv") is not None,"device":importlib.metadata.version("pymobiledevice3") if importlib.util.find_spec("pymobiledevice3") else None}))';
 
-/** Install packages into a CapMac-owned venv, preserving the user's Python packages. */
+/** CapMac's own Python on Windows: python.org's build (its NuGet package), pinned, so nobody installs Python. */
+export const PRIVATE_PYTHON = {
+  version: '3.13.16',
+  url: 'https://api.nuget.org/v3-flatcontainer/python/3.13.16/python.3.13.16.nupkg',
+  sha256: '95fad176338f1d6a799e45946488063f4aa61764e6cff2f132ddeffbf7a04c34',
+} as const;
+
+/** CapMac's folder for the iPhone tools, or undefined when the per-user folder is unknown. */
+function deviceToolsRoot(): string | undefined {
+  const base = process.platform === 'win32' ? process.env.LOCALAPPDATA : process.env.XDG_DATA_HOME ?? path.join(os.homedir(), '.local', 'share');
+  return base && path.isAbsolute(base) ? path.join(base, 'CapMac', 'device-tools') : undefined;
+}
+
+const inside = (folder: string, file: string) => !path.relative(folder, path.resolve(file)).startsWith('..');
+
+/** Where CapMac's own Python lives (Windows), with the iPhone tools installed in it. */
+export function privatePythonPath(root = deviceToolsRoot()): string | undefined {
+  return root && path.join(root, `${WSL_DEVICE_TOOL_VERSION}-python-${PRIVATE_PYTHON.version}`, 'python.exe');
+}
+
+/** A Python CapMac set up earlier (another version, or a venv of the PC's own Python) is set up again; one someone chose is kept. */
+export function devicePythonCurrent(python: string | undefined): boolean {
+  const root = deviceToolsRoot();
+  if (!python || process.platform !== 'win32' || !root || !inside(root, python)) return true;
+  return path.resolve(python).toLowerCase() === privatePythonPath(root)!.toLowerCase();
+}
+
+async function deviceToolVersion(python: string, signal?: AbortSignal): Promise<string | undefined> {
+  try {
+    const result = await hostRun(python, ['-I', '-c', 'import importlib.metadata as m; print(m.version("pymobiledevice3"))'], { signal }, 30_000);
+    return result.code ? undefined : result.stdout.trim();
+  } catch (error) {
+    if (error instanceof CancelledError) throw error;
+    return undefined;
+  }
+}
+
+/** Downloads python.org's Python into CapMac's folder, checks it, and installs the iPhone tools in it. */
+async function ensurePrivatePython(root: string, options: Hooks): Promise<string> {
+  const python = privatePythonPath(root)!;
+  const home = path.dirname(python);
+  if (await deviceToolVersion(python, options.signal) === WSL_DEVICE_TOOL_VERSION) return python;
+  await fs.mkdir(root, { recursive: true });
+  options.onOutput?.(`Downloading Python ${PRIVATE_PYTHON.version} for the iPhone tools.\n`, 'stderr');
+  const staging = await fs.mkdtemp(path.join(root, '.python-'));
+  try {
+    let bytes: Buffer;
+    try {
+      const response = await fetch(PRIVATE_PYTHON.url, { signal: options.signal });
+      if (!response.ok) throw new UserError(`Could not download Python for the iPhone tools (HTTP ${response.status}).`, 'Check the internet connection, then rerun setup.');
+      bytes = Buffer.from(await response.arrayBuffer());
+    } catch (error) {
+      if (error instanceof UserError) throw error;
+      if (options.signal?.aborted) throw new CancelledError();
+      throw new UserError('Could not download Python for the iPhone tools.', 'Check the internet connection, then rerun setup.', [String(error)]);
+    }
+    if (createHash('sha256').update(bytes).digest('hex') !== PRIVATE_PYTHON.sha256) throw new UserError('The Python download for the iPhone tools was damaged.', 'Rerun setup to download it again.');
+    const archive = path.join(staging, 'python.nupkg');
+    await fs.writeFile(archive, bytes);
+    // Windows' own tar unpacks zip files, which a NuGet package is.
+    const unpacked = await hostRun(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), ['-xf', archive, '-C', staging], { signal: options.signal }, 300_000);
+    if (unpacked.code) throw new UserError('Could not unpack Python for the iPhone tools.', 'Rerun setup.', (unpacked.stderr || unpacked.stdout).trim().split(/\r?\n/).slice(-5));
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rename(path.join(staging, 'tools'), home);
+  } finally {
+    await fs.rm(staging, { recursive: true, force: true });
+  }
+  options.onOutput?.(`Installing the iPhone tools (pymobiledevice3 ${WSL_DEVICE_TOOL_VERSION}) in CapMac's Python.\n`, 'stderr');
+  const installed = await hostRun(python, ['-I', '-m', 'pip', 'install', '--disable-pip-version-check', '--no-warn-script-location', `pymobiledevice3==${WSL_DEVICE_TOOL_VERSION}`], options, 1_200_000);
+  if (installed.code || await deviceToolVersion(python, options.signal) !== WSL_DEVICE_TOOL_VERSION) {
+    await fs.rm(home, { recursive: true, force: true });
+    throw new UserError('Could not install the iPhone tools.', 'Check the internet connection, then rerun setup.', (installed.stderr || installed.stdout).trim().split(/\r?\n/).slice(-15));
+  }
+  // Tools an earlier setup left (another version, or a venv of the PC's own Python) are not used any more.
+  for (const entry of await fs.readdir(root)) {
+    if (entry !== path.basename(home) && !entry.startsWith('.')) await fs.rm(path.join(root, entry), { recursive: true, force: true }).catch(() => undefined);
+  }
+  return python;
+}
+
+/**
+ * The Python that runs the iPhone tools. On Windows CapMac brings its own (python.org's build), so
+ * nobody installs Python; a Python someone chose (wsl.python) is used, with the tools in a CapMac venv.
+ */
 export async function ensureHostDeviceTools(options: Hooks & { python?: string } = {}): Promise<string> {
   checkCancelled(options.signal);
-  const base = process.platform === 'win32' ? process.env.LOCALAPPDATA : process.env.XDG_DATA_HOME ?? path.join(os.homedir(), '.local', 'share');
-  if (!base || !path.isAbsolute(base)) throw new UserError('Cannot locate the per-user device tools directory.');
-  const target = path.join(base, 'CapMac', 'device-tools', WSL_DEVICE_TOOL_VERSION);
+  const root = deviceToolsRoot();
+  if (!root) throw new UserError('Cannot locate the per-user device tools directory.');
+  // One CapMac set up before is replaced by the current one.
+  const chosen = options.python && !inside(root, options.python) ? options.python : undefined;
+  if (process.platform === 'win32' && !chosen) return ensurePrivatePython(root, options);
+  const target = path.join(root, WSL_DEVICE_TOOL_VERSION);
   const managed = path.join(target, process.platform === 'win32' ? 'Scripts' : 'bin', process.platform === 'win32' ? 'python.exe' : 'python');
-  const candidates = options.python ? [options.python] : [managed, ...(process.platform === 'win32' ? ['py', 'python'] : ['python3', 'python'])];
+  const candidates = chosen ? [chosen] : [managed, 'python3', 'python'];
   let selected: { executable: string; prefix: string[] } | undefined;
   for (const candidate of candidates) {
     checkCancelled(options.signal);
@@ -227,7 +314,11 @@ export async function ensureHostDeviceTools(options: Hooks & { python?: string }
       if (candidate !== managed) { selected = { executable: candidate, prefix }; break; }
     } catch { /* Another Python candidate may be usable. */ }
   }
-  if (!selected) throw new UserError('Python 3.10 or newer is required for Windows iPhone tools.', 'Install Python 3.13 for your Windows user (`winget install --id Python.Python.3.13 --exact --scope user`), reopen the terminal, and rerun capmac wsl setup.');
+  if (!selected) {
+    throw chosen
+      ? new UserError('The Python chosen for the iPhone tools cannot run them.', 'Point wsl.python at Python 3.10 or newer, or remove wsl.python so CapMac uses its own Python.')
+      : new UserError('Python 3.10 or newer is required for the iPhone tools.', 'Install python3 with its venv module, then rerun capmac wsl setup.');
+  }
   options.onOutput?.(`Installing iPhone tools in the private CapMac Python environment.\n`, 'stderr');
   const result = await hostRun(selected.executable, [...selected.prefix, '-c', INSTALL_HOST_DEVICE_TOOLS, target, WSL_DEVICE_TOOL_VERSION], options, 1_200_000);
   if (result.code) throw new UserError('Could not prepare the Windows iPhone tools.', 'Check the Python/pip output and internet connection, then rerun capmac wsl setup.', (result.stderr || result.stdout).trim().split(/\r?\n/).slice(-15));

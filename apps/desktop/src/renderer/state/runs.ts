@@ -70,6 +70,8 @@ export interface RunState {
   endedAt: number | null;
   phases: Partial<Record<TimelinePhase, PhaseState>>;
   stepPhase: Record<string, TimelinePhase>;
+  /** Before its first build step: what the run does, like checking this PC's build tools. */
+  preparing: { id: string; title: string } | null;
   diagnostics: Diagnostic[];
   error: ErrorInfo | null;
   notes: Note[];
@@ -98,6 +100,7 @@ export function emptyRun(path: string): RunState {
     endedAt: null,
     phases: {},
     stepPhase: {},
+    preparing: null,
     diagnostics: [],
     error: null,
     notes: [],
@@ -137,6 +140,7 @@ function newRun(run: RunState, mode: RunState['mode']): RunState {
     endedAt: null,
     phases: {},
     stepPhase: {},
+    preparing: null,
     diagnostics: [],
     error: null,
     notes: [],
@@ -193,10 +197,11 @@ function reduce(run: RunState, event: HostEvent, sessionId: string | undefined, 
       return next;
     }
     case 'step': {
-      if (!TIMELINE.has(event.phase)) return run;
+      if (!TIMELINE.has(event.phase)) return run.status === 'starting' ? { ...run, preparing: { id: event.id, title: event.title } } : run;
       const phase = event.phase as TimelinePhase;
       return {
         ...run,
+        preparing: null,
         status: run.status === 'starting' || run.status === 'idle' || run.status === 'running' ? 'building' : run.status,
         phases: { ...run.phases, [phase]: { status: 'running', title: event.title, startedAt: now } },
         stepPhase: { ...run.stepPhase, [event.id]: phase },
@@ -211,6 +216,7 @@ function reduce(run: RunState, event: HostEvent, sessionId: string | undefined, 
     case 'step-end': {
       const phase = run.stepPhase[event.id];
       const state = phase && run.phases[phase];
+      if (run.preparing?.id === event.id) return { ...run, preparing: null };
       if (!phase || !state) return run;
       const status: PhaseState['status'] = event.status === 'ok' ? 'done' : event.status;
       return { ...run, phases: { ...run.phases, [phase]: { ...state, status, ms: event.ms || (state.startedAt ? now - state.startedAt : undefined), detail: event.detail, progress: undefined } } };

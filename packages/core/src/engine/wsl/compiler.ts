@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { CancelledError, UserError } from '../errors.js';
 import { inspectWslToolchain, iosCompilerArguments, iosLinkerArguments, WslExecutor, type WslRunOptions, type WslToolchainConfig, type WslToolchainTools } from './toolchain.js';
+import { linkWithObjCStubs } from './objc-stubs.js';
 
 export interface WslSwiftModule {
   name: string;
@@ -302,9 +303,12 @@ export async function buildWithToolchain(plan: WslBuildPlan, executor: WslExecut
       ...await Promise.all(module.sourceFiles.map((source) => executor.path(source, hooks.signal))), '-o', object]);
     objects.push(object);
   }
-  await run([tools.swiftcPath, ...common, '-parse-as-library', '-module-name', 'CapMacApplication',
+  await linkWithObjCStubs(run, [tools.swiftcPath, ...common, '-parse-as-library', '-module-name', 'CapMacApplication',
     ...await Promise.all(plan.sourceFiles.map((source) => executor.path(source, hooks.signal))), ...objects,
-    '-Xlinker', '-ObjC', '-Xlinker', '-rpath', '-Xlinker', '@executable_path/Frameworks', ...iosLinkerArguments(tools), '-o', `${app}/${plan.executableName}`]);
+    '-Xlinker', '-ObjC', '-Xlinker', '-rpath', '-Xlinker', '@executable_path/Frameworks', ...iosLinkerArguments(tools)], `${app}/${plan.executableName}`, {
+    clang: tools.clangPath ?? (tools.swiftcPath.includes('/') ? `${path.posix.dirname(tools.swiftcPath)}/clang` : 'clang'),
+    target: `arm64-apple-ios${plan.minimumIosVersion}`, work: build,
+  });
   await run(['chmod', '755', `${app}/${plan.executableName}`]);
   hooks.onPhase?.('sign');
   await signWslApplication(plan, executor, tools, appPath, ipaPath, hooks);

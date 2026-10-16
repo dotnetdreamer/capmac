@@ -5,6 +5,7 @@ import { CancelledError, UserError } from '../errors.js';
 import { packageUnsignedWslApplication, signWslApplication, type WslBuildHooks, type WslBuildPlan } from './compiler.js';
 import { compileWslResources, generateWslResourceSources, runWslScriptPhases, type WslResourceContext, type WslScriptPhase } from './resources.js';
 import { iosCompilerArguments, iosLinkerArguments, type WslExecutor, type WslToolchainTools, type WslRunOptions } from './toolchain.js';
+import { linkWithObjCStubs } from './objc-stubs.js';
 import { embedWslSwiftRuntimes } from './swift-runtime.js';
 
 export interface WslNativeSource { path: string; flags?: string[] }
@@ -570,7 +571,9 @@ export async function buildNativeWithToolchain(plan: WslNativeBuildPlan, executo
       if ([output, ...linked].some((item) => item.target.sourceFiles.some((source) => /\.(mm|cc|cpp|cxx)$/i.test(source.path)))) linkFlags.push('-lc++');
       if (output.dynamic) linkFlags.push('-emit-library', '-Xlinker', '-install_name', '-Xlinker', `@rpath/${target.productName}/${settings.EXECUTABLE_NAME}`);
       else if (target.productType === 'bundle') linkFlags.push('-Xlinker', '-bundle');
-      await run([tools.swiftcPath, ...iosCompilerArguments(tools, settings.IPHONEOS_DEPLOYMENT_TARGET!), ...objects, ...linkFlags, ...iosLinkerArguments(tools), '-o', output.executable]);
+      await linkWithObjCStubs(run, [tools.swiftcPath, ...iosCompilerArguments(tools, settings.IPHONEOS_DEPLOYMENT_TARGET!), ...objects, ...linkFlags, ...iosLinkerArguments(tools)], output.executable, {
+        clang, target: `arm64-apple-ios${settings.IPHONEOS_DEPLOYMENT_TARGET!}`, work: `${output.directory}/Objects`,
+      });
       await run(['chmod', '755', output.executable]);
     }
     // A static library's product is the .a file itself, so it has no folder for resources.
