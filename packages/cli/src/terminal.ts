@@ -19,8 +19,8 @@ export interface TerminalOptions {
   mode?: 'run' | 'dev' | 'other';
   /** `run` streams app logs (vs `--no-logs`). */
   attach?: boolean;
-  /** An iOS app (the default) or an Electron app on the Mac's desktop: decides labels and wording. */
-  platform?: 'ios' | 'electron';
+  /** An iOS app (the default), an Electron app on the Mac's desktop, or a Flutter app (any of its apps): decides labels and wording. */
+  platform?: 'ios' | 'electron' | 'flutter';
 }
 
 const URL = /\bhttps?:\/\/[^\s'"`)]+/g;
@@ -117,6 +117,10 @@ export class TerminalReporter {
       case 'app-dialogs':
         this.dialogsChanged(event);
         break;
+      case 'hmr':
+        // Flutter's hot reloads, one line each (a web app's HMR stays quiet).
+        if (this.options.platform === 'flutter' && event.state === 'update' && event.detail) log.line(`  ${pc.green('↻')} ${event.detail}`);
+        break;
       case 'build-reused':
         log.dim('  Native code unchanged: reused the previous build.');
         break;
@@ -147,7 +151,9 @@ export class TerminalReporter {
   private appState(event: Extract<EngineEvent, { type: 'app' }>): void {
     const name = pc.bold(event.name ?? 'The app');
     if (event.state === 'running') {
-      if (this.options.mode === 'dev' && this.options.platform === 'electron') {
+      if (this.options.mode === 'dev' && this.options.platform === 'flutter') {
+        log.success(`${name} is running on ${event.target} ${pc.dim('· save your Dart code and CapMac hot-reloads it')}`);
+      } else if (this.options.mode === 'dev' && this.options.platform === 'electron') {
         log.success(`${name} is running on ${event.target} ${pc.dim('· edit your code and CapMac reloads it')}`);
       } else if (this.options.mode === 'dev') {
         log.success(`${name} is running on ${event.target} ${pc.dim('· edit your web code and it reloads instantly')}`);
@@ -270,7 +276,10 @@ export class TerminalReporter {
     if (entry.kind === 'bridge' && !this.options.bridge) return;
     switch (entry.kind) {
       case 'console': {
-        const badge = entry.level === 'error' ? pc.red('js ✖') : entry.level === 'warn' ? pc.yellow('js ▲') : entry.level === 'info' ? pc.cyan('js  ') : entry.level === 'debug' ? pc.dim('js  ') : pc.blue('js  ');
+        // A Flutter app's console is Dart's print(); everyone else's is a page's JavaScript.
+        const badge = this.options.platform === 'flutter'
+          ? entry.level === 'error' ? pc.red('dart') : entry.level === 'warn' ? pc.yellow('dart') : entry.level === 'debug' ? pc.dim('dart') : pc.blue('dart')
+          : entry.level === 'error' ? pc.red('js ✖') : entry.level === 'warn' ? pc.yellow('js ▲') : entry.level === 'info' ? pc.cyan('js  ') : entry.level === 'debug' ? pc.dim('js  ') : pc.blue('js  ');
         const text = entry.level === 'error' ? pc.red(entry.text) : entry.level === 'warn' ? pc.yellow(entry.text) : entry.level === 'debug' ? pc.dim(entry.text) : entry.text;
         // A page's errors say where they came from (a file on this PC, clickable in VS Code).
         const where = entry.source && (entry.level === 'error' || entry.level === 'warn') ? pc.dim(`  ${entry.source}`) : '';
@@ -294,7 +303,8 @@ export class TerminalReporter {
         log.raw(`${pc.dim('elec')} ${entry.level === 'error' ? pc.red(entry.text) : entry.level === 'warn' ? pc.yellow(entry.text) : entry.text}`);
         break;
       default:
-        log.raw(`${pc.dim('ios ')} ${entry.level === 'error' ? pc.red(entry.text) : entry.text}`);
+        // A Flutter app's native lines come from the engine and the plugins, on whichever platform it runs.
+        log.raw(`${pc.dim(this.options.platform === 'flutter' ? 'app ' : 'ios ')} ${entry.level === 'error' ? pc.red(entry.text) : entry.text}`);
     }
   }
 }

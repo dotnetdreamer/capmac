@@ -20,6 +20,8 @@ export interface ScanOptions {
   includeWebDir: boolean;
   /** Leave out an electron/ folder (default true: only Capacitor's Electron platform uses it, and CapMac syncs it for Electron apps). */
   excludeElectron?: boolean;
+  /** A Flutter app: its ios/ and macos/ folders go whole (less Flutter's generated files), and nothing for Android, the web, Linux or Windows. */
+  flutter?: boolean;
   include?: string[];
   exclude?: string[];
   /**
@@ -62,6 +64,17 @@ const PROJECT_EXCLUDES_WITH_ELECTRON = ['android/'];
 const IOS_EXCLUDES = [
   'App/build/', 'App/Pods/', 'App/output/', 'App/App/public/', 'App/App/capacitor.config.json', 'App/App/config.xml',
   'DerivedData/', 'build/', '.build/', '.swiftpm/', 'capacitor-cordova-ios-plugins/', 'xcuserdata/', '*.xcuserstate',
+];
+/** A Flutter app's folders the Mac never builds from, and what Flutter (pub, Gradle) makes on this PC. */
+const FLUTTER_PROJECT_EXCLUDES = [
+  'android/', 'linux/', 'web/', 'windows/', 'fuchsia/', 'build/', '.dart_tool/', '.fvm/',
+  '.flutter-plugins', '.flutter-plugins-dependencies', '.packages', '*.iml',
+];
+/** In ios/ and macos/: what `flutter pub get`, CocoaPods and Xcode make, with this PC's paths in it. The Mac makes its own. */
+const FLUTTER_APPLE_EXCLUDES = [
+  'Pods/', '.symlinks/', 'Flutter/ephemeral/', 'Flutter/Generated.xcconfig', 'Flutter/flutter_export_environment.sh', 'Flutter/Flutter.podspec',
+  'Flutter/App.framework/', 'Flutter/Flutter.framework/', 'Flutter/flutter_assets/', 'Flutter/app.flx', 'Flutter/app.zip',
+  'DerivedData/', 'build/', '.build/', '.swiftpm/', 'xcuserdata/', '*.xcuserstate', 'Runner/GeneratedPluginRegistrant.*', 'ServiceDefinitions.json',
 ];
 const SCRIPT_EXT = /\.(sh|bash|zsh|command)$/i;
 const SMALL = 4 * 1024 * 1024;
@@ -136,10 +149,12 @@ export async function scanProject(options: ScanOptions): Promise<ScanResult> {
   const webRel = webDir ? join(projectRel, webDir) : null;
   const withWeb = options.includeWebDir && webRel !== null;
   const iosRel = join(projectRel, options.iosDir.replace(/^\.\/+|\/+$/g, ''));
+  // The native folders that go whole (less what tools generate): Capacitor's ios/, a Flutter app's ios/ and macos/.
+  const nativeRels = options.flutter ? ['ios', 'macos'].map((dir) => join(projectRel, dir)) : [iosRel];
 
   const globalIgnore = ignore().add(GLOBAL_EXCLUDES);
-  const projectIgnore = ignore().add(options.excludeElectron === false ? PROJECT_EXCLUDES_WITH_ELECTRON : PROJECT_EXCLUDES);
-  const iosIgnore = ignore().add(IOS_EXCLUDES);
+  const projectIgnore = ignore().add(options.flutter ? FLUTTER_PROJECT_EXCLUDES : options.excludeElectron === false ? PROJECT_EXCLUDES_WITH_ELECTRON : PROJECT_EXCLUDES);
+  const iosIgnore = ignore().add(options.flutter ? FLUTTER_APPLE_EXCLUDES : IOS_EXCLUDES);
   const userExclude = ignore().add(options.exclude ?? []);
   const userInclude = ignore().add(options.include ?? []);
   const hasUserInclude = (options.include?.length ?? 0) > 0;
@@ -163,7 +178,7 @@ export async function scanProject(options: ScanOptions): Promise<ScanResult> {
   const isWebPath = (rel: string) => withWeb && under(rel, webRel!);
   const isAncestorOf = (rel: string, target: string) => target === rel || target.startsWith(`${rel}/`);
   // Folders on the way to the web assets / iOS project are walked even if gitignored.
-  const isWebAncestor = (rel: string) => (withWeb && isAncestorOf(rel, webRel!)) || isAncestorOf(rel, iosRel);
+  const isWebAncestor = (rel: string) => (withWeb && isAncestorOf(rel, webRel!)) || nativeRels.some((native) => isAncestorOf(rel, native));
 
   /** Returns true when `rel` (a file, or a dir when isDir) should be skipped. */
   const excluded = (rel: string, isDir: boolean, levels: Level[]): boolean => {
@@ -176,9 +191,10 @@ export async function scanProject(options: ScanOptions): Promise<ScanResult> {
       const inProject = projectRel ? rel.slice(projectRel.length + 1) : rel;
       if (projectIgnore.ignores(isDir ? `${inProject}/` : inProject)) return true;
     }
-    if (under(rel, iosRel) && rel !== iosRel) {
-      const inIos = rel.slice(iosRel.length + 1);
-      return iosIgnore.ignores(isDir ? `${inIos}/` : inIos);
+    const native = nativeRels.find((dir) => under(rel, dir) && rel !== dir);
+    if (native !== undefined) {
+      const inNative = rel.slice(native.length + 1);
+      return iosIgnore.ignores(isDir ? `${inNative}/` : inNative);
     }
     let ignored = false;
     for (const level of levels) {

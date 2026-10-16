@@ -119,6 +119,45 @@ function MacLiveCard({ path, run, mac }: { path: string; run: RunState; mac: Mac
   );
 }
 
+/** Live mode for a Flutter app: saves hot-reload it (on a simulator or device, on the Mac's desktop, or on this PC). */
+function FlutterLiveCard({ path, run, mac }: { path: string; run: RunState; mac: MacSummary | null }) {
+  const live = run.live!;
+  const busy = isBusy(run);
+  const running = run.app?.state === 'running';
+  const where = run.onPc ? t.session.flutterOnPc : run.onMac ? mac?.label ?? t.session.mac : run.target?.name ?? mac?.label ?? t.session.mac;
+  return (
+    <div className="session-bar session-bar--live" role="status" aria-label={t.session.liveLabel}>
+      <span className="session-bar__mode">
+        <Icon name="flash" size={14} filled />
+        {t.common.live}
+      </span>
+      <span className="session-bar__chip">
+        <Icon name={run.onPc ? 'desktop' : run.onMac ? 'mac' : 'phone'} size={14} />
+        {where}
+      </span>
+      <span className="session-bar__sep" />
+      <span className="session-bar__hmr">
+        <StatusDot tone={running ? 'live' : 'idle'} pulse={running} />
+        {live.hmrUpdatedAt ? t.session.flutterReloaded(clockTime(live.hmrUpdatedAt)) : t.session.flutterSaves}
+      </span>
+      <span className="session-bar__spacer" />
+      <Tooltip content={t.session.hotReloadTip}>
+        <Button size="sm" variant="subtle" icon="flash" onClick={() => void reloadApp(path)} disabled={busy || !running}>
+          {t.session.hotReload}
+        </Button>
+      </Tooltip>
+      <Tooltip content={t.session.hotRestartTip}>
+        <Button size="sm" variant="subtle" icon="refresh" onClick={() => void relaunch(path)} disabled={busy || !running}>
+          {t.session.hotRestart}
+        </Button>
+      </Tooltip>
+      <Button size="sm" variant="subtle" icon="sync" onClick={() => void rebuild(path)} disabled={busy}>
+        {t.session.rebuild}
+      </Button>
+    </div>
+  );
+}
+
 function RunCard({ run }: { run: RunState }) {
   const busy = isBusy(run);
   const now = useTick(1000, run.app?.state === 'running');
@@ -197,8 +236,11 @@ function FailureCard({ path, run }: { path: string; run: RunState }) {
   );
 }
 
-/** `electron`: the project's Electron app is Capacitor's (live reload goes through a dev server on this PC) or its own. */
-export function SessionBar({ path, run, mac, electron = null }: { path: string; run: RunState | undefined; mac: MacSummary | null; electron?: 'capacitor' | 'plain' | null }) {
+/**
+ * `electron`: the project's Electron app is Capacitor's (live reload goes through a dev server on this PC) or its own;
+ * `flutter`: it is a Flutter app (live reload is Flutter's hot reload).
+ */
+export function SessionBar({ path, run, mac, electron = null, flutter = false }: { path: string; run: RunState | undefined; mac: MacSummary | null; electron?: 'capacitor' | 'plain' | null; flutter?: boolean }) {
   const active = isActive(run);
   if (mac && active && (mac.state === 'lost' || mac.state === 'reconnecting')) {
     return (
@@ -211,6 +253,7 @@ export function SessionBar({ path, run, mac, electron = null }: { path: string; 
   }
   if (!run) return null;
   if (run.status === 'failed' && run.error && !run.error.cancelled) return <FailureCard path={path} run={run} />;
+  if (active && run.mode === 'live' && run.live && flutter && run.backend !== 'wsl') return <FlutterLiveCard path={path} run={run} mac={mac} />;
   if (active && run.mode === 'live' && run.live && run.onMac && electron !== 'capacitor') return <MacLiveCard path={path} run={run} mac={mac} />;
   if (active && run.mode === 'live' && run.live) return <LiveCard path={path} run={run} mac={mac} />;
   if (active && run.mode === 'run') return <RunCard run={run} />;

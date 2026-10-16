@@ -4,11 +4,12 @@
  */
 
 import type { AppCodec, AppDialog, AppDialogClosed, AppInputEvent, AppWindowInfo, HookEvent, SoundMode } from './electron.js';
+import type { FlutterDaemonMessage } from './flutter.js';
 
 export const PROTOCOL_VERSION = 1;
 
-/** 'mac': the Mac's own desktop, where Electron apps run. */
-export type TargetKind = 'simulator' | 'device' | 'mac';
+/** 'mac': the Mac's own desktop, where Electron apps and Flutter's Mac apps run; 'pc': this PC's desktop, where a Flutter app's Windows app runs. */
+export type TargetKind = 'simulator' | 'device' | 'mac' | 'pc';
 
 export interface Target {
   kind: TargetKind;
@@ -303,6 +304,10 @@ export type AgentEvent =
   | { t: 'electron'; event: HookEvent }
   /** Electron: the answer to a control request sent to `electron-launch`. */
   | { t: 'control-result'; id: number; ok: boolean; data?: unknown; error?: string }
+  /** `flutter-run`: a message of Flutter's daemon protocol (an event, or the answer to a request). */
+  | { t: 'flutter'; msg: FlutterDaemonMessage }
+  /** `flutter-mac-launch`: the Dart VM service of the Mac app CapMac launched (for hot reload). */
+  | { t: 'flutter-vm'; uri: string }
   /** `electron-screen`: the app's windows, and which one is showing. */
   | { t: 'app-windows'; windows: AppWindowInfo[]; watched: number | null }
   /** `electron-screen`: the pointer's shape over the window (Electron's cursor type). */

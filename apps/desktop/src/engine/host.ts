@@ -9,11 +9,13 @@ import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { MessagePortMain } from 'electron';
 import {
+  appFor,
   applyFix,
   AppScreenStream,
   backendOf,
   bootSimulator,
   buildApp,
+  buildFlutterOnMac,
   CancelledError,
   chooseApp,
   chooseBackend,
@@ -22,6 +24,8 @@ import {
   ElectronLiveSession,
   enableRemote,
   findApps,
+  FlutterLiveSession,
+  FlutterPcLiveSession,
   inspectProject,
   installLocalDependencies,
   LiveSession,
@@ -33,6 +37,7 @@ import {
   macChecks,
   openInXcode,
   pairMac,
+  PC_TARGET_ID,
   readFromMac,
   remoteChecks,
   remoteDoorStatus,
@@ -44,6 +49,8 @@ import {
   revokeRemotePc,
   runApp,
   runElectronApp,
+  runFlutterOnMac,
+  runFlutterOnPc,
   runsOnMac,
   ScreenStream,
   setAgentBundlePath,
@@ -334,9 +341,32 @@ interface HostSession {
   /** None when it builds on this PC. */
   mac: string | null;
   controller: AbortController;
-  /** Live reload: an iOS app's, or an Electron app's on the Mac's desktop. */
-  live: LiveSession | ElectronLiveSession | null;
+  /** Live reload: an iOS app's, an Electron app's on the Mac's desktop, or a Flutter app's (on the Mac, or its Windows app here). */
+  live: LiveSession | ElectronLiveSession | FlutterLiveSession | FlutterPcLiveSession | null;
   done: Promise<void>;
+}
+
+/** Live reload until stopped: starts it, and ends the session when it fails or is stopped. */
+function untilStopped(live: NonNullable<HostSession['live']>, controller: AbortController, end: (err?: unknown) => void): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const finish = () => {
+      void live.stop().then(() => {
+        end();
+        resolve();
+      });
+    };
+    live.start().then(
+      () => {
+        // Stays up until stopped (it may have been stopped while starting).
+        if (controller.signal.aborted) finish();
+        else controller.signal.addEventListener('abort', finish, { once: true });
+      },
+      (err) => {
+        end(err);
+        resolve();
+      },
+    );
+  });
 }
 
 const sessions = new Map<string, HostSession>();
@@ -358,6 +388,7 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
   const existing = sessionFor(params.projectPath);
   if (existing) await stopSession(existing.id);
   const project = await loadProject(params.projectPath);
+  if (project.kind === 'flutter') return startFlutterSession(params, project);
   // The app asked for (the toolbar's app picker), else the Mac's desktop as the target, else the one picked for the project.
   const onMac = params.mode !== 'ipa' && runsOnMac(project, { app: 'app' in params ? params.app : undefined, target: 'target' in params && params.target === MAC_TARGET_ID ? 'mac' : undefined });
   if (!onMac) requireIos(project);
@@ -394,25 +425,7 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
       ? new ElectronLiveSession(project, l, { full: options.full || options.clean }, ctx)
       : new LiveSession(project, l, { target, clean: options.clean, full: options.full, configuration: options.configuration, showSimulator: options.showSimulator, osLogs: options.osLogs ?? settings.osLogs }, ctx);
     session.live = live;
-    session.done = new Promise<void>((resolve) => {
-      const finish = () => {
-        void live.stop().then(() => {
-          end();
-          resolve();
-        });
-      };
-      live.start().then(
-        () => {
-          // Stays up until stopped (it may have been stopped while starting).
-          if (controller.signal.aborted) finish();
-          else controller.signal.addEventListener('abort', finish, { once: true });
-        },
-        (err) => {
-          end(err);
-          resolve();
-        },
-      );
-    });
+    session.done = untilStopped(live, controller, end);
   } else {
     const p = params as MethodParams<'builds.ipa'>;
     session.done = buildApp(project, l, { ipa: true, exportKind: p.exportKind, upload: p.upload, outDir: p.outDir, team: p.team }, ctx, controller.signal).then((result) => {
@@ -442,7 +455,66 @@ function startPcSession(params: MethodParams<'sessions.start'>, project: Project
   };
   const session: HostSession = { id, mode, projectPath: project.capDir, mac: null, controller, live: null, done: Promise.resolve() };
   sessions.set(id, session);
-  session.done = wslHost.session(params.mode, project, target, ctx, controller.signal, (file, size) => emit(scope, { type: 'ipa-ready', file, size }), { clean: params.options?.clean }).then(() => end(), end);
+  session.done = wslHost.session(params.mode, project, target, ctx, controller.signal, (file, size) => emit(scope, { type: 'ipa-ready', file, size }), { clean: params.options?.clean, flutterMode: params.options?.flutterMode }).then(() => end(), end);
+  return { sessionId: id };
+}
+
+/**
+ * A Flutter app: its iOS app (in a simulator or on a device through the Mac,
+ * or on an iPhone plugged into this PC), its Mac app (on the Mac's desktop,
+ * its window here) or its Windows app (on this PC, in its own window).
+ */
+async function startFlutterSession(params: MethodParams<'sessions.start'> | (MethodParams<'builds.ipa'> & { mode: 'ipa' }), project: ProjectInfo): Promise<{ sessionId: string }> {
+  const picked = 'target' in params ? params.target : undefined;
+  // An IPA is the iOS app's, whichever app is picked.
+  const app = params.mode === 'ipa' ? 'ios' : appFor(project, { app: 'app' in params ? params.app : undefined, target: picked === MAC_TARGET_ID ? 'mac' : picked === PC_TARGET_ID ? 'pc' : undefined });
+  if (params.mode === 'ipa' && !project.flutter?.platforms.ios) throw new UserError(t.host.flutterIpaIosOnly);
+  if (params.mode === 'ipa' && params.upload) throw new UserError(t.host.flutterNoUpload, t.host.flutterNoUploadHint);
+  const options = params.mode === 'ipa' ? {} : params.options ?? {};
+  const mode = options.flutterMode;
+  const onPc = app === 'windows';
+  // The iOS app builds where the project builds: through the Mac, or on this PC.
+  if (app === 'ios' && params.mode !== 'ipa' && (params.backend ?? (await backendOf(project))) === 'wsl') return startPcSession(params, project);
+  if (params.mode === 'build') throw new UserError(t.host.buildOnPcOnly, t.host.buildOnPcOnlyHint);
+  const mac = onPc ? null : params.mac ?? project.config.host ?? (await defaultMacName());
+  const id = newId('s');
+  const scope: Scope = { sessionId: id, projectPath: project.capDir, ...(mac ? { mac } : {}) };
+  const ctx = contextFor(scope);
+  const controller = new AbortController();
+  const started = Date.now();
+  const target = app === 'ios' && picked !== MAC_TARGET_ID && picked !== PC_TARGET_ID ? picked : undefined;
+  emit(scope, { type: 'session-started', mode: params.mode, projectPath: project.capDir, mac, target: app === 'macos' ? MAC_TARGET_ID : onPc ? PC_TARGET_ID : target ?? null });
+  const end = (err?: unknown) => {
+    sessions.delete(id);
+    const info = err === undefined ? undefined : toErrorInfo(err);
+    const cancelled = Boolean(info?.cancelled) || controller.signal.aborted;
+    emit(scope, { type: 'session-ended', mode: params.mode, ok: err === undefined || cancelled, cancelled, error: cancelled ? undefined : info, ms: Date.now() - started });
+  };
+  const session: HostSession = { id, mode: params.mode, projectPath: project.capDir, mac, controller, live: null, done: Promise.resolve() };
+  sessions.set(id, session);
+  if (onPc) {
+    if (params.mode === 'live') {
+      session.live = new FlutterPcLiveSession(project, {}, ctx);
+      session.done = untilStopped(session.live, controller, end);
+    } else {
+      session.done = runFlutterOnPc(project, { mode }, ctx, controller.signal).then(() => end(), end);
+    }
+    return { sessionId: id };
+  }
+  const l = link(mac!);
+  const macApp = app === 'macos' ? 'macos' : 'ios';
+  if (params.mode === 'run') {
+    session.done = runFlutterOnMac(project, l, { app: macApp, target, mode }, ctx, controller.signal).then(() => end(), end);
+  } else if (params.mode === 'live') {
+    session.live = new FlutterLiveSession(project, l, { app: macApp, target }, ctx);
+    session.done = untilStopped(session.live, controller, end);
+  } else {
+    const p = params as MethodParams<'builds.ipa'>;
+    session.done = buildFlutterOnMac(project, l, { app: 'ios', what: 'ipa', exportMethod: p.exportKind, team: p.team, outDir: p.outDir }, ctx, controller.signal).then((result) => {
+      if (result.kind === 'ipa') emit(scope, { type: 'ipa-ready', file: result.file, size: result.size });
+      end();
+    }, end);
+  }
   return { sessionId: id };
 }
 
@@ -704,7 +776,18 @@ function closeScreen(streamId: string): void {
 
 const SAMPLE_SKIP = new Set(['node_modules', '.git', 'build', 'DerivedData', 'Pods', 'xcuserdata']);
 
-async function createSample(kind: 'ios' | 'electron' = 'ios'): Promise<{ path: string }> {
+async function createSample(kind: 'ios' | 'electron' | 'flutter' = 'ios'): Promise<{ path: string }> {
+  if (kind === 'flutter') {
+    if (!init?.flutterSampleDir || !existsSync(init.flutterSampleDir)) throw new UserError(t.host.noSample);
+    const target = path.join(init.samplesHome, 'Hello Flutter');
+    if (!existsSync(path.join(target, 'pubspec.yaml'))) {
+      await fs.mkdir(init.samplesHome, { recursive: true });
+      // Source only: what Flutter makes on a machine holds that machine's paths.
+      const skip = new Set(['build', '.dart_tool', '.git', '.capmac', '.idea', 'ephemeral', 'Pods', '.symlinks', '.flutter-plugins', '.flutter-plugins-dependencies', 'xcuserdata', 'Generated.xcconfig', 'flutter_export_environment.sh', 'GeneratedPluginRegistrant.h', 'GeneratedPluginRegistrant.m']);
+      await fs.cp(init.flutterSampleDir, target, { recursive: true, filter: (src) => !skip.has(path.basename(src)) && !src.endsWith('.iml') });
+    }
+    return { path: target };
+  }
   if (kind === 'electron') {
     if (!init?.electronSampleDir || !existsSync(init.electronSampleDir)) throw new UserError(t.host.noSample);
     const target = path.join(init.samplesHome, 'Hello Electron');
@@ -802,8 +885,8 @@ const handlers: Handlers = {
   'projects.syncSize': async ({ path: dir }) => syncSize(await loadProject(dir)),
   'projects.createSample': async ({ kind }) => {
     const sample = await createSample(kind);
-    // A sample is opened for one of its apps: no need to ask which.
-    await chooseApp(await loadProject(sample.path), kind ?? 'ios').catch(() => undefined);
+    // A sample is opened for one of its apps: no need to ask which (the Flutter sample's iOS app; the toolbar switches).
+    await chooseApp(await loadProject(sample.path), kind === 'electron' ? 'electron' : 'ios').catch(() => undefined);
     return sample;
   },
   'projects.installDeps': async ({ path: dir }) => {
@@ -815,7 +898,9 @@ const handlers: Handlers = {
   'sessions.rebuild': async ({ sessionId, clean }) => {
     const live = sessions.get(sessionId)?.live;
     if (!live) throw new UserError(t.host.liveNotRunning);
-    live.rebuild({ clean });
+    // (A Flutter app's rebuild starts from its current files: there is nothing to clean first.)
+    if (live instanceof FlutterLiveSession || live instanceof FlutterPcLiveSession) live.rebuild();
+    else live.rebuild({ clean });
   },
   'sessions.relaunch': async ({ sessionId }) => {
     const live = sessions.get(sessionId)?.live;
@@ -824,6 +909,7 @@ const handlers: Handlers = {
   },
   'sessions.reload': async ({ sessionId }) => {
     const live = sessions.get(sessionId)?.live;
+    if (live instanceof FlutterLiveSession || live instanceof FlutterPcLiveSession) return live.reload();
     if (!(live instanceof ElectronLiveSession)) throw new UserError(t.host.liveNotRunning);
     await live.reload();
   },

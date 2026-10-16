@@ -119,6 +119,27 @@ describe('the run timeline', () => {
     expect(run().phases.boot).toMatchObject({ status: 'skipped', detail: 'not needed on a device' });
   });
 
+  it('starts afresh when the next run is somewhere else (a Flutter app’s iOS app, then its Windows app)', () => {
+    apply(
+      { type: 'session-started', mode: 'run', projectPath, mac: 'ik-s-m1', target: null },
+      { type: 'target', target },
+      { type: 'step', id: 'build', title: 'Running Xcode build', phase: 'build' },
+      { type: 'step-end', id: 'build', status: 'ok', ms: 33_000 },
+      { type: 'session-ended', mode: 'run', ok: true, cancelled: false, ms: 60_000 },
+    );
+    // Again on the same simulator: the last run stays to compare with.
+    apply({ type: 'session-started', mode: 'run', projectPath, mac: 'ik-s-m1', target: null });
+    expect(run().target?.name).toBe('iPhone 17');
+    expect(run().previous?.phases.build).toMatchObject({ status: 'done' });
+    apply({ type: 'session-ended', mode: 'run', ok: true, cancelled: true, ms: 1000 });
+    // On this PC's desktop: no simulator, and nothing of the iOS runs.
+    apply({ type: 'session-started', mode: 'run', projectPath, mac: null, target: 'pc-desktop' });
+    expect(run().onPc).toBe(true);
+    expect(run().target).toBeNull();
+    expect(run().previous).toBeNull();
+    expect(run().phases.build).toBeUndefined();
+  });
+
   it('ignores events without a project', () => {
     useRuns.getState().apply([{ scope: { mac: 'ik-s-m1' }, event: { type: 'app', state: 'running' } }]);
     expect(useRuns.getState().byKey).toEqual({});

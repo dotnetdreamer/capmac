@@ -39,6 +39,14 @@ export function phaseOf(op: string, stepId: string): Phase {
       return 'cap';
     case 'electron-prepare:build':
       return 'build';
+    case 'flutter-run:boot':
+      return 'boot';
+    case 'flutter-build:build':
+      return 'build';
+    case 'flutter-sdk:flutter-clone':
+    case 'flutter-sdk:flutter-tool':
+    case 'flutter-sdk:flutter-precache':
+      return 'deps';
     default:
       return 'other';
   }

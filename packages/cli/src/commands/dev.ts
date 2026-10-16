@@ -2,6 +2,7 @@ import { SOUND_MODES, type SoundMode } from '@capmac/core/shared/electron';
 import { answerAppDialog, appFor, ElectronLiveSession, LiveSession, loadApiKey, loadProject, MacLink, requireElectron, requireIos, soundFor, streamPreference, type ProjectInfo, type StreamPreference } from '@capmac/core/engine';
 import { listenForKeys } from '../keys.js';
 import { announceApp } from './apps.js';
+import { flutterDevCommand, type FlutterCommandOptions } from './flutter.js';
 import { reportError } from '../report.js';
 import { terminalContext } from '../terminal.js';
 import { log, pc } from '../ui.js';
@@ -47,10 +48,10 @@ function printElectronKeys(): void {
 }
 
 /** Runs until q or Ctrl+C (also while starting up), then stops the session. */
-async function untilQuit(start: () => Promise<void>, keys: Record<string, () => void>, onStarted: () => void, stop: () => Promise<void>): Promise<void> {
+export async function untilQuit(start: () => Promise<void>, keys: Record<string, () => void>, onStarted: () => void, stop: () => Promise<void>, help: () => void = printKeys): Promise<void> {
   let resolveQuit!: () => void;
   const quit = new Promise<void>((resolve) => (resolveQuit = resolve));
-  const stopKeys = listenForKeys({ ...keys, c: () => console.clear(), h: printKeys, '?': printKeys, q: () => resolveQuit(), 'ctrl+c': () => resolveQuit() });
+  const stopKeys = listenForKeys({ ...keys, c: () => console.clear(), h: help, '?': help, q: () => resolveQuit(), 'ctrl+c': () => resolveQuit() });
   const onSigint = () => resolveQuit();
   process.on('SIGINT', onSigint);
   try {
@@ -69,8 +70,9 @@ async function untilQuit(start: () => Promise<void>, keys: Record<string, () => 
   }
 }
 
-export async function devCommand(options: DevOptions): Promise<void> {
+export async function devCommand(options: DevOptions & FlutterCommandOptions): Promise<void> {
   const project = await loadProject(process.cwd());
+  if (project.kind === 'flutter') return flutterDevCommand(project, options);
   const app = appFor(project, options);
   await announceApp(project, app);
   if (app === 'electron') return devOnMac(project, options);

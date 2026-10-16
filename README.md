@@ -7,7 +7,7 @@
 Keep your editor, web build and dev server on Windows.
 CapMac builds your Capacitor or Ionic app with Xcode on a paired Mac and brings the simulator screen, build errors and app logs back to your PC.
 
-Run on iOS simulators or connected iPhones, export signed builds, and run Electron apps on the Mac desktop through the same CLI or Windows app.
+Run on iOS simulators or connected iPhones, export signed builds, and run Flutter apps (iOS, Mac and Windows) and Electron apps through the same CLI or Windows app.
 
 **Your own Mac · SSH connection · CLI and CapMac Studio**
 
@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/d55fac9f-92fc-4e6e-953a-574a824a5ecb
 
 </div>
 
-[CapMac Studio](#capmac-studio) | [Capacitor and Ionic commands](#keep-your-capacitor-and-ionic-commands) | [Commands](#commands) | [Electron apps](#electron-apps) | [AI coding agents](#ai-coding-agents) | [Remote access](#away-from-the-macs-network) | [Development](#developing-capmac)
+[CapMac Studio](#capmac-studio) | [Capacitor and Ionic commands](#keep-your-capacitor-and-ionic-commands) | [Commands](#commands) | [Flutter apps](#flutter-apps) | [Electron apps](#electron-apps) | [AI coding agents](#ai-coding-agents) | [Remote access](#away-from-the-macs-network) | [Development](#developing-capmac)
 
 ## Why CapMac
 
@@ -35,7 +35,8 @@ CapMac handles the file sync, Xcode build and app launch, then brings the result
 | Avoid repeating build work | Transfers changed files and reuses native simulator output when only web assets changed |
 | Prepare a release | Exports signed IPA files and uploads builds to App Store Connect for TestFlight |
 
-Electron projects use the same pairing and commands to run on macOS, with the app's window and consoles available on Windows.
+Flutter projects use the same pairing and commands: the iOS app in simulators and on iPhones with hot reload, the Mac app on the Mac's desktop, and the Windows app on your PC.
+Electron projects run on macOS the same way, with the app's window and consoles available on Windows.
 The [coding agent skill](#ai-coding-agents) lets your agent build, read logs and take screenshots through the CLI.
 
 ## How it works
@@ -169,7 +170,7 @@ It is not enabled automatically by a temporary `npx capmac` copy or when `CI=tru
 | `capmac open` | Open the project in Xcode on the Mac |
 
 Use `--target "<name or UDID>"` to select a simulator or device and `--mac <name>` to select a paired Mac.
-For [projects with several apps](#one-folder-several-apps), use `--app ios` or `--app electron` to choose which app to run.
+For [projects with several apps](#one-folder-several-apps), use `--app ios`, `--app electron`, or a Flutter app's `--app mac` and `--app windows` to choose which app to run.
 For scripts, `capmac run --no-logs` returns after launch, while `capmac run --for 20` captures the console for 20 seconds and then stops the app.
 
 Build errors use Windows file paths so you can open them from your terminal.
@@ -211,7 +212,9 @@ capmac run
 capmac dev
 ```
 
-Live development starts your Windows dev server and a LAN relay automatically; web changes reload and native changes rebuild and reinstall. Neither package path has an artificial Capacitor 8 restriction. macOS-only scripts, unsupported resource features, and Swift package build-tool plugins or macros need additional support. The WSL backend is experimental: application compilation and device validation with your SDK and signing material remain required. Standalone native project import, Flutter and simulators are future work.
+Live development starts your Windows dev server and a LAN relay automatically; web changes reload and native changes rebuild and reinstall. Neither package path has an artificial Capacitor 8 restriction. macOS-only scripts, unsupported resource features, and Swift package build-tool plugins or macros need additional support. The WSL backend is experimental: application compilation and device validation with your SDK and signing material remain required. Standalone native project import and simulators are future work.
+
+Flutter apps build this way too, with plugins that come as Swift packages. Flutter's Linux tools compile the Dart code in WSL. Dart's iPhone compiler, which Google ships only for Macs, is built from Dart's own source the first time, in about 5 minutes. It makes byte-for-byte the same app code as Flutter's compiler on a Mac. An iPhone runs these builds in release mode, or in profile mode with `--mode profile`. Debug builds need Xcode's debugger, so hot reload stays with a paired Mac. Live mode here rebuilds the app and opens it again each time you save.
 
 ### A real iPhone's screen
 
@@ -230,6 +233,49 @@ The iPhone's camera is never turned on, and its sound keeps playing on the iPhon
 
 The screen is view only for now: tap and type on the iPhone itself.
 Over Wi-Fi alone, the iPhone runs your app but its screen can't be shown.
+
+## Flutter apps
+
+CapMac runs a Flutter app's iOS app, Mac app and Windows app.
+
+```powershell
+cd my_flutter_app
+capmac run                          # the iOS app, in a simulator on the Mac
+capmac dev                          # live: each save hot-reloads the app
+capmac run --app mac                # the Mac app, on the Mac's desktop
+capmac run --app windows            # the Windows app, on this PC (no Mac needed)
+capmac run --device --mode release  # on an iPhone, as people get it
+capmac build --ipa
+```
+
+On the Mac, Flutter itself builds and runs the app (`flutter run`), the way an editor drives it.
+CapMac syncs the project and installs Flutter on the Mac the first time, in `~/.capmac/flutter`, apart from any Flutter you install yourself.
+It uses this PC's Flutter version, or the one your project pins with FVM or `capmac.json`.
+Flutter's steps, the Dart console and the engine's logs come back to Windows, and Dart compile errors use Windows file paths.
+
+`capmac dev` hot-reloads the app when you save Dart code or assets.
+In the terminal, press `r` to hot reload and `R` to hot restart.
+A change to `pubspec.yaml` or to the app's native code rebuilds the app.
+
+The Mac app opens behind the windows on the Mac and never takes its keyboard.
+Its window comes to Studio and to `capmac screen --app mac`, where you can click, scroll and type.
+CapMac reads the window's frames from the surfaces Flutter draws into, so it shows even while the Mac is locked, with no Screen Recording permission.
+
+The Windows app runs with Flutter on this PC: yours, or one CapMac installs in `%LOCALAPPDATA%\CapMac\flutter`.
+It needs Visual Studio with **Desktop development with C++** and **C++ CMake tools for Windows**.
+CapMac checks before building and offers to add what's missing with Visual Studio's installer.
+
+Build options: `--mode debug|profile|release`, `--flavor <name>`, `--main lib/main_dev.dart` and `--dart-define KEY=VALUE`.
+Defaults for every run go in `capmac.json`:
+
+```json
+{ "flutter": { "target": "lib/main_dev.dart", "flavor": "dev", "dartDefines": { "API_URL": "https://dev.example.com" }, "version": "3.47.7" } }
+```
+
+In Studio, the toolbar's app picker switches between a Flutter project's apps.
+Live mode has **Hot reload** and **Hot restart** buttons, and the **More** menu runs profile and release builds.
+**Try a sample › iPhone, Mac and Windows app (Flutter)** creates a small Flutter app with all three ([examples/hello-flutter](examples/hello-flutter)).
+With no Mac, the iOS app builds on this PC too: see the [WSL backend](#experimental-wsl-backend).
 
 ## Electron apps
 
@@ -278,7 +324,7 @@ Change how the app is found, built or started in `capmac.json`.
 
 ## One folder, several apps
 
-A folder can contain both a Capacitor iOS app and an Electron app for the Mac.
+A folder can contain both a Capacitor iOS app and an Electron app for the Mac, and a Flutter project has an iOS, a Mac and a Windows app.
 CapMac finds the apps by reading their files, without running them.
 It also checks subfolders in a monorepo.
 
@@ -295,7 +341,7 @@ capmac apps use electron    # from now on, in the CLI and Studio
 capmac run --app ios        # just this once
 ```
 
-CapMac also recognizes Flutter, React Native, Expo, Tauri, .NET MAUI, Cordova, NativeScript and Xcode projects, but can't run them yet.
+CapMac also recognizes React Native, Expo, Tauri, .NET MAUI, Cordova, NativeScript and Xcode projects, but can't run them yet.
 
 ## Configuration
 

@@ -17,16 +17,25 @@ export const CAP_ELECTRON_PHASES: TimelinePhase[] = ['web', 'sync', 'deps', 'ele
 /** Built on this PC: no copy to a Mac, no cap sync, no simulator. */
 export const PC_PHASES: TimelinePhase[] = ['web', 'deps', 'build', 'install', 'launch'];
 export const PC_IPA_PHASES: TimelinePhase[] = ['web', 'deps', 'build'];
+/** A Flutter app: Flutter builds, then installs and opens it in one step (no web build, no cap sync); its Mac app opens on the Mac's desktop, its Windows app here. */
+export const FLUTTER_PHASES: TimelinePhase[] = ['sync', 'deps', 'boot', 'build', 'launch'];
+export const FLUTTER_MAC_PHASES: TimelinePhase[] = ['sync', 'deps', 'build', 'launch'];
+export const FLUTTER_PC_PHASES: TimelinePhase[] = ['deps', 'build', 'launch'];
+export const FLUTTER_IPA_PHASES: TimelinePhase[] = ['sync', 'deps', 'build', 'download'];
 export const PHASE_LABELS: Record<TimelinePhase, string> = t.phases;
 
-/** A step's name: some read differently for an Electron app ("Build", not "Xcode build"), or on this PC. */
-export function phaseLabel(phase: TimelinePhase, onMac: boolean, pc = false): string {
+/** A step's name: some read differently for an Electron app ("Build", not "Xcode build"), on this PC, or for a Flutter app. */
+export function phaseLabel(phase: TimelinePhase, onMac: boolean, pc = false, flutter = false): string {
+  const own = flutter ? (t.phasesFlutter as Partial<Record<TimelinePhase, string>>)[phase] : undefined;
+  if (own) return own;
   if (pc) return (t.pc.phases as Partial<Record<TimelinePhase, string>>)[phase] ?? PHASE_LABELS[phase];
   return (onMac ? (t.phasesMac as Partial<Record<TimelinePhase, string>>)[phase] : undefined) ?? PHASE_LABELS[phase];
 }
 
 /** The target id of the Mac's desktop (where Electron apps run); see core's MAC_TARGET_ID. */
 export const MAC_TARGET_ID = 'mac-desktop';
+/** The target id of this PC's desktop (where a Flutter app's Windows app runs); see core's PC_TARGET_ID. */
+export const PC_TARGET_ID = 'pc-desktop';
 
 export interface PhaseState {
   status: 'pending' | 'running' | 'done' | 'skipped' | 'failed' | 'cancelled';
@@ -77,8 +86,10 @@ export interface RunState {
   notes: Note[];
   app: { state: 'launching' | 'running' | 'exited' | 'stopped'; name?: string; target?: string; exitCode?: number | null; at: number } | null;
   target: Target | null;
-  /** The app runs on the Mac's desktop (an Electron app). */
+  /** The app runs on the Mac's desktop (an Electron app, a Flutter app's Mac app). */
   onMac: boolean;
+  /** The app runs on this PC's desktop (a Flutter app's Windows app). */
+  onPc: boolean;
   /** Where it builds: the Mac, or this PC (and the iPhone plugged into it). */
   backend: 'mac' | 'wsl';
   mac: string | null;
@@ -107,6 +118,7 @@ export function emptyRun(path: string): RunState {
     app: null,
     target: null,
     onMac: false,
+    onPc: false,
     backend: 'mac',
     mac: null,
     live: null,
@@ -119,7 +131,7 @@ export function emptyRun(path: string): RunState {
 export const isActive = (run: RunState | undefined) => Boolean(run && run.sessionId && !['stopped', 'done'].includes(run.status));
 export const isBusy = (run: RunState | undefined) => Boolean(run && (run.status === 'starting' || run.status === 'building' || run.status === 'stopping'));
 
-const TIMELINE = new Set<string>([...RUN_PHASES, ...IPA_PHASES, ...CAP_ELECTRON_PHASES]);
+const TIMELINE = new Set<string>([...RUN_PHASES, ...IPA_PHASES, ...CAP_ELECTRON_PHASES, ...FLUTTER_IPA_PHASES]);
 let noteId = 1;
 
 interface RunsState {
@@ -163,7 +175,11 @@ function reduce(run: RunState, event: HostEvent, sessionId: string | undefined, 
   const now = Date.now();
   switch (event.type) {
     case 'session-started': {
-      const next = newRun({ ...run, sessionId: sessionId ?? null, mac: event.mac, app: null, onMac: event.target === MAC_TARGET_ID, backend: event.backend ?? 'mac' }, event.mode === 'build' ? 'run' : event.mode);
+      // Another place than the last run (a Flutter app's iOS app, then its Windows app): its target and its last run are not this one's.
+      const place = (onMac: boolean, onPc: boolean, backend: string) => (onPc ? 'pc' : onMac ? 'mac' : backend);
+      const elsewhere = run.runNumber > 0 && place(run.onMac, run.onPc, run.backend) !== place(event.target === MAC_TARGET_ID, event.target === PC_TARGET_ID, event.backend ?? 'mac');
+      const base: RunState = elsewhere ? { ...run, target: null, previous: null, phases: {} } : run;
+      const next = newRun({ ...base, sessionId: sessionId ?? null, mac: event.mac, app: null, onMac: event.target === MAC_TARGET_ID, onPc: event.target === PC_TARGET_ID, backend: event.backend ?? 'mac' }, event.mode === 'build' ? 'run' : event.mode);
       next.status = 'starting';
       next.live = event.mode === 'live'
         ? { devServerUrl: null, external: false, command: null, tunnel: 'pending', liveUrl: null, localUrl: null, hmr: 'waiting', hmrUpdatedAt: null, lastNativeChange: null }
@@ -243,7 +259,7 @@ function reduce(run: RunState, event: HostEvent, sessionId: string | undefined, 
         endedAt: event.state === 'running' ? now : run.endedAt,
       };
     case 'target': {
-      const next = { ...run, target: event.target, onMac: event.target.kind === 'mac' };
+      const next = { ...run, target: event.target, onMac: event.target.kind === 'mac', onPc: event.target.kind === 'pc' };
       if (event.target.kind === 'device' && !next.phases.boot) next.phases = { ...next.phases, boot: { status: 'skipped', detail: 'not needed on a device' } };
       return next;
     }

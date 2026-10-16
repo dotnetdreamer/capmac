@@ -47,6 +47,8 @@ export interface WslOptions {
   logs?: boolean;
   release?: boolean;
   configuration?: string;
+  /** A Flutter app's build mode (`--mode`): an iPhone runs release or profile builds here (debug ones need Xcode's debugger). */
+  mode?: string;
   clean?: boolean;
   app?: string;
   json?: boolean;

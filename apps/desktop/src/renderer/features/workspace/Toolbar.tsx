@@ -142,7 +142,7 @@ function currentPhase(run: RunState | undefined): string | null {
   return run.status === 'starting' ? t.phaseNow.starting : null;
 }
 
-export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, autoTarget, targetsLoading, macDesktop = null, onlyMac = false, app = 'ios', pc = false, pcState = 'setup' }: {
+export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, autoTarget, targetsLoading, macDesktop = null, onlyMac = false, pcDesktop = false, app = 'ios', pc = false, pcState = 'setup' }: {
   path: string;
   summary: ProjectSummary | null;
   icon: string | null;
@@ -157,6 +157,8 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
   macDesktop?: Target | null;
   /** The project's only target is the Mac's desktop. */
   onlyMac?: boolean;
+  /** The app picked is a Flutter app's Windows app: it builds and runs on this PC, with no Mac. */
+  pcDesktop?: boolean;
   /** The app Run and Live use. */
   app?: RunnableApp;
   /** It builds on this PC (no Mac), for the iPhone plugged into it. */
@@ -172,12 +174,13 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
   const phase = busy ? currentPhase(run) : null;
   const name = summary?.appName ?? path.split(/[\\/]/).pop() ?? path;
   // The app picked must be there to run: an iOS app once iOS is added.
-  const appReady = app === 'electron' ? Boolean(summary?.electron) : Boolean(summary?.hasIos);
-  // On this PC no Mac is needed: Run sets this PC up first when it isn't yet.
-  const canRun = appReady && (pc || Boolean(mac));
-  const runHint = !pc && !mac ? t.toolbar.pairFirst : summary && !appReady && app === 'ios' ? t.toolbar.addIosFirst : undefined;
+  const appReady = app === 'electron' ? Boolean(summary?.electron) : app === 'macos' || app === 'windows' ? Boolean(summary?.flutter?.platforms[app]) : Boolean(summary?.hasIos);
+  // On this PC no Mac is needed: Run sets this PC up first when it isn't yet (a Flutter app's Windows app needs no setup).
+  const canRun = appReady && (pc || pcDesktop || Boolean(mac));
+  const runHint = !pc && !pcDesktop && !mac ? t.toolbar.pairFirst : summary && !appReady && app === 'ios' ? t.toolbar.addIosFirst : undefined;
   // IPA builds and Xcode are for the iOS app.
   const canIos = Boolean(summary?.hasIos && (pc || mac));
+  const flutter = summary?.kind === 'flutter';
 
   return (
     <div className="ws-toolbar" role="toolbar" aria-label={t.toolbar.label}>
@@ -195,9 +198,24 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
             <span className="ws-toolbar__pickers-divider" role="separator" />
           </>
         )}
-        <BuildPicker macs={macs} mac={mac} path={path} backend={summary?.backend ?? 'mac'} pcState={pcState} allowPc={app !== 'electron' && Boolean(summary?.hasIos || summary?.kind === 'capacitor')} />
-        <Icon name="chevronRight" size={12} className="ws-toolbar__arrow" />
-        <TargetPicker targets={targets} selected={target} auto={autoTarget} loading={targetsLoading} mac={macDesktop} onlyMac={onlyMac} pc={pc} onSelect={(picked) => setProjectPrefs(path, { target: picked?.udid ?? undefined })} />
+        {pcDesktop ? (
+          // A Flutter app's Windows app: Flutter builds it here and it opens here. Nothing to pick.
+          <span className="tb-picker tb-picker--mac tb-picker--static" role="note" aria-label={t.toolbar.buildOn(`${t.toolbar.windowsHere}, ${t.toolbar.windowsHereSub}`)}>
+            <span className="tb-picker__icon">
+              <Icon name="desktop" size={16} />
+            </span>
+            <span className="tb-picker__text">
+              <span className="tb-picker__title truncate">{t.toolbar.windowsHere}</span>
+              <span className="tb-picker__sub truncate">{t.toolbar.windowsHereSub}</span>
+            </span>
+          </span>
+        ) : (
+          <>
+            <BuildPicker macs={macs} mac={mac} path={path} backend={summary?.backend ?? 'mac'} pcState={pcState} allowPc={app === 'ios' && Boolean(summary?.hasIos || summary?.kind === 'capacitor')} />
+            <Icon name="chevronRight" size={12} className="ws-toolbar__arrow" />
+            <TargetPicker targets={targets} selected={target} auto={autoTarget} loading={targetsLoading} mac={macDesktop} onlyMac={onlyMac} macLabel={flutter ? t.targets.macGroupFlutter : undefined} pc={pc} onSelect={(picked) => setProjectPrefs(path, { target: picked?.udid ?? undefined })} />
+          </>
+        )}
       </div>
       <div className="ws-toolbar__spacer" />
       <div className="ws-toolbar__session" aria-live="polite">
@@ -222,7 +240,7 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
       </div>
       <div className="ws-toolbar__divider" role="separator" />
       <div className="ws-toolbar__actions">
-        {!onlyMac && (
+        {!onlyMac && !pcDesktop && (
           <>
             {pc ? (
               // On this PC: a development .ipa for your own devices, signed with this PC's setup.
@@ -245,6 +263,13 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
           items={[
             { id: 'rebuild', label: t.toolbar.rebuild, icon: 'sync', shortcut: 'Ctrl+Shift+F5', disabled: !canRun, onSelect: () => void rebuild(path) },
             { id: 'clean', label: t.toolbar.cleanRebuild, icon: 'eraser', disabled: !canRun, onSelect: () => void rebuild(path, true) },
+            // A Flutter app runs in debug mode (in release mode on an iPhone from this PC); profile and release run it as people get it.
+            ...(flutter
+              ? [
+                  { id: 'run-profile', label: t.toolbar.runProfile, icon: 'clock' as const, disabled: !canRun || busy, onSelect: () => void startSession(path, 'run', { flutterMode: 'profile' }) },
+                  ...(pc ? [] : [{ id: 'run-release', label: t.toolbar.runRelease, icon: 'rocket' as const, disabled: !canRun || busy, onSelect: () => void startSession(path, 'run', { flutterMode: 'release' }) }]),
+                ]
+              : []),
             ...(pc ? [{ id: 'pc-setup', label: t.pc.setUpMenu, icon: 'wrench' as const, onSelect: () => usePc.getState().showSetup(path, true) }] : []),
             { id: 'log', label: t.toolbar.buildLog, icon: 'document', disabled: !run?.buildLogPath, onSelect: () => emitWorkspace('show-build-log') },
             { id: 'folder', label: t.toolbar.openFolder, icon: 'folderOpen', separatorBefore: true, onSelect: () => void window.capmac.invoke('app:open-path', { path }) },

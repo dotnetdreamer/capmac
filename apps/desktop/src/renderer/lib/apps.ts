@@ -43,11 +43,12 @@ export function appTechShort(app: ProjectApp): string {
   return version ? t.apps.version(framework, version) : framework;
 }
 
-/** "iPhone and iPad", "Mac", or both: where a project's apps CapMac can't run yet would go. */
+/** "iPhone and iPad", "Mac", both, and "Windows": where a project's apps CapMac can't run yet would go. */
 export function platformsLabel(apps: ProjectApp[]): string {
   const ios = apps.some((a) => a.platform === 'ios');
   const mac = apps.some((a) => a.platform === 'mac');
-  return ios && mac ? t.apps.platforms.both : ios ? t.apps.platforms.ios : mac ? t.apps.platforms.mac : '';
+  const apple = ios && mac ? t.apps.platforms.both : ios ? t.apps.platforms.ios : mac ? t.apps.platforms.mac : '';
+  return [apple, apps.some((a) => a.platform === 'windows') ? t.apps.platforms.windows : ''].filter(Boolean).join(' and ');
 }
 
 /** A search made of one project Studio already knows (to ask which app, the first time it opens). */

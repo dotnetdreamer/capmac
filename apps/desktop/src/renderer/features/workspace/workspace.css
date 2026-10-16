@@ -123,6 +123,12 @@
     color: var(--text-2);
   }
 }
+/* Nothing to pick (a Flutter app's Windows app builds and runs on this PC). */
+.tb-picker--static,
+.tb-picker--static:hover:not(:disabled) {
+  background: transparent;
+  cursor: default;
+}
 .tb-picker__icon {
   position: relative;
   display: grid;
