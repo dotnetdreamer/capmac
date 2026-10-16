@@ -84,6 +84,8 @@ interface PromptState {
   queue: PromptRequest[];
   push(prompt: PromptRequest): void;
   answer(id: string, ok: boolean, value?: string | boolean | number): void;
+  /** The engine took the question back: close it without an answer. */
+  withdraw(id: string): void;
 }
 
 export const usePrompts = create<PromptState>((set) => ({
@@ -93,4 +95,5 @@ export const usePrompts = create<PromptState>((set) => ({
     set((s) => ({ queue: s.queue.filter((p) => p.id !== id) }));
     void window.capmac.invoke('app:prompt-response', { id, ok, value });
   },
+  withdraw: (id) => set((s) => ({ queue: s.queue.filter((p) => p.id !== id) })),
 }));

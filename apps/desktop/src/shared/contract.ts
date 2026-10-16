@@ -7,6 +7,7 @@
 import { z } from 'zod';
 import type { AppSearch, ProjectApp } from '@capmac/core/engine/apps';
 import type { ErrorInfo } from '@capmac/core/engine/errors';
+import type { WslSetupState } from '@capmac/core/shared/wsl-setup';
 import type { Check, ConnectionState, EngineEvent, FixId, SessionMode } from '@capmac/core/engine/events';
 import type { ProbeResult, ScreenInfo, StreamFallback, TargetsResult } from '@capmac/core/shared/protocol';
 import type { AppDialog, AppDialogAnswer, AppDialogClosed, AppWindowInfo, ElectronFlavor, MacFolder, SoundMode } from '@capmac/core/shared/electron';
@@ -18,7 +19,7 @@ import type { TakeoverStatus } from '@capmac/core/shared/takeover';
 
 export type { AppFramework, AppPlatform, AppSearch, DetectedProject, ProjectApp } from '@capmac/core/engine/apps';
 export type { ErrorInfo } from '@capmac/core/engine/errors';
-export type { AppLogEntry, Check, CheckLevel, ConnectionState, EngineEvent, FixId, Phase, SessionMode, SessionState, StepStatus } from '@capmac/core/engine/events';
+export type { AppLogEntry, Check, CheckLevel, ConnectionState, EngineEvent, FixId, Phase, SessionMode, SessionState, StepStatus, WslSetupPhase } from '@capmac/core/engine/events';
 export type { Diagnostic, InputEvent, ProbeResult, ScreenInfo, StreamFallback, StreamHelperState, Target, TargetsResult } from '@capmac/core/shared/protocol';
 export type { AppDialog, AppDialogAnswer, AppDialogClosed, AppWindowInfo, ElectronFlavor, MacFolder, SoundMode } from '@capmac/core/shared/electron';
 export type { RelayChoice, RemoteSettings, RemoteTestResult, Route, RouteChoice, SignalServerSetting } from '@capmac/core/shared/remote';
@@ -34,6 +35,9 @@ const id = z.string().regex(/^[a-z0-9-]{1,64}$/);
 /** The apps CapMac runs, by their id in a project (see core's apps.ts). */
 const runnableApp = z.enum(['ios', 'electron']);
 export type RunnableApp = z.infer<typeof runnableApp>;
+/** Where a project's iOS app builds: a paired Mac, or this PC with no Mac (see core's backend.ts). */
+const buildBackend = z.enum(['mac', 'wsl']);
+export type BuildBackend = z.infer<typeof buildBackend>;
 /** Which agents get (or lose) the capmac skill, and where. */
 const skillTarget = { agents: z.array(id).min(1).max(32), scope: z.enum(['global', 'project']), projectDir: fsPath.optional() };
 const hasProject = (v: { scope: string; projectDir?: string }) => v.scope === 'global' || v.projectDir !== undefined;
@@ -83,12 +87,17 @@ export const engineMethods = {
   /** Copies a bundled sample to Documents\CapMac Studio: the Capacitor iOS app, or the Electron app. */
   'projects.createSample': z.object({ kind: z.enum(['ios', 'electron']).optional() }).strict(),
   'projects.installDeps': z.object({ path: fsPath }).strict(),
+  /** Where the project's iOS app builds from now on: a paired Mac, or this PC (`capmac backend`, the CLI too). */
+  'projects.setBackend': z.object({ path: fsPath, backend: buildBackend }).strict(),
   'sessions.start': z.object({
     projectPath: fsPath,
-    mode: z.enum(['run', 'live']),
+    /** `build`: on this PC, build the app and its .ipa without installing it. */
+    mode: z.enum(['run', 'live', 'build']),
     mac: macName.optional(),
     /** Which of the project's apps (default: the one picked for it). */
     app: runnableApp.optional(),
+    /** Where it builds (default: the one picked for the project). */
+    backend: buildBackend.optional(),
     target: udid.optional(),
     options: sessionOptionsSchema.optional(),
   }).strict(),
@@ -120,6 +129,13 @@ export const engineMethods = {
   'macs.remote.status': z.object({ name: macName }).strict(),
   'macs.remote.revoke': z.object({ name: macName, key: z.string().regex(PUBLIC_KEY_RE) }).strict(),
   'macs.remote.test': z.object({ name: macName }).strict(),
+  // This PC, with no Mac: the same as `capmac wsl setup | doctor | targets`, with the same saved setup.
+  'wsl.status': z.object({ projectPath: fsPath }).strict(),
+  /** Starts setup (it reports with `wsl-setup` events, then `setup-ended`); `appleLogin`: sign in to Apple again. */
+  'wsl.setup': z.object({ projectPath: fsPath, appleLogin: z.boolean().optional() }).strict(),
+  'wsl.stopSetup': z.object({ setupId: id }).strict(),
+  'wsl.doctor': z.object({ projectPath: fsPath }).strict(),
+  'wsl.devices': z.object({ projectPath: fsPath }).strict(),
 } as const;
 
 export type EngineMethod = keyof typeof engineMethods;
@@ -191,6 +207,24 @@ export interface ProjectSummary {
   app: RunnableApp;
   /** Whether that app was picked (in Studio, or with `capmac apps use`) rather than taken by default. */
   appChosen: boolean;
+  /** Where the iOS app builds: a paired Mac, or this PC (picked in the toolbar, or with `capmac backend`). */
+  backend: BuildBackend;
+}
+
+/** Building on this PC: what setup has put in place (see core's wslSetupState), and whether it runs now. */
+export interface WslStatus extends WslSetupState {
+  /** The setup running for this project in CapMac Studio now. */
+  setupId: string | null;
+  /** Apple's device server, which reaches iPhones over USB (from the Apple Devices app). */
+  server: 'running' | 'stopped' | 'missing';
+}
+
+/** iPhones plugged into this PC, and Apple's device server that reaches them. */
+export interface WslDevices {
+  server: 'running' | 'stopped' | 'missing';
+  devices: import('@capmac/core/shared/protocol').Target[];
+  /** Why the list could not be read (the iPhone tools are not set up yet, …). */
+  error: ErrorInfo | null;
 }
 
 export interface HealthReport {
@@ -243,6 +277,12 @@ export interface MethodResults {
   'macs.remote.status': RemoteStatusReport;
   'macs.remote.revoke': Array<RemotePc & { current: boolean }>;
   'macs.remote.test': RemoteTestResult;
+  'projects.setBackend': ProjectSummary;
+  'wsl.status': WslStatus;
+  'wsl.setup': { setupId: string };
+  'wsl.stopSetup': void;
+  'wsl.doctor': { ready: boolean; checks: Check[] };
+  'wsl.devices': WslDevices;
 }
 
 // ─── Events ────────────────────────────────────────────────────────────────
@@ -254,12 +294,16 @@ export interface Scope {
   mac?: string;
   watchId?: string;
   streamId?: string;
+  /** Setting up this PC for the project at this path. */
+  setup?: string;
 }
 
 /** Engine events plus the host's own bookkeeping. */
 export type HostEvent =
   | EngineEvent
-  | { type: 'session-started'; mode: SessionMode; projectPath: string; mac: string | null; target: string | null }
+  | { type: 'session-started'; mode: SessionMode; projectPath: string; mac: string | null; target: string | null; backend?: BuildBackend }
+  /** Setting up this PC ended: done, stopped, or failed. */
+  | { type: 'setup-ended'; ok: boolean; cancelled: boolean; error?: ErrorInfo }
   | { type: 'session-ended'; mode: SessionMode; ok: boolean; cancelled: boolean; error?: ErrorInfo; ms: number }
   | { type: 'screen-info'; info: ScreenInfo }
   | { type: 'screen-ended'; error?: ErrorInfo }
@@ -276,10 +320,10 @@ export type EngineStatus = { state: 'starting' } | { state: 'ready' } | { state:
 // ─── Prompts (engine asks, the renderer answers with a dialog) ────────────
 
 export type PromptRequest =
-  | { id: string; kind: 'password'; purpose: 'pair' | 'keychain' | 'sudo'; message: string; mac?: string; user?: string }
-  | { id: string; kind: 'confirm'; message: string; detail?: string; danger?: boolean; confirmLabel?: string; defaultYes?: boolean }
-  | { id: string; kind: 'choose'; message: string; items: Array<{ label: string; hint?: string }> }
-  | { id: string; kind: 'text'; message: string; defaultValue?: string; placeholder?: string };
+  | { id: string; kind: 'password'; purpose: 'pair' | 'keychain' | 'sudo' | 'signing' | 'apple'; message: string; mac?: string; user?: string }
+  | { id: string; kind: 'confirm'; message: string; detail?: string; danger?: boolean; confirmLabel?: string; cancelLabel?: string; defaultYes?: boolean; link?: { label: string; url: string }; waiting?: string }
+  | { id: string; kind: 'choose'; message: string; detail?: string; items: Array<{ label: string; hint?: string }> }
+  | { id: string; kind: 'text'; message: string; defaultValue?: string; placeholder?: string; purpose?: 'apple-email' | 'apple-code' };
 
 export const promptResponseSchema = z.object({
   id: z.string().max(64),
@@ -593,6 +637,8 @@ export interface CapmacApi {
   call<M extends EngineMethod>(method: M, params: MethodParams<M>): Promise<CallResult<MethodResults[M]>>;
   onEvents(listener: (batch: Envelope[]) => void): () => void;
   onPrompt(listener: (prompt: PromptRequest) => void): () => void;
+  /** The engine took a question back: it no longer needs an answer. */
+  onPromptWithdraw(listener: (id: string) => void): () => void;
   onEngineStatus(listener: (status: EngineStatus) => void): () => void;
   onSettings(listener: (settings: Settings) => void): () => void;
   onCommand(listener: (command: AppCommand) => void): () => void;

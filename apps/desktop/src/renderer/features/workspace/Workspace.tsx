@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from 'react-resizable-panels';
-import type { Target } from '../../../shared/contract';
+import type { Target, TargetsResult } from '../../../shared/contract';
 import { t, tidy } from '../../../shared/i18n';
 import { workspaceBus, type WorkspaceAction } from '../../app/commands';
 import { canRun, searchOf } from '../../lib/apps';
-import { appOf, both, forgetProject, setApp } from '../../state/actions';
+import { appOf, both, forgetProject, setApp, setBackend, startSession } from '../../state/actions';
 import { toast, useApp } from '../../state/app';
 import { useChooser } from '../../state/chooser';
 import { call, errorInfo } from '../../state/engine';
 import { resolveMac, useMacs, useTargets, useWatchTargets } from '../../state/macs';
+import { pcReady, usePc, usePcEntry, usePcWatch } from '../../state/pc';
 import { projectKey, useProject, useProjects } from '../../state/projects';
 import { useRun } from '../../state/runs';
 import { Button, IconButton } from '../../ui/Button';
@@ -23,6 +24,7 @@ import { AppWindowPane } from './AppWindow';
 import { SimulatorPane } from './Simulator';
 import { automaticTarget, macDesktopTarget } from './TargetPicker';
 import { MAC_TARGET_ID } from '../../state/runs';
+import { PcBanner, PcDevicePane, PcSetupDialog } from './PcSetup';
 import { Timeline } from './Timeline';
 import { Toolbar } from './Toolbar';
 import './workspace.css';
@@ -99,9 +101,15 @@ export function Workspace({ path }: { path: string }) {
   const onlyMac = Boolean(electron && app === 'electron');
   // Without a Mac yet, still the Mac's desktop: the pane then says how to pair one.
   const macDesktop = useMemo(() => (onlyMac ? macDesktopTarget(mac?.label ?? t.targets.macGroup, mac?.macos ?? null) : null), [mac, onlyMac]);
-  useWatchTargets(onlyMac ? null : mac?.name);
+  // On this PC (no Mac): the iPhones plugged in here, and this PC's setup.
+  const pcMode = entry.summary?.backend === 'wsl' && app !== 'electron';
+  usePcWatch(path, pcMode);
+  const pcEntry = usePcEntry(path);
+  const pcState = pcEntry.running ? 'running' : pcReady(pcEntry.status) ? 'ready' : 'setup';
+  const pcTargets = useMemo((): TargetsResult | null => (pcEntry.devices ? { simulators: [], devices: pcEntry.devices.devices, deviceSupport: true } : null), [pcEntry.devices]);
+  useWatchTargets(onlyMac || pcMode ? null : mac?.name);
   const targetsEntry = useTargets((s) => (mac ? s.byMac[mac.name] : undefined));
-  const targets = targetsEntry?.targets ?? null;
+  const targets = pcMode ? pcTargets : targetsEntry?.targets ?? null;
 
   const [tab, setTab] = useState<'console' | 'problems'>('console');
   const [ipaOpen, setIpaOpen] = useState(false);
@@ -142,13 +150,21 @@ export function Workspace({ path }: { path: string }) {
   const { target, auto } = useMemo((): { target: Target | null; auto: boolean } => {
     // The Electron app runs on the Mac's desktop, and only there.
     if (macDesktop) return { target: macDesktop, auto: false };
+    // On this PC: the iPhone picked when it is plugged in, else the one that is.
+    if (pcMode) {
+      const plugged = pcTargets?.devices ?? [];
+      const picked = prefs?.target ? plugged.find((item) => item.udid === prefs.target) : undefined;
+      if (picked) return { target: picked, auto: false };
+      if (run?.backend === 'wsl' && run.target?.kind === 'device') return { target: plugged.find((item) => item.udid === run.target!.udid) ?? run.target, auto: true };
+      return { target: plugged[0] ?? null, auto: true };
+    }
     const all = targets ? [...targets.simulators, ...targets.devices] : [];
     const picked = prefs?.target && prefs.target !== MAC_TARGET_ID ? all.find((item) => item.udid === prefs.target) : undefined;
     if (picked) return { target: picked, auto: false };
     // A Mac target left over from an Electron run is not for the iOS app (only it reaches here): ignore it.
     if (run?.target && run.target.kind !== 'mac') return { target: all.find((item) => item.udid === run.target!.udid) ?? run.target, auto: true };
     return { target: automaticTarget(targets), auto: true };
-  }, [targets, prefs?.target, run?.target, macDesktop]);
+  }, [targets, prefs?.target, run?.target, run?.backend, macDesktop, pcMode, pcTargets]);
 
   const errors = run?.diagnostics.filter((d) => d.severity === 'error').length ?? 0;
   // The tab counts what the Problems list shows, not the dependency warnings folded away.
@@ -185,7 +201,9 @@ export function Workspace({ path }: { path: string }) {
           setTab('console');
           break;
         case 'build-ipa':
-          setIpaOpen(true);
+          // On this PC there is one kind: a development .ipa, built right away.
+          if (pcMode) void startSession(path, 'build');
+          else setIpaOpen(true);
           break;
         case 'show-build-log':
           setLogOpen(true);
@@ -196,7 +214,7 @@ export function Workspace({ path }: { path: string }) {
     };
     workspaceBus.addEventListener('action', onAction);
     return () => workspaceBus.removeEventListener('action', onAction);
-  }, [simPanel, timelinePanel, bottomPanel]);
+  }, [simPanel, timelinePanel, bottomPanel, pcMode, path]);
 
   if (!entry.summary) {
     return (
@@ -230,7 +248,7 @@ export function Workspace({ path }: { path: string }) {
   const onMacTarget = target?.kind === 'mac';
   return (
     <div className="workspace">
-      <Toolbar path={path} summary={summary} icon={entry.icon} run={run} macs={macs} mac={mac} targets={targets} target={target} autoTarget={auto} targetsLoading={Boolean(mac) && !targets && !targetsEntry?.error} macDesktop={macDesktop} onlyMac={onlyMac} app={app} />
+      <Toolbar path={path} summary={summary} icon={entry.icon} run={run} macs={macs} mac={mac} targets={targets} target={target} autoTarget={auto} targetsLoading={pcMode ? !pcEntry.devices : Boolean(mac) && !targets && !targetsEntry?.error} macDesktop={macDesktop} onlyMac={onlyMac} app={app} pc={pcMode} pcState={pcState} />
       <SessionBar path={path} run={run} mac={mac} electron={electronKind} />
       {app === 'ios' && !summary.hasIos && (
         <div className="session-banner">
@@ -240,9 +258,25 @@ export function Workspace({ path }: { path: string }) {
         </div>
       )}
       {(summary.hasIos || summary.electron?.flavor === 'capacitor') && !summary.hasNodeModules && summary.devCommand && <DepsBanner path={path} packageManager={summary.packageManager} onInstalled={() => void inspect(path, true)} />}
-      {macs.length === 0 && (
+      {pcMode && <PcBanner path={path} entry={pcEntry} />}
+      {!pcMode && macs.length === 0 && (
         <div className="session-banner">
-          <InfoBar tone="info" title={t.workspace.pairBanner} actions={<Button size="sm" variant="accent" onClick={() => useApp.getState().navigate({ name: 'onboarding' })}>{t.common.pairMac}</Button>} />
+          <InfoBar
+            tone="info"
+            title={t.workspace.pairBanner}
+            actions={
+              <>
+                <Button size="sm" variant="accent" onClick={() => useApp.getState().navigate({ name: 'onboarding' })}>
+                  {t.common.pairMac}
+                </Button>
+                {app === 'ios' && summary.kind === 'capacitor' && (
+                  <Button size="sm" icon="desktop" onClick={() => void setBackend(path, 'wsl')}>
+                    {t.pc.noMacBanner}
+                  </Button>
+                )}
+              </>
+            }
+          />
         </div>
       )}
       <Group
@@ -255,20 +289,20 @@ export function Workspace({ path }: { path: string }) {
       >
         <Panel id="simulator" panelRef={simPanel} collapsible collapsedSize={0} minSize={240} defaultSize={onMacTarget ? '50%' : '31%'} className="ws-panel">
           <Pane
-            title={onMacTarget ? t.workspace.macApp : target?.kind === 'device' ? t.workspace.device : t.workspace.simulator}
+            title={onMacTarget ? t.workspace.macApp : pcMode ? t.pc.device : target?.kind === 'device' ? t.workspace.device : t.workspace.simulator}
             labelledBy="pane-sim"
             sub={target ? `${target.name} · ${target.os}` : undefined}
             className={onMacTarget ? 'pane--sim pane--mac' : 'pane--sim'}
             actions={
               onMacTarget ? (
                 <IconButton icon="desktop" size="sm" label={deviceFrame ? t.workspace.hideWindowFrame : t.workspace.showWindowFrame} pressed={deviceFrame} onClick={() => void updateSettings({ deviceFrame: !deviceFrame })} />
-              ) : (
+              ) : pcMode ? undefined : (
                 <IconButton icon="phone" size="sm" label={deviceFrame ? t.workspace.hideFrame : t.workspace.showFrame} pressed={deviceFrame} onClick={() => void updateSettings({ deviceFrame: !deviceFrame })} />
               )
             }
           >
             <ErrorBoundary label={t.crash.parts.simulator} compact>
-              {onMacTarget ? <AppWindowPane mac={mac} path={path} run={run} frame={deviceFrame} /> : <SimulatorPane mac={mac} target={target} />}
+              {onMacTarget ? <AppWindowPane mac={mac} path={path} run={run} frame={deviceFrame} /> : pcMode ? <PcDevicePane target={target} run={run} entry={pcEntry} /> : <SimulatorPane mac={mac} target={target} />}
             </ErrorBoundary>
           </Pane>
         </Panel>
@@ -278,7 +312,7 @@ export function Workspace({ path }: { path: string }) {
             <Panel id="timeline" panelRef={timelinePanel} collapsible collapsedSize={0} minSize={124} defaultSize={168} className="ws-panel">
               <Pane title={t.workspace.timeline} labelledBy="pane-timeline">
                 <ErrorBoundary label={t.crash.parts.timeline} compact>
-                  <Timeline run={run} electron={electronKind} macSelected={onMacTarget} />
+                  <Timeline run={run} electron={electronKind} macSelected={onMacTarget} pcSelected={pcMode} />
                 </ErrorBoundary>
               </Pane>
             </Panel>
@@ -313,6 +347,7 @@ export function Workspace({ path }: { path: string }) {
         </Panel>
       </Group>
       <BuildIpaDialog path={path} open={ipaOpen} onClose={() => setIpaOpen(false)} />
+      <PcSetupDialog path={path} open={pcEntry.dialog} onClose={() => usePc.getState().showSetup(path, false)} />
       <BuildLogDialog path={path} logPath={run?.buildLogPath ?? null} open={logOpen} onClose={() => setLogOpen(false)} />
     </div>
   );

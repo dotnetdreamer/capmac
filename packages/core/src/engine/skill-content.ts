@@ -57,6 +57,10 @@ A typical check after changing code: \`capmac run --for 15\`, read the console f
 
 In an Electron app's folder (plain Electron, electron-vite or Electron Forge), the same commands run the app on the Mac's desktop: \`capmac run --for 20\` or \`capmac run --no-logs\`, then \`capmac screenshot --electron\` for a PNG of its window. In a Capacitor project, add \`--app electron\` (or \`--electron\`) to use its Electron platform instead of iOS; \`capmac apps use electron\` makes that the default, in CapMac Studio too. Console lines start with \`main\` (the main process) or \`js\` (the pages). The app opens behind the windows of whoever is using the Mac and never takes their keyboard, so running it does not disturb them. If the app opens a message box or file dialog, the console prints it and the app waits: answer it with \`capmac dialog <button number or label>\`, \`capmac dialog \"~/path/on/the/mac\"\` or \`capmac dialog --cancel\` (\`capmac dialog\` alone lists what is open). The app's sound is off unless \`--sound mac\` (the Mac's speakers) or \`--sound pc\` (the browser viewer) is given; the choice is remembered for the project. \`capmac screen --electron\` shows the window in the browser as video, which needs far less data; \`--stream compatible\` sends pictures instead (for an old Electron or a browser without WebCodecs), and CapMac Studio uses the same choice.
 
+## Building without a Mac
+
+A project can build on this PC instead, in WSL with no Mac: \`capmac backend\` says which one it uses (the user may have picked it in CapMac Studio), and \`capmac run\`, \`dev\`, \`build\` and \`doctor\` follow it. There the app runs on an iPhone plugged into this PC, not a simulator: \`capmac wsl targets --json\` lists it, and \`capmac doctor\` checks the build tools, the iPhone SDK and signing. Add \`--backend mac\` or \`--backend wsl\` to be sure where one command builds.
+
 ## Reading the output
 
 - Exit code 0 means success. A failure prints \`✖ what went wrong\`, then \`→ how to fix it\`. Follow that hint.
@@ -74,6 +78,7 @@ With remote access on, CapMac reaches the Mac over the internet when it is not o
 ## Leave these to the user
 
 - Anything that needs the Mac's password or a hand on a device: \`capmac pair\`, \`capmac keychain\` (unlocks code signing for iPhones and .ipa exports), \`capmac doctor --fix\` when it asks for a password, plugging in an iPhone and tapping Trust.
+- \`capmac wsl setup\`: it signs in to Apple with the user's password and a two-factor code, which you must never ask for or type.
 - Ask before you run \`capmac clean --all\` (deletes the project's copy on the Mac), \`capmac unpair\`, \`capmac takeover off\`, or a \`capmac remote\` command that changes settings (\`on\`, \`off\`, \`set\`, \`server\`, \`revoke\`).
 
 Every command and option is listed in [references/commands.md](references/commands.md).
@@ -140,6 +145,8 @@ Options shared by \`run\`, \`dev\` and \`build\`:
 | \`capmac doctor [--fix] [-y]\` | Checks this PC, the connection and the Mac; \`--fix\` repairs what it can (may ask for the Mac password). |
 | \`capmac info [--files]\` | What CapMac detected and which files it syncs. No Mac needed. |
 | \`capmac apps [--json]\` | The apps in this folder (and in the folders inside it) and the one CapMac uses; \`capmac apps use <app>\` changes it. No Mac needed. |
+| \`capmac backend [mac\\|wsl] [--json]\` | Where the project's iOS app builds: a paired Mac, or this PC with no Mac (WSL). With a name, picks it for \`run\`, \`dev\`, \`build\`, \`doctor\` and CapMac Studio (ask first). |
+| \`capmac wsl setup\\|doctor\\|targets\\|build\\|run\\|dev\` | Building on this PC: setup (Apple sign-in, so the user runs it), its checks, iPhones plugged into this PC, and the same build, run and live reload. |
 | \`capmac sync [--full]\` | Syncs files and runs \`cap sync\` on the Mac. |
 | \`capmac exec [--no-sync] [--cwd project\\|root\\|ios] -- <command>\` | Runs a command in the project on the Mac and prints its output. |
 | \`capmac pull <paths…> [-y]\` | Copies files from the Mac's copy back to this PC. |

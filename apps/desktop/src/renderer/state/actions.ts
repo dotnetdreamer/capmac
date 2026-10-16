@@ -1,11 +1,12 @@
 /** What the UI (buttons, palette, tray, shortcuts) can do. */
-import type { AppSearch, ErrorInfo, ProjectSummary, RunnableApp } from '../../shared/contract';
+import type { AppSearch, BuildBackend, ErrorInfo, ProjectSummary, RunnableApp } from '../../shared/contract';
 import { t, tidy } from '../../shared/i18n';
 import { canRun } from '../lib/apps';
 import { toast, useApp, useToasts } from './app';
 import { useChooser } from './chooser';
 import { call, errorInfo } from './engine';
 import { resolveMac, useMacs } from './macs';
+import { pcReady, usePc } from './pc';
 import { projectKey, useProjects } from './projects';
 import { emptyRun, isActive, MAC_TARGET_ID, useRuns } from './runs';
 
@@ -37,6 +38,12 @@ function failStart(path: string, error: ErrorInfo): void {
   useRuns.setState((s) => ({ byKey: { ...s.byKey, [key]: { ...run, status: 'failed', error, sessionId: null, endedAt: Date.now() } } }));
 }
 
+/** Chosen in onboarding ("No Mac? Build on this PC"): the next Capacitor app opened builds on this PC. */
+let thisPcNext = false;
+export function preferThisPc(): void {
+  thisPcNext = true;
+}
+
 /** Adds a folder as a project (validates it is a Capacitor app) and opens it; `known`: its summary, just made. */
 export async function openProject(path: string, known?: ProjectSummary): Promise<boolean> {
   const summary = known ?? (await useProjects.getState().inspect(path, true));
@@ -47,6 +54,11 @@ export async function openProject(path: string, known?: ProjectSummary): Promise
   }
   await window.capmac.invoke('app:project-opened', { path: summary.path, name: summary.appName, appId: summary.appId });
   useApp.getState().navigate({ name: 'project', path: summary.path });
+  if (thisPcNext && summary.kind === 'capacitor') {
+    thisPcNext = false;
+    // Switches it (when it isn't yet), and shows setup when this PC isn't ready.
+    await setBackend(summary.path, 'wsl');
+  }
   return true;
 }
 
@@ -109,9 +121,59 @@ export async function setApp(path: string, app: RunnableApp): Promise<ProjectSum
   return summary;
 }
 
-export async function startSession(path: string, mode: 'run' | 'live', options: { clean?: boolean; full?: boolean } = {}): Promise<void> {
+/**
+ * Where the project's iOS app builds from now on: a paired Mac (`mac`: which one), or this PC.
+ * The capmac command uses the same choice. A running app is stopped first.
+ */
+export async function setBackend(path: string, backend: BuildBackend, mac?: string): Promise<void> {
+  const summary = useProjects.getState().byKey[projectKey(path)]?.summary;
+  if (summary && summary.backend !== backend) {
+    if (isActive(useRuns.getState().byKey[projectKey(path)])) await stopSession(path);
+    let next: ProjectSummary;
+    try {
+      next = await call('projects.setBackend', { path, backend });
+    } catch (err) {
+      toast({ tone: 'critical', title: t.pc.switchFailed, body: both(errorInfo(err)) });
+      return;
+    }
+    await useProjects.getState().put(path, next);
+    const label = resolveMac(useMacs.getState().macs, mac ?? projectPrefs(path).mac ?? summary.host)?.label;
+    toast({ tone: 'success', title: backend === 'wsl' ? t.pc.switched : t.pc.switchedMac(label ?? t.common.theMac), body: t.pc.switchedBody });
+  }
+  if (mac) setProjectPrefs(path, { mac });
+  if (backend === 'wsl') {
+    // Not set up yet: show what setup does.
+    const status = await usePc.getState().refresh(path);
+    if (status && !pcReady(status)) usePc.getState().showSetup(path, true);
+  }
+}
+
+/** On this PC: set up first, then build for the iPhone picked (when it is plugged in), else the one that is. */
+async function startOnPc(path: string, mode: 'run' | 'live' | 'build', picked: string | undefined, options: { clean?: boolean }): Promise<void> {
+  const pc = usePc.getState();
+  const status = pc.byKey[projectKey(path)]?.status ?? (await pc.refresh(path));
+  if (!pcReady(status)) {
+    pc.showSetup(path, true);
+    toast({ tone: 'info', title: t.pc.setupFirst, body: t.pc.setupFirstBody });
+    return;
+  }
+  const plugged = usePc.getState().byKey[projectKey(path)]?.devices?.devices ?? [];
+  const target = picked && plugged.some((device) => device.udid === picked) ? picked : undefined;
+  try {
+    await call('sessions.start', { projectPath: path, mode, app: 'ios', backend: 'wsl', target, options: { clean: options.clean } });
+  } catch (err) {
+    failStart(path, errorInfo(err));
+  }
+}
+
+/** `build`: on this PC, build the app and its .ipa without installing it. */
+export async function startSession(path: string, mode: 'run' | 'live' | 'build', options: { clean?: boolean; full?: boolean } = {}): Promise<void> {
   const prefs = projectPrefs(path);
-  const app = appOf(useProjects.getState().byKey[projectKey(path)]?.summary, prefs);
+  const summary = useProjects.getState().byKey[projectKey(path)]?.summary;
+  const app = appOf(summary, prefs);
+  // The Electron app runs on the Mac's desktop; the iOS app builds where the project builds.
+  if (summary?.backend === 'wsl' && app !== 'electron') return startOnPc(path, mode, prefs.target, options);
+  if (mode === 'build') return;
   const mac = macFor(path);
   if (!mac) {
     if (useMacs.getState().macs.length === 0) {
@@ -142,7 +204,8 @@ export async function stopAll(): Promise<void> {
 
 export async function rebuild(path: string, clean = false): Promise<void> {
   const run = useRuns.getState().byKey[projectKey(path)];
-  if (run?.sessionId && run.mode === 'live') {
+  // Live reload on this PC rebuilds by starting again.
+  if (run?.sessionId && run.mode === 'live' && run.backend !== 'wsl') {
     await call('sessions.rebuild', { sessionId: run.sessionId, clean }).catch((err) => toast({ tone: 'critical', title: t.actions.rebuildFailed, body: tidy(errorInfo(err).message) }));
   } else {
     await startSession(path, run?.mode === 'live' ? 'live' : 'run', { clean });
@@ -151,8 +214,8 @@ export async function rebuild(path: string, clean = false): Promise<void> {
 
 export async function relaunch(path: string): Promise<void> {
   const run = useRuns.getState().byKey[projectKey(path)];
-  if (run?.sessionId && run.mode === 'live') await call('sessions.relaunch', { sessionId: run.sessionId }).catch(() => undefined);
-  else await startSession(path, 'run');
+  if (run?.sessionId && run.mode === 'live' && run.backend !== 'wsl') await call('sessions.relaunch', { sessionId: run.sessionId }).catch(() => undefined);
+  else await startSession(path, run?.mode === 'live' ? 'live' : 'run');
 }
 
 /** An Electron app in live reload: reloads its windows. */

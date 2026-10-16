@@ -21,7 +21,7 @@ https://github.com/user-attachments/assets/d55fac9f-92fc-4e6e-953a-574a824a5ecb
 
 ## Why CapMac
 
-An iOS build needs a Mac, but that does not have to move your daily work off Windows.
+The default backend uses a Mac for Xcode builds while you keep your daily work on Windows.
 CapMac handles the file sync, Xcode build and app launch, then brings the result back to the machine where you wrote the code.
 
 | What you need | What CapMac does |
@@ -196,6 +196,22 @@ capmac run --device --team "<TEAM_ID>" --api-key C:/keys/AuthKey_ABC123XYZ9.p8 -
 
 You can also set `ios.apiKey` in `capmac.json`, or use `CAPMAC_ASC_KEY_PATH`, `CAPMAC_ASC_KEY_ID` and `CAPMAC_ASC_ISSUER_ID`.
 The same key works for IPA exports and uploads.
+
+### Experimental WSL backend
+
+Build and sign Capacitor CocoaPods or SPM apps locally through WSL, then run them on an iPhone connected directly to Windows. CapMac imports the existing native application and extensions, including mixed Swift/Objective-C/C++ dependencies, resource bundles, build scripts, and profile-authorized entitlements. CocoaPods uses its real resolver; SPM evaluates real package manifests and preserves locked revisions and binary checksums. Builds use an isolated workspace, preserving your source iOS project and installed packages.
+
+`capmac wsl setup` (or **This PC** in CapMac Studio) installs the tools, signs in to Apple once for signing and the Xcode download, and `capmac backend wsl` makes the project build on this PC by default, in CapMac Studio too. The [WSL setup guide](docs/wsl-ios.md) covers the Studio flow, your own tools and signing files, and current compatibility limits. No Mac connection or xtool is used.
+
+```powershell
+capmac wsl setup
+capmac backend wsl
+capmac doctor
+capmac run
+capmac dev
+```
+
+Live development starts your Windows dev server and a LAN relay automatically; web changes reload and native changes rebuild and reinstall. Neither package path has an artificial Capacitor 8 restriction. macOS-only scripts, unsupported resource features, and Swift package build-tool plugins or macros need additional support. The WSL backend is experimental: application compilation and device validation with your SDK and signing material remain required. Standalone native project import, Flutter and simulators are future work.
 
 ### A real iPhone's screen
 

@@ -1,0 +1,11 @@
+Standalone MIT resource compiler fixtures from:
+https://github.com/joshuaswarren/omarchy-apple-dev
+Revision: 66a11a37dfc0bfb755d04bde1ecbeedc17753b3b
+
+ibtool, nibarchive.py and keyorder.py are unmodified upstream files used for
+hermetic compilation and binary NIBArchive inspection in regression tests.
+LICENSE contains the upstream MIT permission notice.
+
+The production installer obtains the same pinned sources and applies the exact
+SHA-256-checked PATCH_IBTOOL from resource-tools/runtime.ts. The tests apply that
+same patch to a temporary fixture copy. No xtool executable or API is used.

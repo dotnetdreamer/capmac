@@ -6,7 +6,7 @@ import path from 'node:path';
 import { toPosixRel } from '../shared/paths.js';
 import { loadProjectConfig, type ProjectConfig } from './config.js';
 import { capacitorElectronDir, dependsOnElectron, describeElectronApp, readPackageJson, type ElectronProject } from './electron-project.js';
-import { recallAll, remember, type ProjectMemory } from './memory.js';
+import { adoptMemory, recallAll, type ProjectMemory } from './memory.js';
 
 export type { ElectronProject } from './electron-project.js';
 
@@ -25,6 +25,10 @@ export type ProjectKind = 'capacitor' | 'electron';
  */
 export type RunnableApp = 'ios' | 'electron';
 export const isRunnableApp = (value: unknown): value is RunnableApp => value === 'ios' || value === 'electron';
+
+/** Where a project's iOS app builds: on a paired Mac, or on this PC in WSL with no Mac (see backend.ts). */
+export type BuildBackend = 'mac' | 'wsl';
+export const isBuildBackend = (value: unknown): value is BuildBackend => value === 'mac' || value === 'wsl';
 
 export interface ProjectInfo {
   kind: ProjectKind;
@@ -202,6 +206,14 @@ export function readCapacitorConfig(configFile: string): { appId?: string; appNa
   }
 }
 
+/** A legacy identity's evaluated name, without loading or migrating another project. Null when it cannot be resolved. */
+export async function evaluatedCapacitorName(dir: string): Promise<string | null> {
+  const evaluated = await evaluateWithCli(dir);
+  if (evaluated) return evaluated.appName || path.basename(dir);
+  const configFile = CAP_CONFIG_FILES.map((file) => path.join(dir, file)).find((file) => existsSync(file));
+  return configFile ? readCapacitorConfig(configFile).appName ?? null : null;
+}
+
 function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'app';
 }
@@ -256,9 +268,9 @@ export async function projectMemory(projectId: string, dir: string, oldNames: st
   if (pickedUnder) {
     // Loaded here: apps.ts builds on this module.
     const { onlyProjectWithId } = await import('./apps.js');
-    if (!(await onlyProjectWithId(pickedUnder, syncRoot, dir))) delete memory.app;
+    if (!(await onlyProjectWithId(pickedUnder, syncRoot, dir, { evaluateNames: adopt }))) delete memory.app;
   }
-  if (adopt) await remember(projectId, memory).catch(() => undefined);
+  if (adopt) return adoptMemory(projectId, memory).catch(() => memory);
   return memory;
 }
 

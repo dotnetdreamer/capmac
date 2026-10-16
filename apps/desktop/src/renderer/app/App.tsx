@@ -68,6 +68,7 @@ async function bootstrap() {
   setConsoleLimit(settings.consoleLimit);
   capmac.onEvents(handleBatch);
   capmac.onPrompt((prompt) => usePrompts.getState().push(prompt));
+  capmac.onPromptWithdraw((id) => usePrompts.getState().withdraw(id));
   capmac.onEngineStatus((engine) => {
     useApp.setState({ engine });
     if (engine.state === 'ready') void useMacs.getState().refresh();

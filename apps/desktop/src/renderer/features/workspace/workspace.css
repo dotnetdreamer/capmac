@@ -1794,3 +1794,132 @@
   align-items: center;
   gap: var(--s-1_5);
 }
+
+/* Building on this PC: setup steps, their details and health check, and the iPhone pane */
+.pc-steps {
+  list-style: none;
+  margin: var(--s-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--r-card);
+  background: var(--card-2);
+}
+.pc-step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-4);
+  & + & {
+    border-top: 1px solid var(--stroke-divider);
+  }
+}
+.pc-step__icon {
+  flex: none;
+  display: inline-flex;
+  margin-top: 1px;
+  color: var(--text-3);
+  .pc-step--done & {
+    color: var(--success);
+  }
+  .pc-step--failed & {
+    color: var(--critical);
+  }
+  .pc-step--running & {
+    color: var(--accent-text);
+  }
+}
+.pc-step__body {
+  flex: 1;
+  min-width: 0;
+}
+.pc-step__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+}
+.pc-step__title {
+  color: var(--text-1);
+  font-weight: 600;
+  .pc-step--waiting &,
+  .pc-step--skipped & {
+    color: var(--text-2);
+    font-weight: 400;
+  }
+}
+.pc-step__state {
+  margin-left: auto;
+  color: var(--text-3);
+  font: var(--type-small);
+  .pc-step--failed & {
+    color: var(--critical);
+  }
+}
+.pc-step__desc,
+.pc-step__note {
+  margin-top: 2px;
+  color: var(--text-2);
+  font: var(--type-small);
+}
+.pc-step__note {
+  color: var(--text-3);
+}
+.pc-step__error {
+  margin-top: var(--s-1);
+  color: var(--critical);
+  font: var(--type-small);
+}
+.pc-step__line {
+  margin-top: var(--s-1);
+  color: var(--text-3);
+  font: var(--type-caption);
+  font-family: var(--font-mono);
+}
+.pc-step__progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  margin-top: var(--s-2);
+}
+.pc-details {
+  margin-top: var(--s-3);
+  color: var(--text-2);
+  font: var(--type-small);
+  & > summary {
+    cursor: default;
+  }
+}
+.pc-details__log {
+  max-height: 180px;
+  overflow: auto;
+  margin: var(--s-2) 0 0;
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--r-card);
+  background: var(--card-2);
+  color: var(--text-2);
+  font: var(--type-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.pc-checks {
+  margin-top: var(--s-4);
+}
+.pc-checks__title {
+  margin: 0 0 var(--s-2);
+  color: var(--text-1);
+  font: var(--type-small);
+  font-weight: 600;
+}
+.pc-pane {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: var(--s-4);
+  text-align: center;
+}
+.pc-pane__os {
+  color: var(--text-3);
+}

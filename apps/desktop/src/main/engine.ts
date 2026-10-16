@@ -7,6 +7,7 @@ import { t } from '../shared/i18n/index.js';
 export interface EngineHandlers {
   onEvents(batch: Envelope[]): void;
   onPrompt(prompt: PromptRequest): void;
+  onPromptWithdraw(id: string): void;
   onStatus(status: EngineStatus): void;
 }
 
@@ -53,6 +54,9 @@ export class EngineProcess {
           break;
         case 'prompt':
           this.handlers.onPrompt(message.prompt);
+          break;
+        case 'prompt-withdraw':
+          this.handlers.onPromptWithdraw(message.id);
           break;
         case 'log':
           (message.level === 'error' ? console.error : console.log)(`[engine] ${message.message}`);

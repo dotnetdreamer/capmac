@@ -76,6 +76,13 @@ export type SessionMode = 'run' | 'live' | 'build' | 'ipa';
 
 export type SessionState = 'starting' | 'building' | 'running' | 'idle' | 'stopping' | 'stopped' | 'failed';
 
+/**
+ * The steps of setting up builds on this PC (`capmac wsl setup`), in order,
+ * as `.capmac/wsl/setup-status.json` names them.
+ */
+export const WSL_SETUP_PHASES = ['wsl', 'dependencies', 'apple-devices', 'apple-sign-in', 'signing', 'apple-catalog', 'apple-download', 'sdk-import'] as const;
+export type WslSetupPhase = (typeof WSL_SETUP_PHASES)[number];
+
 export type EngineEvent =
   /** A step started (sync, `npm install`, xcodebuild, …). */
   | { type: 'step'; id: string; title: string; phase: Phase }
@@ -110,6 +117,12 @@ export type EngineEvent =
   | { type: 'connection'; mac: string; label: string; state: ConnectionState; attempt?: number; error?: string; latencyMs?: number; route?: Route; rttMs?: number }
   | { type: 'session'; mode: SessionMode; state: SessionState; error?: ErrorInfo; ms?: number }
   | { type: 'check'; check: Check }
-  | { type: 'targets'; targets: TargetsResult };
+  | { type: 'targets'; targets: TargetsResult }
+  /**
+   * Setting up builds on this PC: a step started, finished, failed or was not
+   * needed. `bytes`: the Xcode download, with where an interrupted one continued from.
+   * `fraction`: how far a running step is, 0 to 1 (the iPhone SDK import).
+   */
+  | { type: 'wsl-setup'; phase: WslSetupPhase | 'complete'; state: 'running' | 'done' | 'failed' | 'skipped'; detail?: string; bytes?: { received: number; total?: number; resumedFrom?: number }; fraction?: number };
 
 export type EventOf<T extends EngineEvent['type']> = Extract<EngineEvent, { type: T }>;

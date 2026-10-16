@@ -46,11 +46,16 @@ export function targetGlyph(target: Target): IconName {
 
 /**
  * `mac`: the Mac's desktop, offered when the project has an Electron app;
- * `onlyMac`: the project is an Electron app, so nothing else is offered.
+ * `onlyMac`: the project is an Electron app, so nothing else is offered;
+ * `pc`: it builds on this PC, so the targets are the iPhones plugged into this PC.
  */
-export function TargetPicker({ targets, selected, auto, onSelect, loading, disabled, mac = null, onlyMac = false }: { targets: TargetsResult | null; selected: Target | null; auto: boolean; onSelect: (target: Target | null) => void; loading: boolean; disabled?: boolean; mac?: Target | null; onlyMac?: boolean }) {
+export function TargetPicker({ targets, selected, auto, onSelect, loading, disabled, mac = null, onlyMac = false, pc = false }: { targets: TargetsResult | null; selected: Target | null; auto: boolean; onSelect: (target: Target | null) => void; loading: boolean; disabled?: boolean; mac?: Target | null; onlyMac?: boolean; pc?: boolean }) {
   const popover = usePopover();
   const navigate = useApp((s) => s.navigate);
+  // On this PC the words are about iPhones plugged in here, not the Mac's simulators.
+  const words = pc
+    ? { devices: t.pc.group, looking: t.pc.looking, none: t.pc.none, noneHere: t.pc.noPhone, asking: t.pc.looking, choose: t.pc.choose, search: t.pc.search }
+    : { devices: t.targets.devices, looking: t.targets.looking, none: t.targets.noSimulator, noneHere: t.targets.noneOnMac, asking: t.common.askingMac, choose: t.targets.choose, search: t.targets.search };
   const input = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
@@ -77,11 +82,11 @@ export function TargetPicker({ targets, selected, auto, onSelect, loading, disab
     const result: Array<{ label: string; items: Target[] }> = [];
     if (mac && match(mac)) result.push({ label: t.targets.macGroup, items: [mac] });
     if (onlyMac) return result;
-    if (devices.length) result.push({ label: t.targets.devices, items: devices });
+    if (devices.length) result.push({ label: words.devices, items: devices });
     if (booted.length) result.push({ label: t.targets.running, items: booted });
     for (const [os, items] of byRuntime) result.push({ label: t.targets.simulatorsFor(os), items });
     return result;
-  }, [targets, query, mac, onlyMac]);
+  }, [targets, query, mac, onlyMac, words.devices]);
   const flat = groups.flatMap((g) => g.items);
 
   const choose = (target: Target) => {
@@ -107,7 +112,7 @@ export function TargetPicker({ targets, selected, auto, onSelect, loading, disab
       <button type="button" className="tb-picker tb-picker--target" aria-haspopup="listbox" aria-label={t.targets.label(selected ? `${selected.name}, ${selected.os}, ${targetState(selected)}` : t.common.none)} disabled={disabled} {...popover.triggerProps}>
         {selected ? <Icon name={targetGlyph(selected)} size={16} /> : <Icon name="phone" size={16} />}
         <span className="tb-picker__text">
-          <span className="tb-picker__title truncate">{selected ? selected.name : loading ? t.targets.looking : t.targets.noSimulator}</span>
+          <span className="tb-picker__title truncate">{selected ? selected.name : loading ? words.looking : words.none}</span>
           {selected && (
             <span className="tb-picker__sub truncate">
               <StatusDot tone={targetTone(selected)} />
@@ -118,7 +123,7 @@ export function TargetPicker({ targets, selected, auto, onSelect, loading, disab
         </span>
         {loading && !targets && !onlyMac ? <Spinner size={12} /> : <Icon name="chevronDown" size={12} />}
       </button>
-      <Popover state={popover} placement="bottom-start" className="target-flyout" label={t.targets.choose}>
+      <Popover state={popover} placement="bottom-start" className="target-flyout" label={words.choose}>
         <div className="target-flyout__search">
           <Icon name="search" size={14} />
           <input
@@ -127,7 +132,7 @@ export function TargetPicker({ targets, selected, auto, onSelect, loading, disab
             aria-expanded="true"
             aria-controls="target-list"
             aria-activedescendant={flat[active] ? `target-opt-${active}` : undefined}
-            placeholder={t.targets.search}
+            placeholder={words.search}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -140,10 +145,10 @@ export function TargetPicker({ targets, selected, auto, onSelect, loading, disab
         <div id="target-list" role="listbox" aria-label={t.targets.list} className="target-flyout__list">
           {!targets && !onlyMac && (
             <div className="target-flyout__empty">
-              <Spinner size={16} /> {t.common.askingMac}
+              <Spinner size={16} /> {words.asking}
             </div>
           )}
-          {(targets || onlyMac) && flat.length === 0 && <div className="target-flyout__empty">{query ? t.common.nothingMatches : t.targets.noneOnMac}</div>}
+          {(targets || onlyMac) && flat.length === 0 && <div className="target-flyout__empty">{query ? t.common.nothingMatches : words.noneHere}</div>}
           {groups.map((group) => (
             <div key={group.label} role="group" aria-label={group.label}>
               <div className="target-flyout__group">{group.label}</div>
@@ -181,17 +186,19 @@ export function TargetPicker({ targets, selected, auto, onSelect, loading, disab
           <button type="button" className="btn btn--sm btn--subtle" onClick={() => onSelect(null)} disabled={auto}>
             {t.targets.pickAuto}
           </button>
-          <button
-            type="button"
-            className="btn btn--sm btn--subtle"
-            onClick={() => {
-              popover.close();
-              navigate({ name: 'devices' });
-            }}
-          >
-            {t.targets.manage}
-            <Icon name="chevronRight" size={12} />
-          </button>
+          {!pc && (
+            <button
+              type="button"
+              className="btn btn--sm btn--subtle"
+              onClick={() => {
+                popover.close();
+                navigate({ name: 'devices' });
+              }}
+            >
+              {t.targets.manage}
+              <Icon name="chevronRight" size={12} />
+            </button>
+          )}
         </div>
       </Popover>
     </>

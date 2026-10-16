@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Check, DiscoveredMac, ErrorInfo } from '../../../shared/contract';
-import { openProject, pickProject, startSession } from '../../state/actions';
+import { openProject, pickProject, preferThisPc, startSession } from '../../state/actions';
 import { toast, useApp } from '../../state/app';
 import { call, errorInfo } from '../../state/engine';
 import { useMacs } from '../../state/macs';
@@ -67,7 +67,7 @@ function HeroArt() {
   );
 }
 
-function Welcome({ next }: { next: () => void }) {
+function Welcome({ next, noMac }: { next: () => void; noMac: () => void }) {
   return (
     <div className="ob-page ob-page--welcome">
       <HeroArt />
@@ -76,6 +76,9 @@ function Welcome({ next }: { next: () => void }) {
       <div className="ob-actions ob-actions--center">
         <Button size="lg" variant="accent" onClick={next} data-autofocus>
           {t.onboarding.welcome.start}
+        </Button>
+        <Button size="lg" variant="subtle" icon="desktop" onClick={noMac}>
+          {t.pc.welcome}
         </Button>
       </div>
       <p className="ob-fine">{t.onboarding.welcome.fine}</p>
@@ -444,7 +447,18 @@ export function Onboarding() {
         </button>
       </div>
       <main className="ob-main" key={step}>
-        {step === 'welcome' && <Welcome next={() => setStep('prepare')} />}
+        {step === 'welcome' && (
+          <Welcome
+            next={() => setStep('prepare')}
+            noMac={() => {
+              // No Mac: the app opened next builds on this PC. Pick it right away.
+              preferThisPc();
+              skip();
+              toast({ tone: 'info', title: t.pc.welcome, body: t.pc.welcomeHint });
+              void pickProject();
+            }}
+          />
+        )}
         {step === 'prepare' && <Prepare next={() => setStep('find')} back={() => setStep('welcome')} />}
         {step === 'find' && (
           <Find

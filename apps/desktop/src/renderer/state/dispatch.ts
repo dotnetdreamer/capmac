@@ -4,6 +4,7 @@ import { t, tidy } from '../../shared/i18n';
 import { toast, useApp } from './app';
 import { consoleFor, type ConsoleLevel } from './console';
 import { useMacs, useTargets } from './macs';
+import { usePc } from './pc';
 import { projectKey } from './projects';
 import { useRuns } from './runs';
 
@@ -38,6 +39,8 @@ function showsProject(path: string): boolean {
 
 export function handleBatch(batch: Envelope[]): void {
   useRuns.getState().apply(batch);
+  // Setting up this PC: its events carry `scope.setup`, not a project's session.
+  if (batch.some((envelope) => envelope.scope.setup)) usePc.getState().apply(batch);
   const verbose = useApp.getState().settings?.verbose ?? false;
   for (const { scope, event } of batch) {
     if (scope.projectPath) {

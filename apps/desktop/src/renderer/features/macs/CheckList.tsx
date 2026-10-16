@@ -21,11 +21,13 @@ function fixText(check: Check): string | undefined {
   return tidy(check.fix.replace(/`capmac doctor`/g, t.macs.checkAgain));
 }
 
-function CheckRow({ mac, check }: { mac: string; check: Check }) {
+/** `mac`: the Mac the checks are about (none: this PC's checks, which have no one-click fixes). */
+function CheckRow({ mac, check }: { mac?: string; check: Check }) {
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const runHealth = useMacs((s) => s.runHealth);
   const fix = async (id: FixId) => {
+    if (!mac) return;
     setConfirming(false);
     setBusy(true);
     try {
@@ -77,7 +79,7 @@ function CheckRow({ mac, check }: { mac: string; check: Check }) {
   );
 }
 
-export function CheckList({ mac, checks, checking }: { mac: string; checks: Check[]; checking: boolean }) {
+export function CheckList({ mac, checks, checking }: { mac?: string; checks: Check[]; checking: boolean }) {
   return (
     <ul className="checks" aria-busy={checking} aria-live="polite">
       {checks.map((c) => (

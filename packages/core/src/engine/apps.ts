@@ -14,8 +14,8 @@ import { existsSync, promises as fs, readFileSync, type Dirent } from 'node:fs';
 import path from 'node:path';
 import { toPosixRel } from '../shared/paths.js';
 import { allDependencies, capacitorElectronDir, dependsOnElectron, describeElectronApp, electronProductName, readPackageJson, type ElectronProject } from './electron-project.js';
-import { remember } from './memory.js';
-import { appFor, CAP_CONFIG_FILES, isElectronPlatform, isRunnableApp, ProjectError, projectIdFor, projectMemory, readCapacitorConfig, requireElectron, type ProjectInfo, type RunnableApp } from './project.js';
+import { recallAll, remember } from './memory.js';
+import { appFor, CAP_CONFIG_FILES, evaluatedCapacitorName, findSyncRoot, isElectronPlatform, isRunnableApp, loadProject, ProjectError, projectIdFor, projectMemory, readCapacitorConfig, requireElectron, type ProjectInfo, type RunnableApp } from './project.js';
 
 /** What an app is to CapMac: an iOS app (simulators, iPhones and iPads) or a Mac desktop app. */
 export type AppPlatform = 'ios' | 'mac';
@@ -438,28 +438,30 @@ async function projectAround(start: string): Promise<{ dir: string; found: Found
 
 const MAX_FOLDERS = 800;
 
-/** Projects in the folders below `root` (not inside the apps of a project found there), nearest first. */
-async function projectsBelow(root: string, rootClaims: string[], depth: number, limit: number, maxFolders = MAX_FOLDERS): Promise<{ found: Array<{ dir: string; found: Found }>; truncated: boolean }> {
+/** Projects below `root`, nearest first. Migration also checks nested projects outside each app's platform folders. */
+async function projectsBelow(root: string, rootClaims: string[], depth: number, limit: number, options: { maxFolders?: number; descendProjects?: boolean } = {}): Promise<{ found: Array<{ dir: string; found: Found }>; truncated: boolean }> {
   const found: Array<{ dir: string; found: Found }> = [];
   const queue: Array<{ dir: string; level: number }> = [{ dir: root, level: 0 }];
   let folders = 0;
   while (queue.length) {
     const { dir, level } = queue.shift()!;
-    if (++folders > maxFolders) return { found, truncated: true };
+    if (++folders > (options.maxFolders ?? MAX_FOLDERS)) return { found, truncated: true };
     const entries = await entriesOf(dir);
     if (!entries) continue;
+    let claims = level === 0 ? rootClaims : [];
     if (level > 0) {
       const here = await detectIn(dir, new Set(entries.map((entry) => entry.name)), true);
       if (here) {
         found.push({ dir, found: here });
         if (found.length >= limit) return { found, truncated: queue.length > 0 };
-        // A project's own folders are its apps: nothing else to find in it.
-        continue;
+        // Ordinary discovery presents the project; legacy identity checks must also see nested examples.
+        if (!options.descendProjects) continue;
+        claims = here.claims;
       }
     }
     if (level >= depth) continue;
     for (const entry of entries) {
-      if (!entry.isDirectory() || skipFolder(entry.name) || (level === 0 && rootClaims.includes(entry.name))) continue;
+      if (!entry.isDirectory() || skipFolder(entry.name) || claims.includes(entry.name)) continue;
       queue.push({ dir: path.join(dir, entry.name), level: level + 1 });
     }
   }
@@ -468,9 +470,16 @@ async function projectsBelow(root: string, rootClaims: string[], depth: number, 
 
 async function chosenFor(dir: string, found: Found): Promise<RunnableApp | null> {
   if (!found.apps.some(canRun)) return null;
-  // What loadProject will read (it saves it under the new id; finding apps only reads).
+  // Static legacy names only: explicit restoration resolves evaluated names before a chooser opens.
   const app = (await projectMemory(projectIdFor(found.idName, dir), dir, [found.idName])).app;
   return isRunnableApp(app) && found.apps.some((a) => a.id === app && canRun(a)) ? app : null;
+}
+
+/** A Capacitor config's appName when it is written out, as its CLI evaluates it too; null when it is computed (or missing). */
+function writtenAppName(dir: string): string | null {
+  const configFile = CAP_CONFIG_FILES.find((file) => existsSync(path.join(dir, file)));
+  const name = configFile ? readCapacitorConfig(path.join(dir, configFile)).appName : undefined;
+  return name && !name.includes('${') ? name : null;
 }
 
 /**
@@ -479,17 +488,24 @@ async function chosenFor(dir: string, found: Found): Promise<RunnableApp | null>
  * apps with one name in one monorepo shared theirs. False when there are too
  * many folders to tell.
  */
-export async function onlyProjectWithId(oldId: string, syncRoot: string, dir: string): Promise<boolean> {
+export async function onlyProjectWithId(oldId: string, syncRoot: string, dir: string, options: { evaluateNames?: boolean } = {}): Promise<boolean> {
   const entries = await entriesOf(syncRoot);
   const atRoot = entries ? await detectIn(syncRoot, new Set(entries.map((entry) => entry.name)), false) : null;
-  const below = await projectsBelow(syncRoot, atRoot?.claims ?? [], Infinity, Infinity, 5000);
+  const below = await projectsBelow(syncRoot, atRoot?.claims ?? [], Infinity, Infinity, { maxFolders: 5000, descendProjects: true });
   if (below.truncated) return false;
   const projects = [...(atRoot ? [{ dir: syncRoot, found: atRoot }] : []), ...below.found];
   // Folders compare as ids do: without case.
   const self = path.resolve(dir).toLowerCase();
-  return !projects.some(
-    (p) => (p.found.framework === 'capacitor' || p.found.framework === 'electron') && path.resolve(p.dir).toLowerCase() !== self && projectIdFor(p.found.idName, syncRoot) === oldId,
-  );
+  const root = path.resolve(syncRoot).toLowerCase();
+  for (const project of projects) {
+    if (project.found.framework !== 'capacitor' && project.found.framework !== 'electron') continue;
+    if (path.resolve(project.dir).toLowerCase() === self || path.resolve(findSyncRoot(project.dir)).toLowerCase() !== root) continue;
+    let name: string | null = project.found.idName;
+    if (project.found.framework === 'capacitor') name = options.evaluateNames ? await evaluatedCapacitorName(project.dir) : writtenAppName(project.dir);
+    // A computed name can have owned this legacy key. Reading files alone cannot prove otherwise.
+    if (name === null || projectIdFor(name, syncRoot) === oldId) return false;
+  }
+  return true;
 }
 
 /**
@@ -508,6 +524,40 @@ export async function findApps(start: string, options: { depth?: number; limit?:
     all.map(async ({ dir, found }) => ({ dir, rel: toPosixRel(from, dir), name: found.name, framework: found.framework, apps: found.apps, chosen: await chosenFor(dir, found) })),
   );
   return { start: from, projects, suggested: suggest(from, projects), truncated: below.truncated };
+}
+
+/**
+ * Before asking which app to use, restore choices stored under legacy evaluated names.
+ * Unlike findApps, this explicitly loads candidate projects and may run their Capacitor CLI.
+ * Existing new state wins; without a relevant old app choice, no project code runs. Nor
+ * does it for a name written out in the config (or an Electron app's): findApps looked
+ * under that one already.
+ */
+export async function restoreAppChoices(search: AppSearch): Promise<AppSearch> {
+  const memory = await recallAll();
+  const projects: DetectedProject[] = [];
+  for (const found of search.projects) {
+    if (!found.apps.some(canRun) || found.framework !== 'capacitor' || writtenAppName(found.dir) !== null) {
+      projects.push(found);
+      continue;
+    }
+    const projectId = projectIdFor(found.name, found.dir);
+    const oldSuffix = `-${projectIdFor('', findSyncRoot(found.dir)).slice(-8)}`;
+    const hasLegacyChoice = Object.entries(memory).some(([id, value]) => id !== projectId && id.endsWith(oldSuffix) && isRunnableApp(value.app));
+    if (memory[projectId] || !hasLegacyChoice) {
+      projects.push(found);
+      continue;
+    }
+    try {
+      const loaded = await loadProject(found.dir);
+      const chosen = loaded.chosenApp;
+      projects.push({ ...found, chosen: chosen && found.apps.some((app) => app.id === chosen && canRun(app)) ? chosen : null });
+    } catch {
+      // Discovery still works when a project's evaluated config is unavailable; opening it reports the error.
+      projects.push(found);
+    }
+  }
+  return { ...search, projects, suggested: suggest(search.start, projects) };
 }
 
 /** The app CapMac works on in a project findApps found: appFor's rule, without loading the project. Null when it runs none of its apps. */

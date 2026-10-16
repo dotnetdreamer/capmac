@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import type { MacSummary, ProjectSummary, RunnableApp, Target, TargetsResult } from '../../../shared/contract';
+import type { BuildBackend, MacSummary, ProjectSummary, RunnableApp, Target, TargetsResult } from '../../../shared/contract';
 import { t } from '../../../shared/i18n';
 import { emitWorkspace } from '../../app/commands';
 import { macStatusText } from '../../app/Sidebar';
 import { appGlyph, appKind, appTech, appTechShort, canRun as runnable } from '../../lib/apps';
-import { forgetProject, openInXcode, rebuild, setApp, setProjectPrefs, startSession, stopSession } from '../../state/actions';
+import { forgetProject, openInXcode, rebuild, setApp, setBackend, setProjectPrefs, startSession, stopSession } from '../../state/actions';
 import { useApp } from '../../state/app';
+import { usePc } from '../../state/pc';
 import { useProjects } from '../../state/projects';
 import { isActive, isBusy, phaseLabel, type RunState, type TimelinePhase } from '../../state/runs';
 import { AppIcon } from '../../ui/AppIcon';
@@ -19,19 +20,29 @@ import { TargetPicker } from './TargetPicker';
 
 const MAC_TONE: Record<string, Tone> = { connected: 'ok', restored: 'ok', connecting: 'busy', reconnecting: 'warn', lost: 'warn', offline: 'error', idle: 'idle', closed: 'idle' };
 
-function MacPicker({ macs, mac, path }: { macs: MacSummary[]; mac: MacSummary | null; path: string }) {
+/** Setting up this PC, as the picker shows it. */
+export type PcSetupState = 'ready' | 'setup' | 'running';
+
+/**
+ * Where the app builds: one of the paired Macs, or this PC with no Mac
+ * (`allowPc`: the iOS app is the one picked; Electron apps run on the Mac).
+ */
+function BuildPicker({ macs, mac, path, backend, pcState, allowPc }: { macs: MacSummary[]; mac: MacSummary | null; path: string; backend: BuildBackend; pcState: PcSetupState; allowPc: boolean }) {
   const menu = usePopover();
   const navigate = useApp((s) => s.navigate);
+  const pc = backend === 'wsl' && allowPc;
+  const pcText = pcState === 'ready' ? t.pc.ready : pcState === 'running' ? t.pc.settingUp : t.pc.needsSetup;
+  const tone: Tone = pc ? (pcState === 'ready' ? 'ok' : pcState === 'running' ? 'busy' : 'warn') : mac ? MAC_TONE[mac.state] ?? 'idle' : 'error';
   return (
     <>
-      <button type="button" className="tb-picker tb-picker--mac" aria-haspopup="menu" aria-label={t.toolbar.mac(mac ? `${mac.label}, ${macStatusText(mac)}` : t.common.none)} {...menu.triggerProps}>
+      <button type="button" className="tb-picker tb-picker--mac" aria-haspopup="menu" aria-label={pc ? t.toolbar.buildOn(`${t.pc.name}, ${pcText}`) : t.toolbar.mac(mac ? `${mac.label}, ${macStatusText(mac)}` : t.common.none)} {...menu.triggerProps}>
         <span className="tb-picker__icon">
-          <Icon name="mac" size={16} />
-          <StatusDot tone={mac ? MAC_TONE[mac.state] ?? 'idle' : 'error'} pulse={mac?.state === 'connecting' || mac?.state === 'reconnecting'} />
+          <Icon name={pc ? 'desktop' : 'mac'} size={16} />
+          <StatusDot tone={tone} pulse={pc ? pcState === 'running' : mac?.state === 'connecting' || mac?.state === 'reconnecting'} />
         </span>
         <span className="tb-picker__text">
-          <span className="tb-picker__title truncate">{mac?.label ?? t.toolbar.noMac}</span>
-          <span className="tb-picker__sub truncate">{mac ? macStatusText(mac) : t.toolbar.pairOne}</span>
+          <span className="tb-picker__title truncate">{pc ? t.pc.name : mac?.label ?? t.toolbar.noMac}</span>
+          <span className="tb-picker__sub truncate">{pc ? pcText : mac ? macStatusText(mac) : t.toolbar.pairOne}</span>
         </span>
         <Icon name="chevronDown" size={12} />
       </button>
@@ -39,9 +50,15 @@ function MacPicker({ macs, mac, path }: { macs: MacSummary[]; mac: MacSummary | 
         state={menu}
         label={t.toolbar.chooseMac}
         placement="bottom-start"
-        width={240}
+        width={260}
         items={[
-          ...macs.map((m) => ({ id: m.name, label: m.label, hint: m.isDefault ? t.common.default.toLowerCase() : undefined, checked: m.name === mac?.name, onSelect: () => setProjectPrefs(path, { mac: m.name }) })),
+          ...macs.map((m) => ({ id: m.name, label: m.label, icon: 'mac' as const, hint: m.isDefault ? t.common.default.toLowerCase() : undefined, checked: !pc && m.name === mac?.name, onSelect: () => void setBackend(path, 'mac', m.name) })),
+          ...(allowPc
+            ? [
+                { id: 'pc', label: t.pc.usePc, icon: 'desktop' as const, hint: pc ? pcText.toLowerCase() : undefined, checked: pc, separatorBefore: macs.length > 0, onSelect: () => void setBackend(path, 'wsl') },
+                ...(pc ? [{ id: 'pc-setup', label: t.pc.setUpMenu, icon: 'wrench' as const, onSelect: () => usePc.getState().showSetup(path, true) }] : []),
+              ]
+            : []),
           { id: 'pair', label: t.common.pairMacMenu, icon: 'add' as const, separatorBefore: true, onSelect: () => navigate({ name: 'onboarding' }) },
           { id: 'manage', label: t.toolbar.manageMacs, icon: 'mac' as const, onSelect: () => navigate({ name: 'macs' }) },
         ]}
@@ -118,12 +135,14 @@ function AppPicker({ path, summary, app, run }: { path: string; summary: Project
 function currentPhase(run: RunState | undefined): string | null {
   if (!run) return null;
   for (const [phase, state] of Object.entries(run.phases)) {
-    if (state?.status === 'running') return t.phaseNow[phase as keyof typeof t.phaseNow] ?? phaseLabel(phase as TimelinePhase, run.onMac);
+    if (state?.status !== 'running') continue;
+    const onPc = run.backend === 'wsl' ? (t.pc.phaseNow as Partial<Record<string, string>>)[phase] : undefined;
+    return onPc ?? t.phaseNow[phase as keyof typeof t.phaseNow] ?? phaseLabel(phase as TimelinePhase, run.onMac, run.backend === 'wsl');
   }
   return run.status === 'starting' ? t.phaseNow.starting : null;
 }
 
-export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, autoTarget, targetsLoading, macDesktop = null, onlyMac = false, app = 'ios' }: {
+export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, autoTarget, targetsLoading, macDesktop = null, onlyMac = false, app = 'ios', pc = false, pcState = 'setup' }: {
   path: string;
   summary: ProjectSummary | null;
   icon: string | null;
@@ -140,6 +159,10 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
   onlyMac?: boolean;
   /** The app Run and Live use. */
   app?: RunnableApp;
+  /** It builds on this PC (no Mac), for the iPhone plugged into it. */
+  pc?: boolean;
+  /** This PC's setup, for the picker. */
+  pcState?: PcSetupState;
 }) {
   const more = usePopover();
   const active = isActive(run);
@@ -150,10 +173,11 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
   const name = summary?.appName ?? path.split(/[\\/]/).pop() ?? path;
   // The app picked must be there to run: an iOS app once iOS is added.
   const appReady = app === 'electron' ? Boolean(summary?.electron) : Boolean(summary?.hasIos);
-  const canRun = appReady && Boolean(mac);
-  const runHint = !mac ? t.toolbar.pairFirst : summary && !appReady && app === 'ios' ? t.toolbar.addIosFirst : undefined;
+  // On this PC no Mac is needed: Run sets this PC up first when it isn't yet.
+  const canRun = appReady && (pc || Boolean(mac));
+  const runHint = !pc && !mac ? t.toolbar.pairFirst : summary && !appReady && app === 'ios' ? t.toolbar.addIosFirst : undefined;
   // IPA builds and Xcode are for the iOS app.
-  const canIos = Boolean(summary?.hasIos && mac);
+  const canIos = Boolean(summary?.hasIos && (pc || mac));
 
   return (
     <div className="ws-toolbar" role="toolbar" aria-label={t.toolbar.label}>
@@ -171,9 +195,9 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
             <span className="ws-toolbar__pickers-divider" role="separator" />
           </>
         )}
-        <MacPicker macs={macs} mac={mac} path={path} />
+        <BuildPicker macs={macs} mac={mac} path={path} backend={summary?.backend ?? 'mac'} pcState={pcState} allowPc={app !== 'electron' && Boolean(summary?.hasIos || summary?.kind === 'capacitor')} />
         <Icon name="chevronRight" size={12} className="ws-toolbar__arrow" />
-        <TargetPicker targets={targets} selected={target} auto={autoTarget} loading={targetsLoading} mac={macDesktop} onlyMac={onlyMac} onSelect={(picked) => setProjectPrefs(path, { target: picked?.udid ?? undefined })} />
+        <TargetPicker targets={targets} selected={target} auto={autoTarget} loading={targetsLoading} mac={macDesktop} onlyMac={onlyMac} pc={pc} onSelect={(picked) => setProjectPrefs(path, { target: picked?.udid ?? undefined })} />
       </div>
       <div className="ws-toolbar__spacer" />
       <div className="ws-toolbar__session" aria-live="polite">
@@ -200,8 +224,15 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
       <div className="ws-toolbar__actions">
         {!onlyMac && (
           <>
-            <IconButton icon="box" label={canIos || !mac ? t.toolbar.buildIpa : `${t.toolbar.buildIpa} (${t.toolbar.iosOnly.toLowerCase()})`} disabled={!canIos} onClick={() => emitWorkspace('build-ipa')} />
-            <IconButton icon="code" label={canIos || !mac ? t.toolbar.openXcode : `${t.toolbar.openXcode} (${t.toolbar.iosOnly.toLowerCase()})`} disabled={!canIos} onClick={() => void openInXcode(path)} />
+            {pc ? (
+              // On this PC: a development .ipa for your own devices, signed with this PC's setup.
+              <IconButton icon="box" label={t.pc.buildIpa} disabled={!canIos || busy} onClick={() => void startSession(path, 'build')} />
+            ) : (
+              <>
+                <IconButton icon="box" label={canIos || !mac ? t.toolbar.buildIpa : `${t.toolbar.buildIpa} (${t.toolbar.iosOnly.toLowerCase()})`} disabled={!canIos} onClick={() => emitWorkspace('build-ipa')} />
+                <IconButton icon="code" label={canIos || !mac ? t.toolbar.openXcode : `${t.toolbar.openXcode} (${t.toolbar.iosOnly.toLowerCase()})`} disabled={!canIos} onClick={() => void openInXcode(path)} />
+              </>
+            )}
           </>
         )}
         <button type="button" className="icon-btn" aria-label={t.common.moreActions} aria-haspopup="menu" {...more.triggerProps}>
@@ -214,6 +245,7 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
           items={[
             { id: 'rebuild', label: t.toolbar.rebuild, icon: 'sync', shortcut: 'Ctrl+Shift+F5', disabled: !canRun, onSelect: () => void rebuild(path) },
             { id: 'clean', label: t.toolbar.cleanRebuild, icon: 'eraser', disabled: !canRun, onSelect: () => void rebuild(path, true) },
+            ...(pc ? [{ id: 'pc-setup', label: t.pc.setUpMenu, icon: 'wrench' as const, onSelect: () => usePc.getState().showSetup(path, true) }] : []),
             { id: 'log', label: t.toolbar.buildLog, icon: 'document', disabled: !run?.buildLogPath, onSelect: () => emitWorkspace('show-build-log') },
             { id: 'folder', label: t.toolbar.openFolder, icon: 'folderOpen', separatorBefore: true, onSelect: () => void window.capmac.invoke('app:open-path', { path }) },
             { id: 'editor', label: t.toolbar.openEditor, icon: 'open', onSelect: () => void window.capmac.invoke('app:open-in-editor', { file: path }) },

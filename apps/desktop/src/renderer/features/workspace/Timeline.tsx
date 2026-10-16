@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { t, tidy } from '../../../shared/i18n';
 import { formatDuration } from '../../lib/format';
 import { Rich } from '../../ui/Rich';
-import { CAP_ELECTRON_PHASES, ELECTRON_PHASES, IPA_PHASES, isBusy, phaseLabel, RUN_PHASES, type PhaseState, type RunState, type TimelinePhase } from '../../state/runs';
+import { CAP_ELECTRON_PHASES, ELECTRON_PHASES, IPA_PHASES, isBusy, PC_IPA_PHASES, PC_PHASES, phaseLabel, RUN_PHASES, type PhaseState, type RunState, type TimelinePhase } from '../../state/runs';
 import { ProgressBar, Spinner } from '../../ui/Feedback';
 import { Icon } from '../../ui/Icon';
 
@@ -59,18 +59,20 @@ function useNow(enabled: boolean): number {
 
 /**
  * `electron`: the project's Electron app (Capacitor's platform, or the app
- * itself); `macSelected`: the toolbar's target is the Mac's desktop. A run
- * says for itself where it ran.
+ * itself); `macSelected`: the toolbar's target is the Mac's desktop;
+ * `pcSelected`: the project builds on this PC. A run says for itself where it ran.
  */
-export function Timeline({ run, electron = null, macSelected = false }: { run: RunState | undefined; electron?: 'capacitor' | 'plain' | null; macSelected?: boolean }) {
+export function Timeline({ run, electron = null, macSelected = false, pcSelected = false }: { run: RunState | undefined; electron?: 'capacitor' | 'plain' | null; macSelected?: boolean; pcSelected?: boolean }) {
   const busy = isBusy(run);
-  const onMac = run?.sessionId || run?.runNumber ? Boolean(run?.onMac) : macSelected;
-  const PHASE_LABELS = Object.fromEntries((['web', 'sync', 'deps', 'electron', 'cap', 'build', 'boot', 'install', 'launch', 'archive', 'export', 'download'] as TimelinePhase[]).map((p) => [p, phaseLabel(p, onMac)])) as Record<TimelinePhase, string>;
+  const ran = Boolean(run?.sessionId || run?.runNumber);
+  const onMac = ran ? Boolean(run?.onMac) : macSelected;
+  const pc = ran ? run?.backend === 'wsl' : pcSelected;
+  const PHASE_LABELS = Object.fromEntries((['web', 'sync', 'deps', 'electron', 'cap', 'build', 'boot', 'install', 'launch', 'archive', 'export', 'download'] as TimelinePhase[]).map((p) => [p, phaseLabel(p, onMac, pc)])) as Record<TimelinePhase, string>;
   const now = useNow(busy);
   const hasCurrent = Boolean(run && Object.keys(run.phases).length > 1);
   const showingPrevious = !hasCurrent && Boolean(run?.previous);
   const phases: Partial<Record<TimelinePhase, PhaseState>> = hasCurrent ? run!.phases : run?.previous?.phases ?? {};
-  const order = run?.mode === 'ipa' ? IPA_PHASES : onMac ? (electron === 'capacitor' ? CAP_ELECTRON_PHASES : ELECTRON_PHASES) : RUN_PHASES;
+  const order = pc ? (run?.mode === 'ipa' ? PC_IPA_PHASES : PC_PHASES) : run?.mode === 'ipa' ? IPA_PHASES : onMac ? (electron === 'capacitor' ? CAP_ELECTRON_PHASES : ELECTRON_PHASES) : RUN_PHASES;
   const runningPhase = order.find((p) => phases[p]?.status === 'running');
   const running = runningPhase ? phases[runningPhase] : undefined;
   const failed = order.find((p) => phases[p]?.status === 'failed');

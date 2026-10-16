@@ -1,6 +1,7 @@
 /** What capmac Studio shows about a project before any Mac is involved. */
 import { appsOf, type ProjectApp } from './apps.js';
-import { appFor, hasInstalledDependencies, loadProject, type ProjectInfo, type RunnableApp } from './project.js';
+import { backendOf } from './backend.js';
+import { appFor, hasInstalledDependencies, loadProject, type BuildBackend, type ProjectInfo, type RunnableApp } from './project.js';
 import { scanProject } from './scan.js';
 import { scanOptionsFor } from './sync-client.js';
 
@@ -38,6 +39,8 @@ export interface ProjectSummary {
   app: RunnableApp;
   /** Whether that app was picked (in CapMac Studio, or with `capmac apps use`) rather than taken by default. */
   appChosen: boolean;
+  /** Where the iOS app builds: a paired Mac, or this PC (`capmac backend`). */
+  backend: BuildBackend;
 }
 
 export async function inspectProject(dir: string): Promise<ProjectSummary> {
@@ -71,6 +74,7 @@ export async function summarizeProject(project: ProjectInfo): Promise<ProjectSum
     apps,
     app,
     appChosen: project.chosenApp === app,
+    backend: await backendOf(project),
   };
 }
 

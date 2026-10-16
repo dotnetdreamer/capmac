@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { appsOf, chooseApp, findApps, nothingToRun } from '../../packages/core/src/engine/apps.js';
+import { appsOf, chooseApp, findApps, nothingToRun, restoreAppChoices } from '../../packages/core/src/engine/apps.js';
 import { recallAll } from '../../packages/core/src/engine/memory.js';
 import { appFor, loadProject, projectIdFor, runsOnMac, type ProjectInfo } from '../../packages/core/src/engine/project.js';
 
@@ -280,6 +280,12 @@ describe('what CapMac remembered under a project’s old id', () => {
   // Ids used to be made from the folder synced to the Mac (the lockfile's), with the name the Capacitor CLI evaluates.
   const rememberedBefore = (memory: Record<string, unknown>) => writeFileSync(path.join(configDir, 'projects.json'), JSON.stringify(memory));
   const memoryOf = async (projectId: string) => (await recallAll())[projectId];
+  const computedProject = (rel: string, name: string, marker?: string) => {
+    capacitorProject(rel);
+    const p = (file: string) => rel ? `${rel}/${file}` : file;
+    write(p('capacitor.config.ts'), `const name = ${JSON.stringify(name)}; export default { appId: 'com.example.computed', appName: name };`);
+    write(p('node_modules/@capacitor/cli/bin/capacitor'), `${marker ? `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'evaluated');` : ''}console.log(JSON.stringify({ app: { appId: 'com.example.computed', appName: ${JSON.stringify(name)} }, ios: {} }));`);
+  };
 
   it('carries a monorepo app’s target, sound and picked app over to its new id', async () => {
     write('package-lock.json', '{}');
@@ -319,6 +325,131 @@ describe('what CapMac remembered under a project’s old id', () => {
     const project = await loadProject(dir);
     expect(project.projectId).toBe(projectIdFor('Ludo Wala', dir));
     expect(await memoryOf(project.projectId)).toEqual({ lastDevice: 'PHONE-1', sound: 'pc' });
+  });
+
+  it('explicitly restores a computed-name choice before a chooser, while raw discovery runs no code', async () => {
+    const marker = at('evaluated');
+    computedProject('', 'Computed Name', marker);
+    const oldId = projectIdFor('Computed Name', dir);
+    const newId = projectIdFor(path.basename(dir), dir);
+    const previous = { app: 'electron', lastTarget: 'SIM-1', lastDevice: 'PHONE-1', sound: 'pc' };
+    rememberedBefore({ [oldId]: previous });
+
+    const search = await findApps(dir);
+    expect(search.projects[0]!.chosen).toBeNull();
+    expect(existsSync(marker)).toBe(false);
+    expect(await memoryOf(newId)).toBeUndefined();
+
+    const restored = await restoreAppChoices(search);
+    expect(restored.projects[0]!.chosen).toBe('electron');
+    expect(restored.suggested).toEqual({ dir, app: 'electron' });
+    expect(existsSync(marker)).toBe(true);
+    expect(await memoryOf(newId)).toEqual(previous);
+    expect(await memoryOf(oldId)).toEqual(previous);
+    expect((await loadProject(dir)).chosenApp).toBe('electron');
+  });
+
+  it('does not call a legacy choice unique while a sibling name is unresolved by static discovery', async () => {
+    write('package-lock.json', '{}');
+    capacitorProject('apps/literal');
+    const marker = at('computed-evaluated');
+    computedProject('apps/computed', 'Ludo Wala', marker);
+    rememberedBefore({ [projectIdFor('Ludo Wala', dir)]: { app: 'electron', sound: 'pc' } });
+
+    const search = await findApps(dir);
+    expect(search.projects.map((project) => project.chosen)).toEqual([null, null]);
+    expect(existsSync(marker)).toBe(false);
+    expect((await restoreAppChoices(search)).projects.map((project) => project.chosen)).toEqual([null, null]);
+  });
+
+  it('does not give two computed-name siblings the app picked under their shared evaluated legacy id', async () => {
+    write('package-lock.json', '{}');
+    for (const brand of ['one', 'two']) computedProject(`brands/${brand}/mobile`, 'Shared Evaluated Name');
+    const oldId = projectIdFor('Shared Evaluated Name', dir);
+    const previous = { app: 'electron', lastTarget: 'SIM-1', sound: 'pc' };
+    rememberedBefore({ [oldId]: previous });
+
+    const restored = await restoreAppChoices(await findApps(dir));
+    expect(restored.projects.map((project) => project.chosen)).toEqual([null, null]);
+    const projects = await Promise.all(['one', 'two'].map((brand) => loadProject(at('brands', brand, 'mobile'))));
+    expect(projects[0]!.projectId).not.toBe(projects[1]!.projectId);
+    for (const project of projects) {
+      expect(project.chosenApp).toBeNull();
+      expect(await memoryOf(project.projectId)).toEqual({ lastTarget: 'SIM-1', sound: 'pc' });
+    }
+    expect(await memoryOf(oldId)).toEqual(previous);
+  });
+
+  it('preserves independent choices, targets and sound for distinct computed legacy names', async () => {
+    write('package-lock.json', '{}');
+    computedProject('brands/one/mobile', 'First Evaluated Name');
+    computedProject('brands/two/mobile', 'Second Evaluated Name');
+    const first = { app: 'electron', lastTarget: 'SIM-1', sound: 'pc' };
+    const second = { app: 'ios', lastDevice: 'PHONE-2', sound: 'mac' };
+    rememberedBefore({ [projectIdFor('First Evaluated Name', dir)]: first, [projectIdFor('Second Evaluated Name', dir)]: second });
+
+    const restored = await restoreAppChoices(await findApps(dir));
+    expect(restored.projects.map((project) => project.chosen)).toEqual(['electron', 'ios']);
+    expect(restored.suggested).toEqual({ dir: at('brands', 'one', 'mobile'), app: 'electron' });
+    const one = await loadProject(at('brands', 'one', 'mobile'));
+    const two = await loadProject(at('brands', 'two', 'mobile'));
+    expect(await memoryOf(one.projectId)).toEqual(first);
+    expect(await memoryOf(two.projectId)).toEqual(second);
+  });
+
+  it('runs no project’s config to restore choices when its name is written out', async () => {
+    write('package-lock.json', '{}');
+    capacitorProject('apps/literal');
+    const marker = at('literal-evaluated');
+    write('apps/literal/node_modules/@capacitor/cli/bin/capacitor', `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'evaluated'); console.log(JSON.stringify({ app: { appId: 'com.example.ludo', appName: 'Ludo Wala' }, ios: {} }));`);
+    // A choice saved under the old id of another app of this monorepo: findApps has looked under this one's old id already.
+    rememberedBefore({ [projectIdFor('Gone App', dir)]: { app: 'electron' } });
+
+    expect((await restoreAppChoices(await findApps(dir))).projects.map((project) => project.chosen)).toEqual([null]);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it('does not evaluate configs without a relevant legacy app choice or over existing new state', async () => {
+    const marker = at('evaluated');
+    computedProject('', 'Computed Name', marker);
+    const newId = projectIdFor(path.basename(dir), dir);
+    await restoreAppChoices(await findApps(dir));
+    expect(existsSync(marker)).toBe(false);
+    expect(await memoryOf(newId)).toBeUndefined();
+
+    rememberedBefore({ [projectIdFor('Computed Name', dir)]: { app: 'electron', sound: 'pc' }, [newId]: { lastTarget: 'NEW' } });
+    expect((await restoreAppChoices(await findApps(dir))).projects[0]!.chosen).toBeNull();
+    expect(existsSync(marker)).toBe(false);
+    expect(await memoryOf(newId)).toEqual({ lastTarget: 'NEW' });
+  });
+
+  it('does not treat a sibling with its own lockfile as an owner of this sync root’s legacy choice', async () => {
+    write('package-lock.json', '{}');
+    capacitorProject('apps/main');
+    capacitorProject('apps/independent');
+    write('apps/independent/package-lock.json', '{}');
+    rememberedBefore({ [projectIdFor('Ludo Wala', dir)]: { app: 'electron' } });
+
+    expect((await loadProject(at('apps', 'main'))).chosenApp).toBe('electron');
+    expect((await loadProject(at('apps', 'independent'))).chosenApp).toBeNull();
+  });
+
+  it('does not migrate an ambiguous choice when another project is nested inside a detected project', async () => {
+    write('package-lock.json', '{}');
+    capacitorProject('apps/parent');
+    capacitorProject('apps/parent/examples/mobile');
+    const oldId = projectIdFor('Ludo Wala', dir);
+    const previous = { app: 'electron', lastTarget: 'SIM-1', sound: 'pc' };
+    rememberedBefore({ [oldId]: previous });
+
+    // Normal discovery still presents the parent; migration must also account for its nested example.
+    expect((await findApps(dir)).projects.map((project) => project.rel)).toEqual(['apps/parent']);
+    for (const rel of ['apps/parent', 'apps/parent/examples/mobile']) {
+      const project = await loadProject(at(rel));
+      expect(project.chosenApp).toBeNull();
+      expect(await memoryOf(project.projectId)).toEqual({ lastTarget: 'SIM-1', sound: 'pc' });
+    }
+    expect(await memoryOf(oldId)).toEqual(previous);
   });
 
   it('never overrides what the new id already has', async () => {
