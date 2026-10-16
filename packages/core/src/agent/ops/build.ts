@@ -93,17 +93,15 @@ function builtAppPath(productsDir: string, settings: Record<string, string> | nu
 }
 
 /**
- * The app a build made: the one its settings name, else the product its
- * scheme names. Never another app that happens to be in the folder: the
- * scheme may build others, and an old build may have left one there.
+ * The app a build made, as its settings name it. Never a guess from the
+ * folder: the scheme's other apps are there too, and so is what older builds
+ * left, like a product since renamed (the scheme file may still name it).
  */
-async function findBuiltApp(productsDir: string, settings: Record<string, string> | null, app: SchemeApp): Promise<{ appPath: string; resolved: boolean }> {
-  const fromSettings = builtAppPath(productsDir, settings);
-  const appPath = fromSettings ?? path.join(productsDir, app.product);
-  if (!(await exists(appPath))) {
-    throw new AgentError(`Build succeeded but the app was not found at ${appPath}`, 'BUILD_FAILED', fromSettings ? undefined : 'CapMac could not read the scheme’s build settings to find its app. Check that the scheme has an app selected in its Run action.');
-  }
-  return { appPath, resolved: fromSettings !== null };
+async function findBuiltApp(productsDir: string, settings: Record<string, string> | null): Promise<string> {
+  const appPath = builtAppPath(productsDir, settings);
+  if (!appPath) throw new AgentError('The build succeeded, but CapMac could not read its build settings to find the app it made.', 'BUILD_FAILED', 'Run again. If it keeps happening, check that the scheme has an app selected in its Run action.');
+  if (!(await exists(appPath))) throw new AgentError(`Build succeeded but the app was not found at ${appPath}`, 'BUILD_FAILED');
+  return appPath;
 }
 
 /**
@@ -300,11 +298,11 @@ export async function opBuild(params: BuildParams, io: AgentIO): Promise<BuildRe
     // Nothing native changed since the last good build: reuse it.
     let reuse = !params.force && !params.clean && previous !== undefined && previous.nativeGen === state.nativeGen && (await exists(previous.appPath));
     if (reuse && previous && (settings || !previous.resolved)) {
-      // An older CapMac could record another app the scheme builds: such a record is checked once.
+      // An older CapMac could record another app the scheme builds: such a record is reused only once checked.
       settings ??= await projectSettingsFor(ios, scheme, app, params, paths.derivedData, io.signal);
       const expected = builtAppPath(productsDir, settings);
-      reuse = !expected || expected === previous.appPath;
-      if (reuse && expected && !previous.resolved) {
+      reuse = expected !== null && expected === previous.appPath;
+      if (reuse && !previous.resolved) {
         previous.resolved = true;
         await saveState(paths, state);
       }
@@ -410,12 +408,15 @@ export async function opBuild(params: BuildParams, io: AgentIO): Promise<BuildRe
     void result;
 
     // Built, so its Swift packages are in place and asking is quick: the settings name the app.
+    // Asked once more when that fails, so a passing hiccup does not fail a good build.
     settings ||= await projectSettingsFor(ios, scheme, app, params, paths.derivedData, io.signal);
-    const { appPath, resolved } = await findBuiltApp(productsDir, settings, app);
+    if (!settings && !io.signal.aborted) settings = await projectSettingsFor(ios, scheme, app, params, paths.derivedData, io.signal);
+    if (io.signal.aborted) throw new AgentError('Cancelled', 'CANCELLED');
+    const appPath = await findBuiltApp(productsDir, settings);
     // Xcode can leave a resource it thinks unchanged (the live-reload config): bring it in step.
     if (isSim && !(await bundledConfigMatches(appPath, ios.appDir))) await refreshWebAssets(appPath, ios.appDir);
     const info = await readAppInfo(appPath);
-    const record: BuildRecord = { appPath, ...info, nativeGen: state.nativeGen, webGen: state.webGen, at: Date.now(), ...(resolved ? { resolved } : {}) };
+    const record: BuildRecord = { appPath, ...info, nativeGen: state.nativeGen, webGen: state.webGen, at: Date.now(), resolved: true };
     state.builds[key] = record;
     await saveState(paths, state);
     return { skipped: false, ...record, warnings: parser.warnings, logPath };

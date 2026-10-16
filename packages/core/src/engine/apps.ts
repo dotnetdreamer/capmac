@@ -14,7 +14,7 @@ import { existsSync, promises as fs, readFileSync, type Dirent } from 'node:fs';
 import path from 'node:path';
 import { toPosixRel } from '../shared/paths.js';
 import { allDependencies, capacitorElectronDir, dependsOnElectron, describeElectronApp, electronProductName, readPackageJson, type ElectronProject } from './electron-project.js';
-import { recallAll, remember } from './memory.js';
+import { recallAll, remember, type ProjectMemory } from './memory.js';
 import { appFor, CAP_CONFIG_FILES, evaluatedCapacitorName, findSyncRoot, isElectronPlatform, isRunnableApp, loadProject, ProjectError, projectIdFor, projectMemory, readCapacitorConfig, requireElectron, type ProjectInfo, type RunnableApp } from './project.js';
 
 /** What an app is to CapMac: an iOS app (simulators, iPhones and iPads) or a Mac desktop app. */
@@ -475,11 +475,22 @@ async function chosenFor(dir: string, found: Found): Promise<RunnableApp | null>
   return isRunnableApp(app) && found.apps.some((a) => a.id === app && canRun(a)) ? app : null;
 }
 
-/** A Capacitor config's appName when it is written out, as its CLI evaluates it too; null when it is computed (or missing). */
+/**
+ * A Capacitor config's appName when it is written out once, as one plain
+ * string, so its CLI evaluates the same; null when only running the config
+ * can tell ('Brand ' + suffix, a template, a second mention that may change
+ * it, a spread that may replace it), or when it has none.
+ */
 function writtenAppName(dir: string): string | null {
   const configFile = CAP_CONFIG_FILES.find((file) => existsSync(path.join(dir, file)));
-  const name = configFile ? readCapacitorConfig(path.join(dir, configFile)).appName : undefined;
-  return name && !name.includes('${') ? name : null;
+  if (!configFile) return null;
+  if (configFile.endsWith('.json')) {
+    const name: unknown = readJson(path.join(dir, configFile))?.appName;
+    return typeof name === 'string' && name ? name : null;
+  }
+  const text = readText(path.join(dir, configFile));
+  if (text === null || (text.match(/\bappName\b/g) ?? []).length !== 1 || text.includes('...')) return null;
+  return /\bappName\s*:\s*(['"`])([^'"`\\$\r\n]+)\1\s*(?=[,}]|$)/m.exec(text)?.[2] ?? null;
 }
 
 /**
@@ -500,10 +511,15 @@ export async function onlyProjectWithId(oldId: string, syncRoot: string, dir: st
   for (const project of projects) {
     if (project.found.framework !== 'capacitor' && project.found.framework !== 'electron') continue;
     if (path.resolve(project.dir).toLowerCase() === self || path.resolve(findSyncRoot(project.dir)).toLowerCase() !== root) continue;
-    let name: string | null = project.found.idName;
-    if (project.found.framework === 'capacitor') name = options.evaluateNames ? await evaluatedCapacitorName(project.dir) : writtenAppName(project.dir);
-    // A computed name can have owned this legacy key. Reading files alone cannot prove otherwise.
-    if (name === null || projectIdFor(name, syncRoot) === oldId) return false;
+    // The names its old id may have come from: its config as read (CapMac 0.1 without the Capacitor
+    // CLI), and what that CLI evaluates. Only running a computed config can tell the second.
+    const names = [project.found.idName];
+    if (project.found.framework === 'capacitor') {
+      const evaluated = (options.evaluateNames ? await evaluatedCapacitorName(project.dir) : null) ?? writtenAppName(project.dir);
+      if (evaluated === null) return false;
+      names.push(evaluated);
+    }
+    if (names.some((name) => projectIdFor(name, syncRoot) === oldId)) return false;
   }
   return true;
 }
@@ -527,30 +543,24 @@ export async function findApps(start: string, options: { depth?: number; limit?:
 }
 
 /**
- * Before asking which app to use, restore choices stored under legacy evaluated names.
- * Unlike findApps, this explicitly loads candidate projects and may run their Capacitor CLI.
- * Existing new state wins; without a relevant old app choice, no project code runs. Nor
- * does it for a name written out in the config (or an Electron app's): findApps looked
- * under that one already.
+ * Before asking which app to use, restores the apps picked under old ids
+ * (see projectMemory) that findApps could not: it only reads files, so a
+ * computed name, the project's own or a sibling's, leaves it unsure. Loading
+ * a project to settle that may run its Capacitor CLI and its siblings', so it
+ * is done only where an old pick may be waiting: under the project's own old
+ * id when its name is written out (an Electron app's always is), else under
+ * any old id of its sync root. What a project remembers under its new id wins.
  */
 export async function restoreAppChoices(search: AppSearch): Promise<AppSearch> {
   const memory = await recallAll();
   const projects: DetectedProject[] = [];
   for (const found of search.projects) {
-    if (!found.apps.some(canRun) || found.framework !== 'capacitor' || writtenAppName(found.dir) !== null) {
-      projects.push(found);
-      continue;
-    }
-    const projectId = projectIdFor(found.name, found.dir);
-    const oldSuffix = `-${projectIdFor('', findSyncRoot(found.dir)).slice(-8)}`;
-    const hasLegacyChoice = Object.entries(memory).some(([id, value]) => id !== projectId && id.endsWith(oldSuffix) && isRunnableApp(value.app));
-    if (memory[projectId] || !hasLegacyChoice) {
+    if (!mayHaveOldPick(found, memory)) {
       projects.push(found);
       continue;
     }
     try {
-      const loaded = await loadProject(found.dir);
-      const chosen = loaded.chosenApp;
+      const chosen = (await loadProject(found.dir)).chosenApp;
       projects.push({ ...found, chosen: chosen && found.apps.some((app) => app.id === chosen && canRun(app)) ? chosen : null });
     } catch {
       // Discovery still works when a project's evaluated config is unavailable; opening it reports the error.
@@ -558,6 +568,23 @@ export async function restoreAppChoices(search: AppSearch): Promise<AppSearch> {
     }
   }
   return { ...search, projects, suggested: suggest(search.start, projects) };
+}
+
+/** Whether an app picked under one of the project's old ids may be waiting for it (see restoreAppChoices). */
+function mayHaveOldPick(found: DetectedProject, memory: Record<string, ProjectMemory>): boolean {
+  if (found.chosen || (found.framework !== 'capacitor' && found.framework !== 'electron')) return false;
+  const idName = found.framework === 'electron' ? describeElectronApp(found.dir, '', false).name : found.name;
+  const projectId = projectIdFor(idName, found.dir);
+  if (memory[projectId]) return false;
+  const syncRoot = findSyncRoot(found.dir);
+  const isItsApp = (value: ProjectMemory | undefined) => found.apps.some((app) => app.id === value?.app && canRun(app));
+  const written = found.framework === 'electron' ? idName : writtenAppName(found.dir);
+  if (written !== null) {
+    const oldId = projectIdFor(written, syncRoot);
+    return oldId !== projectId && isItsApp(memory[oldId]);
+  }
+  const suffix = `-${projectIdFor('', syncRoot).slice(-8)}`;
+  return Object.entries(memory).some(([id, value]) => id !== projectId && id.endsWith(suffix) && isItsApp(value));
 }
 
 /** The app CapMac works on in a project findApps found: appFor's rule, without loading the project. Null when it runs none of its apps. */

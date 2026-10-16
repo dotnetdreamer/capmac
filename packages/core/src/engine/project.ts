@@ -206,12 +206,10 @@ export function readCapacitorConfig(configFile: string): { appId?: string; appNa
   }
 }
 
-/** A legacy identity's evaluated name, without loading or migrating another project. Null when it cannot be resolved. */
+/** The name a Capacitor project's CLI evaluates (CapMac 0.1 made its id from it), without loading or migrating the project. Null when the CLI can't run here. */
 export async function evaluatedCapacitorName(dir: string): Promise<string | null> {
   const evaluated = await evaluateWithCli(dir);
-  if (evaluated) return evaluated.appName || path.basename(dir);
-  const configFile = CAP_CONFIG_FILES.map((file) => path.join(dir, file)).find((file) => existsSync(file));
-  return configFile ? readCapacitorConfig(configFile).appName ?? null : null;
+  return evaluated ? evaluated.appName || path.basename(dir) : null;
 }
 
 function slug(value: string): string {

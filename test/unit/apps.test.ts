@@ -409,6 +409,40 @@ describe('what CapMac remembered under a project’s old id', () => {
     expect(existsSync(marker)).toBe(false);
   });
 
+  it('restores a written-out name’s choice that a computed sibling made unclear', async () => {
+    write('package-lock.json', '{}');
+    capacitorProject('apps/literal');
+    computedProject('apps/computed', 'Computed Name');
+    rememberedBefore({ [projectIdFor('Ludo Wala', dir)]: { app: 'electron', sound: 'pc' } });
+
+    const search = await findApps(dir);
+    const chosen = (s: typeof search) => Object.fromEntries(s.projects.map((p) => [p.rel, p.chosen]));
+    // Reading files alone can't tell that the computed one never had that name.
+    expect(chosen(search)).toEqual({ 'apps/literal': null, 'apps/computed': null });
+    expect(chosen(await restoreAppChoices(search))).toEqual({ 'apps/literal': 'electron', 'apps/computed': null });
+  });
+
+  it('treats a name built from pieces as computed', async () => {
+    computedProject('', 'Brand Wala');
+    write('capacitor.config.ts', "const suffix = 'Wala';\nexport default { appId: 'com.example.computed', appName: 'Brand ' + suffix };");
+    rememberedBefore({ [projectIdFor('Brand Wala', dir)]: { app: 'electron' } });
+
+    expect((await restoreAppChoices(await findApps(dir))).projects[0]!.chosen).toBe('electron');
+  });
+
+  it('gives no project the choice a sibling with a name built from pieces may have made', async () => {
+    write('package-lock.json', '{}');
+    capacitorProject('apps/plain');
+    computedProject('apps/pieces', 'Ludo Wala');
+    write('apps/pieces/capacitor.config.ts', "const last = 'Wala';\nexport default { appId: 'com.example.computed', appName: 'Ludo ' + last };");
+    rememberedBefore({ [projectIdFor('Ludo Wala', dir)]: { app: 'electron' } });
+
+    const search = await findApps(dir);
+    expect(search.projects.map((p) => p.chosen)).toEqual([null, null]);
+    expect((await restoreAppChoices(search)).projects.map((p) => p.chosen)).toEqual([null, null]);
+    expect((await loadProject(at('apps', 'plain'))).chosenApp).toBeNull();
+  });
+
   it('does not evaluate configs without a relevant legacy app choice or over existing new state', async () => {
     const marker = at('evaluated');
     computedProject('', 'Computed Name', marker);

@@ -354,15 +354,46 @@ describe('the app opBuild returns', () => {
     expect(boundary.run).not.toHaveBeenCalled();
   });
 
-  it('takes the product the scheme names when the settings can’t be read after a build, never another app', async () => {
+  it('does not reuse a build an older CapMac recorded when it can’t check it', async () => {
     params.target = { ...params.target, kind: 'simulator', udid: 'SIM' };
+    params.force = false;
     products = path.join(root, 'DerivedData', 'Build', 'Products', 'Debug-iphonesimulator');
     await product('Auxiliary.app', 'com.test.aux');
     await product('PhoneApp.app', 'com.test.phone');
+    boundary.tryCapture.mockResolvedValue(JSON.stringify([entry('Auxiliary', 'Auxiliary.app', 'OTHER12345'), entry('PhoneApp', 'PhoneApp.app')]));
+    await opBuild(params, io);
+    // As an older CapMac could leave it: another app the scheme builds, not found from the settings.
+    const old = Object.values(boundary.state!.builds)[0]!;
+    delete old.resolved;
+    old.appPath = path.join(products, 'Auxiliary.app');
+    boundary.run.mockClear();
     boundary.tryCapture.mockResolvedValue(null);
-    expect((await opBuild(params, io)).bundleId).toBe('com.test.phone');
-    // Not found from the settings: the next run checks it.
-    expect(Object.values(boundary.state!.builds)[0]!.resolved).toBeUndefined();
+    await expect(opBuild(params, io)).rejects.toThrow(/build settings/);
+    expect(boundary.run).toHaveBeenCalledOnce();
+  });
+
+  it('never guesses the app when the settings can’t be read after a build', async () => {
+    params.target = { ...params.target, kind: 'simulator', udid: 'SIM' };
+    products = path.join(root, 'DerivedData', 'Build', 'Products', 'Debug-iphonesimulator');
+    // Left by a build before the product was renamed (with an -xcconfig or --xcodebuild-arg, the scheme still names it).
+    await product('PhoneApp.app', 'com.test.stale');
+    boundary.tryCapture.mockResolvedValue(null);
+    await expect(opBuild(params, io)).rejects.toThrow(/build settings/);
+    // Asked twice: once more in case the first failure was a passing one.
+    expect(boundary.tryCapture).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops, rather than guesses, when cancelled while it reads the settings', async () => {
+    params.target = { ...params.target, kind: 'simulator', udid: 'SIM' };
+    products = path.join(root, 'DerivedData', 'Build', 'Products', 'Debug-iphonesimulator');
+    await product('PhoneApp.app', 'com.test.phone');
+    const controller = new AbortController();
+    boundary.tryCapture.mockImplementation(async () => {
+      controller.abort();
+      return null;
+    });
+    await expect(opBuild(params, { ...io, signal: controller.signal } as AgentIO)).rejects.toThrow(/Cancelled/);
+    expect(boundary.tryCapture).toHaveBeenCalledOnce();
   });
 
   it('asks for any iPhone’s settings before a device build that names no team, once for the team and the app', async () => {

@@ -22,6 +22,9 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+/** What is in the settings folder, but for the bundle the tests that start writers of their own put there, and the file macOS locks. */
+const leftInSettings = async () => (await fs.readdir(dir)).filter((name) => name !== 'memory.cjs' && name !== 'projects.json.lock');
+
 async function bundleMemory(): Promise<string> {
   const bundle = path.join(dir, 'memory.cjs');
   await build({ entryPoints: [fileURLToPath(new URL('../../packages/core/src/engine/memory.ts', import.meta.url))], bundle: true, platform: 'node', format: 'cjs', outfile: bundle, external: ['ssh2', 'node-datachannel'] });
@@ -101,40 +104,6 @@ describe('concurrent project memory', () => {
     expect((await recallAll())['new-id']).toEqual(adopted);
   });
 
-  it('recovers a lock left by a killed writer', async () => {
-    const lockFile = path.join(dir, 'projects.json.lock');
-    const script = "require('node:fs').writeFileSync(process.argv[1], `${process.pid} dead-writer`); console.log('locked'); setInterval(() => {}, 1000);";
-    const child = spawn(process.execPath, ['-e', script, lockFile], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    const exited = new Promise<void>((resolve, reject) => { child.on('exit', () => resolve()); child.on('error', reject); });
-    try {
-      await new Promise<void>((resolve, reject) => { child.stdout.once('data', () => resolve()); child.once('error', reject); });
-      child.kill();
-      await exited;
-      await remember('after-crash', { sound: 'pc' });
-
-      expect((await recallAll())['after-crash']).toEqual({ sound: 'pc' });
-      expect((await recallAll()).sentinel).toEqual({ lastTarget: 'KEEP' });
-      expect(await fs.readdir(dir)).toEqual(['projects.json']);
-    } finally {
-      if (child.exitCode === null && child.signalCode === null) child.kill();
-      await exited;
-    }
-  });
-
-  it('recovers a lock whose writer’s process id now belongs to another program', async () => {
-    // Windows reuses process ids soon: a lock left long ago can name a live process.
-    const lockFile = path.join(dir, 'projects.json.lock');
-    await fs.writeFile(lockFile, `${process.pid} long-gone-writer`);
-    const longAgo = new Date(Date.now() - 60_000);
-    await fs.utimes(lockFile, longAgo, longAgo);
-    const started = Date.now();
-    await remember('after-reuse', { sound: 'pc' });
-
-    expect(Date.now() - started).toBeLessThan(5_000);
-    expect(await recallAll()).toMatchObject({ sentinel: { lastTarget: 'KEEP' }, 'after-reuse': { sound: 'pc' } });
-    expect(await fs.readdir(dir)).toEqual(['projects.json']);
-  });
-
   it('never writes over settings it could not read', async () => {
     const before = await fs.readFile(path.join(dir, 'projects.json'), 'utf8');
     const read = vi.spyOn(fs, 'readFile').mockRejectedValueOnce(Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' }));
@@ -144,98 +113,109 @@ describe('concurrent project memory', () => {
       read.mockRestore();
     }
     expect(await fs.readFile(path.join(dir, 'projects.json'), 'utf8')).toBe(before);
-    expect(await fs.readdir(dir)).toEqual(['projects.json']);
+    expect(await leftInSettings()).toEqual(['projects.json']);
   });
 
-  it('serializes concurrent recovery without deleting the next writer’s live lock', async () => {
+  it('never takes the lock from a live writer that is slow', async () => {
     const bundle = await bundleMemory();
-    const dead = spawn(process.execPath, ['-e', ''], { windowsHide: true });
-    await new Promise<void>((resolve, reject) => { dead.on('exit', () => resolve()); dead.on('error', reject); });
-    await fs.writeFile(path.join(dir, 'projects.json.lock'), `${dead.pid} dead-writer`);
-    // Pause B after its stale-owner check. A either waits for B's recovery
-    // guard, or (the regression) takes a lock B is about to delete.
-    const script = `
-      const fs = require('node:fs/promises'), path = require('node:path');
-      const root = process.argv[2], role = process.argv[3];
-      const wait = ms => new Promise(r => setTimeout(r, ms));
-      const until = async file => { for (;;) { try { await fs.stat(path.join(root, file)); return; } catch {} await wait(2); } };
-      let paused = false;
-      if (role === 'B') {
-        const unlink = fs.unlink.bind(fs);
-        fs.unlink = async file => {
-          if (file === path.join(root, 'projects.json.lock') && !paused) { paused = true; console.log('B_READY'); await until('release-b'); }
-          return unlink(file);
-        };
-      } else {
-        const rename = fs.rename.bind(fs), link = fs.link.bind(fs);
-        fs.rename = async (...args) => { console.log('A_HOLDING'); await until('release-a'); return rename(...args); };
-        fs.link = async (...args) => {
-          try { return await link(...args); } catch (err) {
-            if (args[1] === path.join(root, 'projects.json.recovery.lock') && err.code === 'EEXIST') console.log('A_WAITING');
-            throw err;
-          }
-        };
-      }
-      const { remember } = require(process.argv[1]);
-      remember(role, { lastTarget: role }).catch(err => { console.error(err); process.exitCode = 1; });
-    `;
-    const start = (role: string) => {
-      const child = spawn(process.execPath, ['-e', script, bundle, dir, role], { windowsHide: true, env: { ...process.env, CAPMAC_CONFIG_DIR: dir }, stdio: ['ignore', 'pipe', 'pipe'] });
-      let output = '';
-      child.stdout.on('data', (data: Buffer) => { output += data.toString(); });
-      child.stderr.on('data', (data: Buffer) => { output += data.toString(); });
-      const exited = new Promise<number | null>((resolve, reject) => { child.on('exit', resolve); child.on('error', reject); });
-      return { child, exited, output: () => output };
-    };
-    const waitFor = async (writer: ReturnType<typeof start>, pattern: RegExp) => {
-      const deadline = Date.now() + 5000;
-      while (!pattern.test(writer.output())) {
-        if (Date.now() > deadline) throw new Error(`Writer did not reach ${pattern}: ${writer.output()}`);
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      }
-    };
-    const b = start('B');
-    let a: ReturnType<typeof start> | undefined;
+    const release = path.join(dir, 'release');
+    const slow = writer(bundle, 'slow', release);
     try {
-      await waitFor(b, /B_READY/);
-      a = start('A');
-      await waitFor(a, /A_HOLDING|A_WAITING/);
-      const stolen = a.output().includes('A_HOLDING');
-      await fs.writeFile(path.join(dir, 'release-b'), '');
-      if (stolen) await b.exited;
-      await waitFor(a, /A_HOLDING/);
-      await fs.writeFile(path.join(dir, 'release-a'), '');
-      expect(await a.exited, a.output()).toBe(0);
-      expect(await b.exited, b.output()).toBe(0);
-      expect(await recallAll()).toMatchObject({ sentinel: { lastTarget: 'KEEP' }, A: { lastTarget: 'A' }, B: { lastTarget: 'B' } });
+      await slow.holding();
+      let saved = false;
+      const other = remember('other', { lastTarget: 'other' }).then(() => { saved = true; });
+      // Longer than any write takes: a lock that expired would have been taken from it by now.
+      await new Promise((resolve) => setTimeout(resolve, 6_000));
+      expect(saved).toBe(false);
+      await fs.writeFile(release, '');
+      expect(await slow.exited, slow.output()).toBe(0);
+      await other;
+      expect(await recallAll()).toMatchObject({ sentinel: { lastTarget: 'KEEP' }, slow: { lastTarget: 'slow' }, other: { lastTarget: 'other' } });
     } finally {
-      for (const writer of [a, b]) {
-        if (!writer) continue;
-        if (writer.child.exitCode === null && writer.child.signalCode === null) writer.child.kill();
-        await writer.exited;
-      }
+      await slow.stop();
     }
   });
 
-  it('does not publish an ownerless lock when a writer is killed before acquisition', async () => {
+  it('lets go at once of a killed writer’s lock, and clears what it left', async () => {
     const bundle = await bundleMemory();
-    const script = `
-      const fs = require('node:fs/promises');
-      fs.link = async () => { console.log('BEFORE_PUBLISH'); await new Promise(() => {}); };
-      require(process.argv[1]).remember('killed', { sound: 'mac' });
-      setInterval(() => {}, 1000);
-    `;
-    const child = spawn(process.execPath, ['-e', script, bundle], { windowsHide: true, env: { ...process.env, CAPMAC_CONFIG_DIR: dir }, stdio: ['ignore', 'pipe', 'pipe'] });
-    const exited = new Promise<void>((resolve, reject) => { child.on('exit', () => resolve()); child.on('error', reject); });
+    const killed = writer(bundle, 'killed', '');
     try {
-      await new Promise<void>((resolve, reject) => { child.stdout.once('data', () => resolve()); child.once('error', reject); });
-      child.kill();
-      await exited;
+      await killed.holding();
+      killed.child.kill();
+      await killed.exited;
+      const started = Date.now();
       await remember('after-crash', { sound: 'pc' });
-      expect(await recallAll()).toMatchObject({ sentinel: { lastTarget: 'KEEP' }, 'after-crash': { sound: 'pc' } });
+      expect(Date.now() - started).toBeLessThan(2_000);
+      const saved = await recallAll();
+      expect(saved).toMatchObject({ sentinel: { lastTarget: 'KEEP' }, 'after-crash': { sound: 'pc' } });
+      expect(saved.killed).toBeUndefined();
+      // Its half-done write is gone too.
+      expect(await leftInSettings()).toEqual(['projects.json']);
     } finally {
-      if (child.exitCode === null && child.signalCode === null) child.kill();
-      await exited;
+      await killed.stop();
+    }
+  });
+
+  it('lets writers waiting on a killed one save in turn, losing none', async () => {
+    const bundle = await bundleMemory();
+    const killed = writer(bundle, 'killed', '');
+    const waiting: Array<ReturnType<typeof writer>> = [];
+    try {
+      await killed.holding();
+      for (let i = 0; i < 3; i++) waiting.push(writer(bundle, `waiting-${i}`));
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      killed.child.kill();
+      await killed.exited;
+      for (const w of waiting) expect(await w.exited, w.output()).toBe(0);
+      expect(await recallAll()).toMatchObject({ sentinel: { lastTarget: 'KEEP' }, 'waiting-0': { lastTarget: 'waiting-0' }, 'waiting-1': { lastTarget: 'waiting-1' }, 'waiting-2': { lastTarget: 'waiting-2' } });
+      expect(await leftInSettings()).toEqual(['projects.json']);
+    } finally {
+      for (const w of [killed, ...waiting]) await w.stop();
     }
   });
 });
+
+/**
+ * `remember(key)` in a process of its own, like the CLI's or Studio's.
+ * `stall`: once it holds the lock and has read the settings, it stops there
+ * until that file exists ('' for good), as a paused or killed writer would.
+ */
+function writer(bundle: string, key: string, stall?: string) {
+  const script = `
+    const fs = require('node:fs/promises');
+    const [bundle, key, stall] = process.argv.slice(1);
+    if (stall !== undefined) {
+      const rename = fs.rename.bind(fs);
+      fs.rename = async (...args) => {
+        console.log('HOLDING');
+        for (;;) {
+          if (stall) { try { await fs.stat(stall); break; } catch {} }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        return rename(...args);
+      };
+    }
+    require(bundle).remember(key, { lastTarget: key }).catch((err) => { console.error(err); process.exitCode = 1; });
+  `;
+  const child = spawn(process.execPath, ['-e', script, bundle, key, ...(stall === undefined ? [] : [stall])], { windowsHide: true, env: { ...process.env, CAPMAC_CONFIG_DIR: dir }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let output = '';
+  child.stdout.on('data', (data: Buffer) => { output += data.toString(); });
+  child.stderr.on('data', (data: Buffer) => { output += data.toString(); });
+  const exited = new Promise<number | null>((resolve, reject) => { child.on('exit', resolve); child.on('error', reject); });
+  return {
+    child,
+    exited,
+    output: () => output,
+    async holding() {
+      const deadline = Date.now() + 10_000;
+      while (!output.includes('HOLDING')) {
+        if (child.exitCode !== null || Date.now() > deadline) throw new Error(`The writer never held the lock: ${output}`);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    },
+    async stop() {
+      if (child.exitCode === null && child.signalCode === null) child.kill();
+      await exited;
+    },
+  };
+}

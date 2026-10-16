@@ -1,5 +1,6 @@
-import { promises as fs } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { constants as fsConstants, promises as fs } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import net from 'node:net';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isSoundMode, type SoundMode } from '../shared/electron.js';
@@ -48,91 +49,65 @@ export function recallAll(): Promise<Record<string, ProjectMemory>> {
 }
 
 /**
- * No write holds the lock this long. An older lock was left by a writer that
- * died, and its process id may belong to another program by now (Windows
- * reuses them soon), so the id alone can't tell.
+ * The lock on the settings file, shared by every CapMac process (the CLI's,
+ * Studio's): one the system holds for a process and lets go of when that
+ * process exits, however it exits. So a writer that died never holds the
+ * others up, and one that is only slow or paused is never written over. A
+ * process id could not tell those apart (Windows soon gives a dead process's
+ * id to another program), nor could a lock file's age (a paused writer's
+ * looks as old), nor whether a socket file still answers (its queue fills).
  */
-const STALE_LOCK_MS = 5_000;
-
-/** One writer across CLI and Studio processes; a dead writer's lock may be reclaimed. */
 async function lockMemory(memoryFile: string): Promise<() => Promise<void>> {
-  const lockFile = `${memoryFile}.lock`;
-  const recoveryFile = `${memoryFile}.recovery.lock`;
-  const token = `${process.pid} ${randomUUID()}`;
-  const ownerFile = `${lockFile}.${randomUUID()}.owner`;
   const deadline = Date.now() + 10_000;
-  // Publish a complete owner atomically: a killed writer cannot leave an empty lock.
-  await fs.writeFile(ownerFile, token, { flag: 'wx', mode: 0o600 });
-  let acquired = false;
-  try {
-    for (;;) {
-      // Dated when it is taken, not when this writer began to wait: its age tells the others whether it was left behind.
-      const now = new Date();
-      await fs.utimes(ownerFile, now, now);
-      try {
-        await fs.link(ownerFile, lockFile);
-        acquired = true;
-        return async () => {
-          try {
-            if (await fs.readFile(lockFile, 'utf8') === token) await fs.unlink(lockFile);
-          } finally {
-            await fs.unlink(ownerFile);
-          }
-        };
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      }
-      const owner = await fs.readFile(lockFile, 'utf8').catch(() => '');
-      let recovering = false;
-      let waitingOn = lockFile;
-      if (await leftBehind(lockFile, owner)) {
-        try {
-          await fs.link(ownerFile, recoveryFile);
-          recovering = true;
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-          waitingOn = recoveryFile;
-          // A reclaimer that died while reclaiming would hold off every writer after it.
-          const reclaimer = await fs.readFile(recoveryFile, 'utf8').catch(() => '');
-          if (await leftBehind(recoveryFile, reclaimer)) await fs.unlink(recoveryFile).catch(() => undefined);
-        }
-      }
-      if (recovering) {
-        try {
-          // Only one reclaimer can recheck and remove an old lock. A second
-          // reclaimer must see the live successor before it may remove anything.
-          const current = await fs.readFile(lockFile, 'utf8').catch(() => '');
-          if (current === owner && (await leftBehind(lockFile, current))) {
-            await fs.unlink(lockFile);
-            continue;
-          }
-        } finally {
-          await fs.unlink(recoveryFile);
-        }
-      }
-      if (Date.now() >= deadline) throw new Error(`Timed out waiting to save project settings (${waitingOn}).`);
-      await delay(20);
-    }
-  } finally {
-    if (!acquired) await fs.unlink(ownerFile);
+  for (;;) {
+    const release = await tryLock(memoryFile);
+    if (release) return release;
+    if (Date.now() >= deadline) throw new Error('Timed out waiting to save project settings: another CapMac process is saving them.');
+    await delay(20);
   }
 }
 
-/** Whether a lock file holding `owner` was left by a writer that died: its process is gone, or the lock is older than any write takes. */
-async function leftBehind(file: string, owner: string): Promise<boolean> {
-  if (ownerIsDead(owner)) return true;
-  const stat = await fs.stat(file).catch(() => null);
-  return stat !== null && Date.now() - stat.mtimeMs > STALE_LOCK_MS;
+/** macOS's open(2) flag that locks the file as it opens (not in Node's fs.constants). */
+const O_EXLOCK = 0x20;
+
+/** Takes the lock on `memoryFile`, or null while another process has it. */
+async function tryLock(memoryFile: string): Promise<(() => Promise<void>) | null> {
+  if (process.platform === 'win32' || process.platform === 'linux') {
+    // A named pipe (Windows) or a socket with no file behind it (Linux): one process at a time listens on it.
+    const name = `capmac-settings-${createHash('sha1').update(path.resolve(memoryFile).toLowerCase()).digest('hex').slice(0, 16)}`;
+    const server = await listenOn(process.platform === 'win32' ? `\\\\.\\pipe\\${name}` : `\0${name}`);
+    return server && (() => new Promise<void>((resolve) => server.close(() => resolve())));
+  }
+  // macOS: a file next to the settings that the system locks while a process has it open; EAGAIN meanwhile.
+  try {
+    const file = await fs.open(`${memoryFile}.lock`, fsConstants.O_RDWR | fsConstants.O_CREAT | fsConstants.O_NONBLOCK | O_EXLOCK, 0o600);
+    return () => file.close();
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EAGAIN') return null;
+    throw err;
+  }
 }
 
-function ownerIsDead(owner: string): boolean {
-  const pid = Number(owner.split(' ')[0]);
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'ESRCH';
+/** Listens on `name`; null when another process does. */
+function listenOn(name: string): Promise<net.Server | null> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer((socket) => socket.destroy());
+    // Kept on while it listens: an error then must not end the process.
+    server.on('error', (err: NodeJS.ErrnoException) => (err.code === 'EADDRINUSE' ? resolve(null) : reject(err)));
+    server.listen(name, () => {
+      // Holding the lock is no reason for a process to stay up.
+      server.unref();
+      resolve(server);
+    });
+  });
+}
+
+/** Removes the half-done writes of writers that died: while the lock is held, no other is at work. */
+async function clearLeftovers(memoryFile: string): Promise<void> {
+  const dir = path.dirname(memoryFile);
+  const prefix = `${path.basename(memoryFile)}.`;
+  for (const name of await fs.readdir(dir).catch(() => [] as string[])) {
+    if (name.startsWith(prefix) && name.endsWith('.tmp')) await fs.unlink(path.join(dir, name)).catch(() => undefined);
   }
 }
 
@@ -144,6 +119,7 @@ async function updateMemory(projectId: string, patch: ProjectMemory, onlyMissing
     const release = await lockMemory(memoryFile);
     const temp = `${memoryFile}.${process.pid}.${randomUUID()}.tmp`;
     try {
+      await clearLeftovers(memoryFile);
       const all = await readAll(memoryFile, true);
       if (onlyMissing && all[projectId]) return all[projectId]!;
       const memory = { ...all[projectId], ...patch };
