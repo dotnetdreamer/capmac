@@ -18,7 +18,7 @@ CapMac builds your app and runs it on the iOS Simulator or your own iPhone<br>Yo
 
 [Quick start](#quick-start) · [No Mac?](#no-mac-at-all) · [FAQ](#faq) · [Guide](docs/guide.md)
 
-<a href="out/capmac-intro-v5.mp4"><img src="out/capmac-intro-v5.jpg" width="860" alt="Watch CapMac's intro film, 84 seconds"></a>
+https://github.com/user-attachments/assets/cea942bc-a90b-4a7b-bb6c-0837361bfee8
 
 </div>
 

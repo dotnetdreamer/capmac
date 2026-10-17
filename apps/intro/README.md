@@ -23,7 +23,9 @@ npm run intro:poster:vscode
 | CapMac | 84 seconds | `out/capmac-intro-v5.mp4` | `out/capmac-poster-v4.png` |
 | CapMac for VS Code | 68 seconds | `out/capmac-vscode-intro-v1.mp4` | `out/capmac-vscode-poster-v1.png` |
 
-The project README shows `out/capmac-intro-v5.jpg`, the poster with a play button, linked to the video. `npm --prefix apps/intro run readme` renders it again
+The project README plays the film from a copy uploaded to GitHub
+
+Where a page can't play video, `npm --prefix apps/intro run readme` renders `out/capmac-intro-v5.jpg`, the poster with a play button, to link to it instead
 
 `npm --prefix apps/intro run previews -- CapMacIntro` exports a film's review frames into `out/previews/CapMacIntro/`, and `CapMacVSCodeIntro` does the same for the other film
 
