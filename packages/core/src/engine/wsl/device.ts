@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import type { Target } from '../../shared/protocol.js';
+import { wait } from '../context.js';
 import { CancelledError, UserError } from '../errors.js';
 
 // These commands and the unprivileged userspace tunnel were verified against this release.
@@ -17,6 +18,10 @@ export interface WslDevice {
   productType?: string;
   /** How this PC reaches it: the cable, or Wi-Fi once a run over the cable paired it for Wi-Fi. */
   connection?: 'usb' | 'network';
+  /** iOS 16 and later open the apps CapMac installs only with Developer Mode on. Known over the cable. */
+  developerMode?: 'enabled' | 'disabled';
+  /** False while the iPhone doesn't trust this PC yet (its Trust prompt). Known over the cable. */
+  paired?: boolean;
 }
 
 /** An iPhone plugged into this PC or on its Wi-Fi, as the target pickers show devices. */
@@ -24,9 +29,15 @@ export function wslDeviceTarget(device: WslDevice): Target {
   return {
     kind: 'device', udid: device.udid, name: device.name,
     os: device.productVersion ? `iOS ${device.productVersion}` : 'iOS', osVersion: device.productVersion ?? '',
-    state: 'connected', available: true, connection: device.connection ?? 'usb', ...(device.productType ? { model: device.productType } : {}),
+    state: 'connected', available: device.paired !== false && device.developerMode !== 'disabled', connection: device.connection ?? 'usb',
+    ...(device.productType ? { model: device.productType } : {}),
+    ...(device.developerMode ? { developerMode: device.developerMode } : {}),
+    ...(device.paired === false ? { paired: false } : {}),
   };
 }
+
+/** Where to turn on Developer Mode, for the CLI and run messages (Studio shows its own steps). */
+export const DEVELOPER_MODE_STEPS = 'On your iPhone, open Settings, tap Privacy & Security, then Developer Mode. Turn it on and tap Restart. After it restarts, unlock it and tap Turn On.';
 
 /** The iPhone tools keep a device's Wi-Fi pairing (RemotePairing) here. */
 const pairingFolder = () => path.join(os.homedir(), '.pymobiledevice3');
@@ -74,6 +85,43 @@ async def main():
  print(json.dumps(sorted(found)))
 asyncio.run(main())
 `;
+
+/**
+ * iPhones plugged into this PC, as `usbmux list --usb` prints them, with whether each trusts this PC
+ * (`Paired`) and, from iOS 16, whether Developer Mode is on (`DeveloperModeStatus`). For an iPhone with
+ * it off, it also shows the Developer Mode switch in Settings, which iOS hides until a developer tool
+ * asks (`Revealed`; argv: the UDIDs it was shown on already). Errors end it with one line.
+ */
+export const USB_IPHONES = String.raw`import asyncio,json,sys
+from pymobiledevice3 import usbmux
+from pymobiledevice3.lockdown import create_using_usbmux
+from pymobiledevice3.services.amfi import AmfiService
+async def main(*revealed):
+ found=[]
+ for device in await usbmux.list_devices():
+  if not device.is_usb: continue
+  lockdown=await create_using_usbmux(device.serial,autopair=False,connection_type=device.connection_type)
+  try:
+   info=lockdown.short_info
+   info['Paired']=lockdown.paired
+   major=str(info.get('ProductVersion') or '0').split('.')[0]
+   if lockdown.paired and major.isdigit() and int(major)>=16:
+    try:
+     status=await lockdown.get_value('com.apple.security.mac.amfi','DeveloperModeStatus')
+     if isinstance(status,bool): info['DeveloperModeStatus']=status
+     if status is False and device.serial not in revealed:
+      info['Revealed']=True
+      await AmfiService(lockdown).reveal_developer_mode_option_in_ui()
+    except Exception: pass
+   found.append(info)
+  finally: await lockdown.close()
+ print(json.dumps(found))
+try: asyncio.run(main(*sys.argv[1:]))
+except Exception as error: raise SystemExit(f'{type(error).__name__}: {error}')
+`;
+
+/** iPhones whose Developer Mode switch this process showed in Settings already. */
+const revealedDeveloperMode = new Set<string>();
 
 /** When each iPhone last answered on Wi-Fi. A sleepy iPhone misses some searches; one seen lately stays listed. */
 const seenOnWifi = new Map<string, number>();
@@ -236,10 +284,21 @@ function atLeast(actual: string, required: string): boolean {
   return true;
 }
 
+/** CapMac's own Python with these iPhone tools, once setup put it on this PC (see bootstrap's privatePythonPath). */
+async function ownPython(): Promise<string | undefined> {
+  const base = process.platform === 'win32' ? process.env.LOCALAPPDATA : undefined;
+  if (!base || !path.isAbsolute(base)) return undefined;
+  const root = path.join(base, 'CapMac', 'device-tools');
+  const folder = (await readdir(root).catch(() => [] as string[])).filter((name) => name.startsWith(`${WSL_DEVICE_TOOL_VERSION}-python-`)).sort().at(-1);
+  return folder ? path.join(root, folder, 'python.exe') : undefined;
+}
+
 /** Read-only doctor probe; it never installs Python, pip packages, drivers, or device services. */
 export async function inspectWslDeviceTools(options: WslDeviceOptions = {}): Promise<WslDeviceTools> {
   const configured = options.python ?? process.env.CAPMAC_PYTHON;
-  const candidates = configured ? [configured] : process.platform === 'win32' ? ['py', 'python'] : ['python3', 'python'];
+  // A project not set up yet still reaches the iPhones with the tools setup installed for another one.
+  const own = configured ? undefined : await ownPython();
+  const candidates = configured ? [configured] : process.platform === 'win32' ? [...(own ? [own] : []), 'py', 'python'] : ['python3', 'python'];
   let found: WslDeviceTools | undefined;
   const probe = 'import importlib.metadata,importlib.util,json,platform; print(json.dumps({"python":platform.python_version(),"pymobiledevice3":importlib.metadata.version("pymobiledevice3") if importlib.util.find_spec("pymobiledevice3") else None}))';
   for (const candidate of candidates) {
@@ -286,7 +345,9 @@ function commandError(action: string, output: ProcessOutput): UserError {
   if (DROPPED.test(text)) {
     // First: the tools' Wi-Fi log lines name "RemotePairing", which is no Trust problem.
     hint = 'The iPhone dropped the Wi-Fi connection. Keep it unlocked and on this Wi-Fi, or plug it in.';
-  } else if (/DeveloperMode|developer mode|DeveloperDiskImage|personalized.*image|InvalidService|InvalidServiceError/i.test(text)) {
+  } else if (/DeveloperMode|developer mode/i.test(text)) {
+    hint = `Developer Mode is off. ${DEVELOPER_MODE_STEPS}`;
+  } else if (/DeveloperDiskImage|personalized.*image|InvalidService|InvalidServiceError/i.test(text)) {
     hint = 'Enable Settings → Privacy & Security → Developer Mode on the iPhone and finish its restart/confirmation. The developer disk image must mount successfully.';
   } else if (/Pairing|pairing|Trust|trust|UserDenied|PasswordProtected|DeviceLocked|InvalidHostID|GetProhibited/i.test(text)) {
     hint = 'Unlock the iPhone, accept “Trust This Computer”, and retry with the device unlocked.';
@@ -323,10 +384,12 @@ function validateBundleId(bundleId: string): void {
   if (!/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(bundleId)) throw new UserError('Invalid iOS bundle identifier.', 'Use an identifier such as com.example.app.');
 }
 
-export async function listWslDevices(options: WslDeviceOptions = {}): Promise<WslDevice[]> {
-  const stdout = await runDevice(['usbmux', 'list', '--usb'], { ...options, onLog: undefined });
+/** The iPhones plugged into this PC (see USB_IPHONES). */
+async function usbIphones(options: WslDeviceOptions): Promise<WslDevice[]> {
+  const output = await execute(await requirePython(options), ['-c', USB_IPHONES, ...revealedDeveloperMode], { ...options, onLog: undefined });
+  if (output.code !== 0) throw commandError('Listing iPhones', output);
   let value: unknown;
-  try { value = JSON.parse(stdout.trim()); } catch { throw new UserError('The host device tools returned invalid device data.', 'Upgrade pymobiledevice3 and retry.'); }
+  try { value = JSON.parse(output.stdout.trim()); } catch { throw new UserError('The host device tools returned invalid device data.', 'Upgrade pymobiledevice3 and retry.'); }
   if (!Array.isArray(value)) throw new UserError('The host device tools returned invalid device data.');
   const devices: WslDevice[] = [];
   for (const item of value) {
@@ -336,6 +399,7 @@ export async function listWslDevices(options: WslDeviceOptions = {}): Promise<Ws
     const udid = typeof data.UniqueDeviceID === 'string' ? data.UniqueDeviceID : data.Identifier;
     if (typeof udid !== 'string') throw new UserError('The host device tools returned a device without a UDID.');
     validateUdid(udid);
+    if (data.Revealed === true) revealedDeveloperMode.add(udid);
     if (devices.some((device) => device.udid === udid)) continue;
     devices.push({
       udid,
@@ -343,9 +407,17 @@ export async function listWslDevices(options: WslDeviceOptions = {}): Promise<Ws
       productVersion: typeof data.ProductVersion === 'string' ? data.ProductVersion : undefined,
       productType: typeof data.ProductType === 'string' ? data.ProductType : undefined,
       connection: 'usb',
+      ...(typeof data.DeveloperModeStatus === 'boolean' ? { developerMode: data.DeveloperModeStatus ? 'enabled' as const : 'disabled' as const } : {}),
+      ...(data.Paired === false ? { paired: false } : {}),
     });
   }
-  await rememberIphones(devices).catch(() => undefined);
+  return devices;
+}
+
+export async function listWslDevices(options: WslDeviceOptions = {}): Promise<WslDevice[]> {
+  const devices = await usbIphones(options);
+  // An iPhone that doesn't trust this PC yet may not tell its name: it keeps the one it had.
+  await rememberIphones(devices.filter((device) => device.paired !== false)).catch(() => undefined);
   // The cable wins when an iPhone is both plugged in and on the Wi-Fi.
   const wifi = (await wifiIphones(options)).filter((udid) => !devices.some((device) => device.udid.toLowerCase() === udid.toLowerCase()));
   const known = wifi.length ? await knownIphones() : {};
@@ -364,6 +436,24 @@ export async function selectWslDevice(udid?: string, options: WslDeviceOptions =
   if (devices.length === 1) return devices[0]!;
   if (!devices.length) throw new UserError('No iPhone or iPad is connected over USB or Wi-Fi.', 'Connect a device, unlock it, and accept “Trust This Computer”. On Windows, Apple Devices provides the required USB drivers. After one run over the cable, it also works over the same Wi-Fi.');
   throw new UserError('More than one iPhone or iPad is connected.', 'Select a device with --target <UDID>.', devices.map((device) => `${device.name}: ${device.udid}`));
+}
+
+/**
+ * Waits until Developer Mode is on: the user turns it on in Settings, the iPhone restarts (it leaves
+ * the list for a while) and they confirm it once it's back. Stop (the signal) ends the wait.
+ */
+export async function waitForDeveloperMode(device: WslDevice, options: WslDeviceOptions = {}, everyMs = 3_000): Promise<void> {
+  validateUdid(device.udid);
+  for (;;) {
+    cancelled(options.signal);
+    // While it restarts, the iPhone is gone or can't answer yet: ask again.
+    const found = await usbIphones(options).catch((error: unknown) => {
+      if (error instanceof CancelledError) throw error;
+      return [] as WslDevice[];
+    });
+    if (found.find((item) => item.udid.toLowerCase() === device.udid.toLowerCase())?.developerMode === 'enabled') return;
+    await wait(everyMs, options.signal);
+  }
 }
 
 export async function installWslApp(ipaPath: string, device: WslDevice, options: WslDeviceOptions = {}): Promise<void> {
@@ -415,7 +505,7 @@ ${OVER_WIFI}def find(value,key,kind=str):
   for item in value.values(): yield from find(item,key,kind)
  elif isinstance(value,(list,tuple)):
   for item in value: yield from find(item,key,kind)
-async def main(action,udid,transport,target):
+async def main(action,udid,transport,target,*arguments):
  global searches
  # Stopping an app on an iPhone that is away is not worth a wait: its app is not running either.
  if action=='stop': searches=1
@@ -429,7 +519,7 @@ async def main(action,udid,transport,target):
     return
    told=False
    while True:
-    try: launched=await asyncio.wait_for(apps.launch_application(target),120)
+    try: launched=await asyncio.wait_for(apps.launch_application(target,list(arguments)),120)
     except CoreDeviceError as error:
      details=error.user_info or {}
      if 'Locked' not in find(details,'BSErrorCodeDescription'): raise SystemExit(' '.join([str(error),*list(find(details,'NSLocalizedFailureReason'))[-1:]]))
@@ -441,7 +531,7 @@ async def main(action,udid,transport,target):
      break
     return
  finally: await tunnel.aclose()
-asyncio.run(main(*sys.argv[1:5]))
+asyncio.run(main(*sys.argv[1:]))
 `;
 
 /** The process each launch opened, so a run can stop its app over Wi-Fi. */
@@ -451,7 +541,7 @@ const launchedProcesses = new Map<string, number>();
  * Mounts developer services and waits for a confirmed launch; there is no manual-open success fallback.
  * `onLocked`: the iPhone is locked, and the app opens once it is unlocked (Stop ends the wait).
  */
-export async function launchWslApp(bundleId: string, device: WslDevice, options: WslDeviceOptions = {}): Promise<void> {
+export async function launchWslApp(bundleId: string, device: WslDevice, options: WslDeviceOptions & { args?: string[] } = {}): Promise<void> {
   validateUdid(device.udid);
   validateBundleId(bundleId);
   const wifi = device.connection === 'network';
@@ -465,13 +555,16 @@ export async function launchWslApp(bundleId: string, device: WslDevice, options:
       else if (line === 'CAPMAC_LOCKED') options.onLocked?.();
       else options.onLog?.(line);
     };
-    const output = await execute(python, ['-c', LAUNCH_APP, 'launch', device.udid, wifi ? 'wifi' : 'usb', bundleId], { ...options, onLog }, { udid: device.udid, stream: true });
+    const output = await execute(python, ['-c', LAUNCH_APP, 'launch', device.udid, wifi ? 'wifi' : 'usb', bundleId, ...(options.args ?? [])], { ...options, onLog }, { udid: device.udid, stream: true });
     if (output.code !== 0) throw commandError('Opening the app', output);
     return;
   }
+  const args = options.args ?? [];
+  // dvt's launch takes the bundle id and its arguments as one line, the way a shell splits it.
+  const shellWord = (word: string) => (/^[A-Za-z0-9_.:/=@+-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`);
   const command = atLeast(device.productVersion!, '17.0.0')
-    ? ['developer', 'core-device', 'launch-application', ...transport, bundleId]
-    : ['developer', 'dvt', 'launch', ...transport, bundleId];
+    ? ['developer', 'core-device', 'launch-application', ...transport, bundleId, ...args]
+    : ['developer', 'dvt', 'launch', ...transport, [bundleId, ...args].map(shellWord).join(' ')];
   await runDevice(command, options, { udid: device.udid, timeoutMs: 60_000 });
 }
 

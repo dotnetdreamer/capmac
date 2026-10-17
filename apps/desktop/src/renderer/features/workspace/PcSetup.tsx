@@ -185,14 +185,14 @@ export function PcBanner({ path, entry }: { path: string; entry: PcEntry }) {
 }
 
 /** Where the simulator shows on a Mac: the iPhone plugged into this PC, which shows the app itself. */
-/** A Flutter app's Windows app: it runs on this PC in its own window, so the pane says where it is. */
-export function WindowsAppPane({ run, name }: { run: RunState | undefined; name: string }) {
+/** A Flutter or React Native app's Windows app: it runs on this PC in its own window, so the pane says where it is. */
+export function WindowsAppPane({ run, name, reactNative = false }: { run: RunState | undefined; name: string; reactNative?: boolean }) {
   const running = Boolean(run?.onPc && run.app?.state === 'running');
   return (
     <div className="pc-pane">
       <EmptyState icon="desktop" title={running ? t.workspace.windowsAppRunning(run?.app?.name ?? name) : t.workspace.windowsAppTitle} compact>
-        <p>{t.workspace.windowsAppBody}</p>
-        {!running && <p className="faint">{t.workspace.windowsAppIdle}</p>}
+        <p>{reactNative ? t.workspace.windowsAppBodyReactNative : t.workspace.windowsAppBody}</p>
+        {!running && <p className="faint">{reactNative ? t.workspace.windowsAppIdleReactNative : t.workspace.windowsAppIdle}</p>}
       </EmptyState>
     </div>
   );
@@ -215,8 +215,32 @@ export function PcDevicePane({ target, run, entry }: { target: Target | null; ru
     <div className="pc-pane">
       <EmptyState icon="phone" title={target.name} compact>
         <p className="pc-pane__os">{target.os}</p>
-        <p>{t.pc.devicePane}</p>
-        {running && <p className="faint">{t.pc.devicePaneHint}</p>}
+        {target.paired === false ? (
+          <div className="pc-pane__todo" role="note">
+            <div className="pc-pane__todo-title">
+              <Icon name="warning" size={16} filled />
+              {t.pc.trust.title}
+            </div>
+            <p>{t.pc.trust.body}</p>
+          </div>
+        ) : target.developerMode === 'disabled' ? (
+          <div className="pc-pane__todo" role="note">
+            <div className="pc-pane__todo-title">
+              <Icon name="warning" size={16} filled />
+              {t.pc.devMode.title}
+            </div>
+            <ol>
+              {t.pc.devMode.steps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+          </div>
+        ) : (
+          <>
+            <p>{t.pc.devicePane}</p>
+            {running && <p className="faint">{t.pc.devicePaneHint}</p>}
+          </>
+        )}
       </EmptyState>
     </div>
   );

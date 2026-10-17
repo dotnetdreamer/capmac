@@ -66,6 +66,13 @@
   margin: 0 var(--s-1);
   background: var(--stroke-divider);
 }
+/* On this PC: "This PC" is short and keeps its words, and the iPhone picker's long status gives way first. */
+.tb-picker--pc {
+  flex-shrink: 0;
+}
+.ws-toolbar__pickers:has(.tb-picker--pc) .tb-picker--target {
+  flex-shrink: 3;
+}
 .tb-picker--app {
   max-width: 200px;
   .tb-picker__icon {
@@ -249,9 +256,23 @@
   &.is-unusable {
     color: var(--text-3);
   }
+  /* A device that needs something done on it: what to do, on a second line. */
+  &.has-hint {
+    flex-wrap: wrap;
+    row-gap: 2px;
+    height: auto;
+    min-height: 32px;
+    padding-block: 6px;
+  }
 }
 .target-option__name {
   flex: 1;
+}
+.target-option__hint {
+  flex-basis: 100%;
+  padding-left: calc(16px + var(--s-2_5));
+  color: var(--text-2);
+  font: var(--type-small);
 }
 .target-option__state {
   display: inline-flex;
@@ -1920,12 +1941,44 @@
 }
 .pc-pane {
   display: flex;
-  align-items: center;
+  /* Safe: steps taller than the pane scroll instead of losing their top. */
+  align-items: safe center;
   justify-content: center;
   height: 100%;
+  overflow-y: auto;
   padding: var(--s-4);
   text-align: center;
 }
 .pc-pane__os {
   color: var(--text-3);
+}
+/* What to do on the iPhone before it can open the app (Developer Mode, Trust). */
+.pc-pane__todo {
+  max-width: 320px;
+  margin: var(--s-2) auto 0;
+  padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--stroke-card);
+  border-radius: var(--r-card);
+  background: var(--caution-bg);
+  color: var(--text-1);
+  text-align: left;
+  p {
+    margin: 0;
+  }
+  ol {
+    display: grid;
+    gap: 4px;
+    margin: var(--s-2) 0 0;
+    padding-left: 20px;
+  }
+}
+.pc-pane__todo-title {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-bottom: 2px;
+  font-weight: 600;
+  .icon {
+    color: var(--caution);
+  }
 }

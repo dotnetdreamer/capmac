@@ -3,6 +3,7 @@ import { answerAppDialog, appFor, ElectronLiveSession, LiveSession, loadApiKey, 
 import { listenForKeys } from '../keys.js';
 import { announceApp } from './apps.js';
 import { flutterDevCommand, type FlutterCommandOptions } from './flutter.js';
+import { reactNativeDevCommand } from './react-native.js';
 import { reportError } from '../report.js';
 import { terminalContext } from '../terminal.js';
 import { log, pc } from '../ui.js';
@@ -73,6 +74,7 @@ export async function untilQuit(start: () => Promise<void>, keys: Record<string,
 export async function devCommand(options: DevOptions & FlutterCommandOptions): Promise<void> {
   const project = await loadProject(process.cwd());
   if (project.kind === 'flutter') return flutterDevCommand(project, options);
+  if (project.kind === 'react-native') return reactNativeDevCommand(project, options);
   const app = appFor(project, options);
   await announceApp(project, app);
   if (app === 'electron') return devOnMac(project, options);

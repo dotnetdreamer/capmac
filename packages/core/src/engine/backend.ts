@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { UserError } from './errors.js';
 import { describeFlutterProject } from './flutter/project.js';
+import { describeReactNativeProject } from './react-native/project.js';
 import { recall, remember } from './memory.js';
 import { CAP_CONFIG_FILES, findProjectDir, isBuildBackend, projectIdFor, readCapacitorConfig, type BuildBackend, type ProjectInfo } from './project.js';
 
@@ -19,9 +20,9 @@ export async function backendOf(project: Pick<ProjectInfo, 'projectId'>): Promis
 /**
  * The backend picked for the project in `dir` or a folder above, without
  * loading the project (that runs its Capacitor CLI): the id comes from the
- * config file the way loadProject makes it. Not in a Capacitor or Flutter
- * app, or the app picked is one that runs on a desktop: the Mac, where
- * Electron and Mac apps run (a Flutter app's Windows app runs here anyway).
+ * config file the way loadProject makes it. Not in a Capacitor, Flutter or
+ * React Native app, or the app picked is one that runs on a desktop: the Mac,
+ * where Electron and Mac apps run (a Windows app runs here anyway).
  */
 export async function backendIn(dir: string): Promise<BuildBackend> {
   const found = findProjectDir(dir);
@@ -31,6 +32,14 @@ export async function backendIn(dir: string): Promise<BuildBackend> {
     const memory = await recall(projectIdFor(flutter.name, found.dir)).catch(() => ({ app: undefined, backend: undefined }));
     // Only the iOS app builds on this PC.
     const app = memory.app ?? (flutter.platforms.ios ? 'ios' : undefined);
+    return app === 'ios' && isBuildBackend(memory.backend) ? memory.backend : 'mac';
+  }
+  if (found?.kind === 'react-native') {
+    const rn = describeReactNativeProject(found.dir);
+    if (!rn) return 'mac';
+    const memory = await recall(projectIdFor(rn.name, found.dir)).catch(() => ({ app: undefined, backend: undefined }));
+    // Only the iOS app builds on this PC.
+    const app = memory.app ?? (rn.platforms.ios ? 'ios' : undefined);
     return app === 'ios' && isBuildBackend(memory.backend) ? memory.backend : 'mac';
   }
   if (found?.kind !== 'capacitor') return 'mac';
@@ -49,6 +58,9 @@ export async function chooseBackend(project: ProjectInfo, backend: string): Prom
     if (project.kind === 'electron') throw new UserError('Electron apps run on the Mac’s desktop, so they need a Mac.', 'Use a paired Mac for this app.');
     if (project.kind === 'flutter' && !project.hasIos) {
       throw new UserError('This Flutter app has no iOS app to build on this PC.', 'Add it with `flutter create --platforms ios .`, or run its Windows app here: `capmac run --app windows`.');
+    }
+    if (project.kind === 'react-native' && !project.hasIos) {
+      throw new UserError('This React Native app has no iOS app to build on this PC.', 'Run its Windows app here instead: `capmac run --app windows`.');
     }
   }
   await remember(project.projectId, { backend });

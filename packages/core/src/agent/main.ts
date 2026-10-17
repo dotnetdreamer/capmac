@@ -9,6 +9,8 @@ import { opBuild } from './ops/build.js';
 import { opBoot, opDeploy, opLogs, opShutdown } from './ops/deploy.js';
 import { opElectronDialog, opElectronLaunch, opElectronPrepare, opElectronScreen, opElectronScreenshot } from './ops/electron.js';
 import { opFlutterBuild, opFlutterMacLaunch, opFlutterRun, opFlutterSdk } from './ops/flutter.js';
+import { opMacAppLaunch } from './ops/mac-app.js';
+import { opReactNativeBuild, opReactNativePrepare } from './ops/react-native.js';
 import { opClean, opExec, opKeychain, opOpenXcode, opPull, opRelay } from './ops/misc.js';
 import { opPrepare } from './ops/prepare.js';
 import { opRemoteInstall, opRemoteRevoke, opRemoteSet, opRemoteStatus, opRemoteUninstall } from './ops/remote.js';
@@ -63,6 +65,9 @@ const OPS: Record<string, Handler> = {
   'flutter-run': opFlutterRun,
   'flutter-build': opFlutterBuild,
   'flutter-mac-launch': opFlutterMacLaunch,
+  'mac-app-launch': opMacAppLaunch,
+  'rn-prepare': opReactNativePrepare,
+  'rn-build': opReactNativeBuild,
   version: async () => ({ version: AGENT_VERSION, node: process.version, platform: process.platform, arch: process.arch }),
 };
 

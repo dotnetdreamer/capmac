@@ -3,7 +3,7 @@ import type { BuildBackend, MacSummary, ProjectSummary, RunnableApp, Target, Tar
 import { t } from '../../../shared/i18n';
 import { emitWorkspace } from '../../app/commands';
 import { macStatusText } from '../../app/Sidebar';
-import { appGlyph, appKind, appTech, appTechShort, canRun as runnable } from '../../lib/apps';
+import { appGlyph, appKind, appTech, appTechShort, canRun as runnable, platformApps } from '../../lib/apps';
 import { forgetProject, openInXcode, rebuild, setApp, setBackend, setProjectPrefs, startSession, stopSession } from '../../state/actions';
 import { useApp } from '../../state/app';
 import { usePc } from '../../state/pc';
@@ -35,7 +35,7 @@ function BuildPicker({ macs, mac, path, backend, pcState, allowPc }: { macs: Mac
   const tone: Tone = pc ? (pcState === 'ready' ? 'ok' : pcState === 'running' ? 'busy' : 'warn') : mac ? MAC_TONE[mac.state] ?? 'idle' : 'error';
   return (
     <>
-      <button type="button" className="tb-picker tb-picker--mac" aria-haspopup="menu" aria-label={pc ? t.toolbar.buildOn(`${t.pc.name}, ${pcText}`) : t.toolbar.mac(mac ? `${mac.label}, ${macStatusText(mac)}` : t.common.none)} {...menu.triggerProps}>
+      <button type="button" className={`tb-picker tb-picker--mac${pc ? ' tb-picker--pc' : ''}`} aria-haspopup="menu" aria-label={pc ? t.toolbar.buildOn(`${t.pc.name}, ${pcText}`) : t.toolbar.mac(mac ? `${mac.label}, ${macStatusText(mac)}` : t.common.none)} {...menu.triggerProps}>
         <span className="tb-picker__icon">
           <Icon name={pc ? 'desktop' : 'mac'} size={16} />
           <StatusDot tone={tone} pulse={pc ? pcState === 'running' : mac?.state === 'connecting' || mac?.state === 'reconnecting'} />
@@ -174,13 +174,14 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
   const phase = busy ? currentPhase(run) : null;
   const name = summary?.appName ?? path.split(/[\\/]/).pop() ?? path;
   // The app picked must be there to run: an iOS app once iOS is added.
-  const appReady = app === 'electron' ? Boolean(summary?.electron) : app === 'macos' || app === 'windows' ? Boolean(summary?.flutter?.platforms[app]) : Boolean(summary?.hasIos);
+  const appReady = app === 'electron' ? Boolean(summary?.electron) : app === 'macos' || app === 'windows' ? Boolean(platformApps(summary)?.[app]) : Boolean(summary?.hasIos);
   // On this PC no Mac is needed: Run sets this PC up first when it isn't yet (a Flutter app's Windows app needs no setup).
   const canRun = appReady && (pc || pcDesktop || Boolean(mac));
   const runHint = !pc && !pcDesktop && !mac ? t.toolbar.pairFirst : summary && !appReady && app === 'ios' ? t.toolbar.addIosFirst : undefined;
   // IPA builds and Xcode are for the iOS app.
   const canIos = Boolean(summary?.hasIos && (pc || mac));
   const flutter = summary?.kind === 'flutter';
+  const reactNative = summary?.kind === 'react-native';
 
   return (
     <div className="ws-toolbar" role="toolbar" aria-label={t.toolbar.label}>
@@ -200,20 +201,20 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
         )}
         {pcDesktop ? (
           // A Flutter app's Windows app: Flutter builds it here and it opens here. Nothing to pick.
-          <span className="tb-picker tb-picker--mac tb-picker--static" role="note" aria-label={t.toolbar.buildOn(`${t.toolbar.windowsHere}, ${t.toolbar.windowsHereSub}`)}>
+          <span className="tb-picker tb-picker--mac tb-picker--static" role="note" aria-label={t.toolbar.buildOn(`${t.toolbar.windowsHere}, ${reactNative ? t.toolbar.windowsHereSubReactNative : t.toolbar.windowsHereSub}`)}>
             <span className="tb-picker__icon">
               <Icon name="desktop" size={16} />
             </span>
             <span className="tb-picker__text">
               <span className="tb-picker__title truncate">{t.toolbar.windowsHere}</span>
-              <span className="tb-picker__sub truncate">{t.toolbar.windowsHereSub}</span>
+              <span className="tb-picker__sub truncate">{reactNative ? t.toolbar.windowsHereSubReactNative : t.toolbar.windowsHereSub}</span>
             </span>
           </span>
         ) : (
           <>
             <BuildPicker macs={macs} mac={mac} path={path} backend={summary?.backend ?? 'mac'} pcState={pcState} allowPc={app === 'ios' && Boolean(summary?.hasIos || summary?.kind === 'capacitor')} />
             <Icon name="chevronRight" size={12} className="ws-toolbar__arrow" />
-            <TargetPicker targets={targets} selected={target} auto={autoTarget} loading={targetsLoading} mac={macDesktop} onlyMac={onlyMac} macLabel={flutter ? t.targets.macGroupFlutter : undefined} pc={pc} onSelect={(picked) => setProjectPrefs(path, { target: picked?.udid ?? undefined })} />
+            <TargetPicker targets={targets} selected={target} auto={autoTarget} loading={targetsLoading} mac={macDesktop} onlyMac={onlyMac} macLabel={flutter || reactNative ? t.targets.macGroupFlutter : undefined} pc={pc} onSelect={(picked) => setProjectPrefs(path, { target: picked?.udid ?? undefined })} />
           </>
         )}
       </div>
@@ -270,6 +271,8 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
                   ...(pc ? [] : [{ id: 'run-release', label: t.toolbar.runRelease, icon: 'rocket' as const, disabled: !canRun || busy, onSelect: () => void startSession(path, 'run', { flutterMode: 'release' }) }]),
                 ]
               : []),
+            // A React Native app runs in debug mode (its JavaScript from Metro); release runs it as people get it, its JavaScript inside.
+            ...(reactNative ? [{ id: 'run-release', label: t.toolbar.runRelease, icon: 'rocket' as const, disabled: !canRun || busy, onSelect: () => void startSession(path, 'run', { configuration: 'Release' }) }] : []),
             ...(pc ? [{ id: 'pc-setup', label: t.pc.setUpMenu, icon: 'wrench' as const, onSelect: () => usePc.getState().showSetup(path, true) }] : []),
             { id: 'log', label: t.toolbar.buildLog, icon: 'document', disabled: !run?.buildLogPath, onSelect: () => emitWorkspace('show-build-log') },
             { id: 'folder', label: t.toolbar.openFolder, icon: 'folderOpen', separatorBefore: true, onSelect: () => void window.capmac.invoke('app:open-path', { path }) },

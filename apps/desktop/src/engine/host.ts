@@ -26,6 +26,8 @@ import {
   findApps,
   FlutterLiveSession,
   FlutterPcLiveSession,
+  ReactNativeLiveSession,
+  ReactNativePcLiveSession,
   inspectProject,
   installLocalDependencies,
   LiveSession,
@@ -51,6 +53,8 @@ import {
   runElectronApp,
   runFlutterOnMac,
   runFlutterOnPc,
+  runReactNativeOnMac,
+  runReactNativeOnPc,
   runsOnMac,
   ScreenStream,
   setAgentBundlePath,
@@ -342,7 +346,7 @@ interface HostSession {
   mac: string | null;
   controller: AbortController;
   /** Live reload: an iOS app's, an Electron app's on the Mac's desktop, or a Flutter app's (on the Mac, or its Windows app here). */
-  live: LiveSession | ElectronLiveSession | FlutterLiveSession | FlutterPcLiveSession | null;
+  live: LiveSession | ElectronLiveSession | FlutterLiveSession | FlutterPcLiveSession | ReactNativeLiveSession | ReactNativePcLiveSession | null;
   done: Promise<void>;
 }
 
@@ -389,6 +393,7 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
   if (existing) await stopSession(existing.id);
   const project = await loadProject(params.projectPath);
   if (project.kind === 'flutter') return startFlutterSession(params, project);
+  if (project.kind === 'react-native') return startReactNativeSession(params, project);
   // The app asked for (the toolbar's app picker), else the Mac's desktop as the target, else the one picked for the project.
   const onMac = params.mode !== 'ipa' && runsOnMac(project, { app: 'app' in params ? params.app : undefined, target: 'target' in params && params.target === MAC_TARGET_ID ? 'mac' : undefined });
   if (!onMac) requireIos(project);
@@ -455,7 +460,62 @@ function startPcSession(params: MethodParams<'sessions.start'>, project: Project
   };
   const session: HostSession = { id, mode, projectPath: project.capDir, mac: null, controller, live: null, done: Promise.resolve() };
   sessions.set(id, session);
-  session.done = wslHost.session(params.mode, project, target, ctx, controller.signal, (file, size) => emit(scope, { type: 'ipa-ready', file, size }), { clean: params.options?.clean, flutterMode: params.options?.flutterMode }).then(() => end(), end);
+  session.done = wslHost.session(params.mode, project, target, ctx, controller.signal, (file, size) => emit(scope, { type: 'ipa-ready', file, size }), { clean: params.options?.clean, flutterMode: params.options?.flutterMode, configuration: params.options?.configuration }).then(() => end(), end);
+  return { sessionId: id };
+}
+
+/**
+ * A React Native app: its iOS app (in a simulator or on a device through the
+ * Mac, or on an iPhone plugged into this PC), its Mac app (react-native-macos,
+ * on the Mac's desktop, its window here) or its Windows app
+ * (react-native-windows, on this PC, in its own window). Metro runs on this
+ * PC for all of them: a save shows in the app at once.
+ */
+async function startReactNativeSession(params: MethodParams<'sessions.start'> | (MethodParams<'builds.ipa'> & { mode: 'ipa' }), project: ProjectInfo): Promise<{ sessionId: string }> {
+  const picked = 'target' in params ? params.target : undefined;
+  const app = params.mode === 'ipa' ? 'ios' : appFor(project, { app: 'app' in params ? params.app : undefined, target: picked === MAC_TARGET_ID ? 'mac' : picked === PC_TARGET_ID ? 'pc' : undefined });
+  // An .ipa of a React Native app is made on this PC (it signs with this PC's setup).
+  if (params.mode === 'ipa') throw new UserError(t.host.reactNativeIpaOnPc, t.host.reactNativeIpaOnPcHint);
+  const options = params.options ?? {};
+  const onPc = app === 'windows';
+  // The iOS app builds where the project builds: through the Mac, or on this PC.
+  if (app === 'ios' && (params.backend ?? (await backendOf(project))) === 'wsl') return startPcSession(params, project);
+  if (params.mode === 'build') throw new UserError(t.host.buildOnPcOnly, t.host.buildOnPcOnlyHint);
+  const mac = onPc ? null : params.mac ?? project.config.host ?? (await defaultMacName());
+  const id = newId('s');
+  const scope: Scope = { sessionId: id, projectPath: project.capDir, ...(mac ? { mac } : {}) };
+  const ctx = contextFor(scope);
+  const controller = new AbortController();
+  const started = Date.now();
+  const target = app === 'ios' && picked !== MAC_TARGET_ID && picked !== PC_TARGET_ID ? picked : undefined;
+  emit(scope, { type: 'session-started', mode: params.mode, projectPath: project.capDir, mac, target: app === 'macos' ? MAC_TARGET_ID : onPc ? PC_TARGET_ID : target ?? null });
+  const end = (err?: unknown) => {
+    sessions.delete(id);
+    const info = err === undefined ? undefined : toErrorInfo(err);
+    const cancelled = Boolean(info?.cancelled) || controller.signal.aborted;
+    emit(scope, { type: 'session-ended', mode: params.mode, ok: err === undefined || cancelled, cancelled, error: cancelled ? undefined : info, ms: Date.now() - started });
+  };
+  const session: HostSession = { id, mode: params.mode, projectPath: project.capDir, mac, controller, live: null, done: Promise.resolve() };
+  sessions.set(id, session);
+  const release = options.configuration === 'Release';
+  if (onPc) {
+    if (params.mode === 'live') {
+      session.live = new ReactNativePcLiveSession(project, {}, ctx);
+      session.done = untilStopped(session.live, controller, end);
+    } else {
+      session.done = runReactNativeOnPc(project, { release }, ctx, controller.signal).then(() => end(), end);
+    }
+    return { sessionId: id };
+  }
+  const l = link(mac!);
+  const macApp = app === 'macos' ? 'macos' : 'ios';
+  const common = { app: macApp, target, clean: options.clean, configuration: options.configuration, showSimulator: options.showSimulator, osLogs: options.osLogs ?? settings.osLogs } as const;
+  if (params.mode === 'run') {
+    session.done = runReactNativeOnMac(project, l, common, ctx, controller.signal).then(() => end(), end);
+  } else {
+    session.live = new ReactNativeLiveSession(project, l, common, ctx);
+    session.done = untilStopped(session.live, controller, end);
+  }
   return { sessionId: id };
 }
 
@@ -776,7 +836,18 @@ function closeScreen(streamId: string): void {
 
 const SAMPLE_SKIP = new Set(['node_modules', '.git', 'build', 'DerivedData', 'Pods', 'xcuserdata']);
 
-async function createSample(kind: 'ios' | 'electron' | 'flutter' = 'ios'): Promise<{ path: string }> {
+async function createSample(kind: 'ios' | 'electron' | 'flutter' | 'react-native' = 'ios'): Promise<{ path: string }> {
+  if (kind === 'react-native') {
+    if (!init?.reactNativeSampleDir || !existsSync(init.reactNativeSampleDir)) throw new UserError(t.host.noSample);
+    const target = path.join(init.samplesHome, 'Hello React Native');
+    if (!existsSync(path.join(target, 'package.json'))) {
+      await fs.mkdir(init.samplesHome, { recursive: true });
+      // Source only: packages, CocoaPods' and Visual Studio's files hold the machine's paths (they come back on the first run).
+      const skip = new Set(['node_modules', '.git', '.capmac', 'Pods', 'build', 'DerivedData', 'xcuserdata', '.xcode.env.local', 'vendor', '.bundle', 'x64', 'ARM64', 'AppPackages', 'BundleArtifacts', 'Generated Files', 'packages']);
+      await fs.cp(init.reactNativeSampleDir, target, { recursive: true, filter: (src) => !skip.has(path.basename(src)) });
+    }
+    return { path: target };
+  }
   if (kind === 'flutter') {
     if (!init?.flutterSampleDir || !existsSync(init.flutterSampleDir)) throw new UserError(t.host.noSample);
     const target = path.join(init.samplesHome, 'Hello Flutter');
@@ -885,7 +956,7 @@ const handlers: Handlers = {
   'projects.syncSize': async ({ path: dir }) => syncSize(await loadProject(dir)),
   'projects.createSample': async ({ kind }) => {
     const sample = await createSample(kind);
-    // A sample is opened for one of its apps: no need to ask which (the Flutter sample's iOS app; the toolbar switches).
+    // A sample is opened for one of its apps: no need to ask which (the Flutter and React Native samples' iOS app; the toolbar switches).
     await chooseApp(await loadProject(sample.path), kind === 'electron' ? 'electron' : 'ios').catch(() => undefined);
     return sample;
   },
@@ -898,8 +969,8 @@ const handlers: Handlers = {
   'sessions.rebuild': async ({ sessionId, clean }) => {
     const live = sessions.get(sessionId)?.live;
     if (!live) throw new UserError(t.host.liveNotRunning);
-    // (A Flutter app's rebuild starts from its current files: there is nothing to clean first.)
-    if (live instanceof FlutterLiveSession || live instanceof FlutterPcLiveSession) live.rebuild();
+    // (A Flutter app's rebuild starts from its current files: there is nothing to clean first; nor for a Windows app.)
+    if (live instanceof FlutterLiveSession || live instanceof FlutterPcLiveSession || live instanceof ReactNativePcLiveSession) live.rebuild();
     else live.rebuild({ clean });
   },
   'sessions.relaunch': async ({ sessionId }) => {
@@ -910,8 +981,15 @@ const handlers: Handlers = {
   'sessions.reload': async ({ sessionId }) => {
     const live = sessions.get(sessionId)?.live;
     if (live instanceof FlutterLiveSession || live instanceof FlutterPcLiveSession) return live.reload();
+    // A React Native app reloads its JavaScript from Metro.
+    if (live instanceof ReactNativeLiveSession || live instanceof ReactNativePcLiveSession) return live.reload();
     if (!(live instanceof ElectronLiveSession)) throw new UserError(t.host.liveNotRunning);
     await live.reload();
+  },
+  'sessions.devtools': async ({ sessionId }) => {
+    const live = sessions.get(sessionId)?.live;
+    if (!(live instanceof ReactNativeLiveSession || live instanceof ReactNativePcLiveSession)) throw new UserError(t.host.liveNotRunning);
+    return { opened: await live.openDevTools() };
   },
   'builds.ipa': (params) => startSession({ ...params, mode: 'ipa' }),
   'xcode.open': async ({ projectPath, mac }) => {

@@ -5,9 +5,9 @@
  * an Electron app (Ludo Wala ships its iPad app and its Steam build for the
  * Mac from one folder), or a monorepo with a phone app and a desktop app side
  * by side. Finding them only reads files, nothing runs, so it is quick enough
- * for the moment a folder is added. Each framework has a detector: Capacitor
- * and Electron, which CapMac runs, and the ones it recognises so it can say
- * what it found (Flutter, React Native, Expo, Tauri, .NET MAUI, Cordova,
+ * for the moment a folder is added. Each framework has a detector: Capacitor,
+ * Flutter, React Native (and Expo) and Electron, which CapMac runs, and the
+ * ones it recognises so it can say what it found (Tauri, .NET MAUI, Cordova,
  * NativeScript, Xcode projects). A new framework is one more detector.
  */
 import { existsSync, promises as fs, readFileSync, type Dirent } from 'node:fs';
@@ -16,12 +16,13 @@ import { toPosixRel } from '../shared/paths.js';
 import { allDependencies, capacitorElectronDir, dependsOnElectron, describeElectronApp, electronProductName, readPackageJson, type ElectronProject } from './electron-project.js';
 import { describeFlutterProject, flutterDisplayName, type FlutterProject } from './flutter/project.js';
 import { recallAll, remember, type ProjectMemory } from './memory.js';
-import { appFor, CAP_CONFIG_FILES, evaluatedCapacitorName, findSyncRoot, isElectronPlatform, isRunnableApp, loadProject, ProjectError, projectIdFor, projectMemory, readCapacitorConfig, requireElectron, requireFlutter, type ProjectInfo, type RunnableApp } from './project.js';
+import { describeReactNativeProject, reactNativeIconDirs, type ReactNativeProject } from './react-native/project.js';
+import { appFor, CAP_CONFIG_FILES, evaluatedCapacitorName, findSyncRoot, isElectronPlatform, isRunnableApp, loadProject, ProjectError, projectIdFor, projectMemory, readCapacitorConfig, requireElectron, requireFlutter, requireReactNative, type ProjectInfo, type RunnableApp } from './project.js';
 
-/** What an app is to CapMac: an iOS app (simulators, iPhones and iPads), a Mac desktop app, or a Windows desktop app (a Flutter app's, run on this PC). */
+/** What an app is to CapMac: an iOS app (simulators, iPhones and iPads), a Mac desktop app, or a Windows desktop app (a Flutter or React Native app's, run on this PC). */
 export type AppPlatform = 'ios' | 'mac' | 'windows';
 
-/** The frameworks CapMac recognises. It runs Capacitor, Flutter and Electron apps today. */
+/** The frameworks CapMac recognises. It runs Capacitor, Flutter, React Native (and Expo) and Electron apps today. */
 export type AppFramework = 'capacitor' | 'electron' | 'flutter' | 'react-native' | 'expo' | 'tauri' | 'maui' | 'cordova' | 'nativescript' | 'xcode';
 
 export interface ProjectApp {
@@ -208,10 +209,45 @@ async function flutterApps(dir: string, flutter: FlutterProject): Promise<Projec
   return apps;
 }
 
+/**
+ * A React Native project's apps: one per platform folder CapMac runs. The iOS
+ * app runs on simulators and iPhones (through the Mac, or built on this PC),
+ * the Mac app (react-native-macos) on the Mac's desktop, the Windows app
+ * (react-native-windows) on this PC. An Expo app without an ios/ folder gets
+ * one from `expo prebuild` the first time it is built.
+ */
+async function reactNativeApps(dir: string, rn: ReactNativeProject): Promise<ProjectApp[]> {
+  const apps: ProjectApp[] = [];
+  const framework: AppFramework = rn.expo ? 'expo' : 'react-native';
+  const icons = reactNativeIconDirs(dir, rn);
+  const iconFor = async (platform: 'ios' | 'macos') => {
+    const found = icons.find((icon) => icon.platform === platform);
+    return found ? iconInAssets(found.assets) : null;
+  };
+  const iosIcon = rn.ios ? await iconFor('ios') : null;
+  const macIcon = rn.macos ? await iconFor('macos') : null;
+  if (rn.platforms.ios && rn.ios) {
+    apps.push({
+      id: 'ios', platform: 'ios', framework, flavor: rn.ios.pods ? 'CocoaPods' : null, name: rn.ios.displayName ?? rn.displayName, rel: 'ios',
+      version: rn.versions.reactNative ?? rn.versions.expo, icon: iosIcon,
+      status: 'ready', ...(rn.prebuild ? { hint: 'CapMac makes its ios/ folder with `expo prebuild` the first time it builds it' } : {}),
+      evidence: ['package.json', rn.ios.xcodeproj ? `ios/${rn.ios.xcodeproj}` : 'app.json'],
+    });
+  }
+  if (rn.macos) {
+    apps.push({ id: 'macos', platform: 'mac', framework, flavor: rn.macos.pods ? 'CocoaPods' : null, name: rn.macos.displayName ?? rn.displayName, rel: 'macos', version: rn.versions.macos ?? rn.versions.reactNative, icon: macIcon, status: 'ready', evidence: ['package.json', `macos/${rn.macos.xcodeproj}`] });
+  }
+  if (rn.windows) {
+    apps.push({ id: 'windows', platform: 'windows', framework, flavor: null, name: rn.displayName, rel: 'windows', version: rn.versions.windows ?? rn.versions.reactNative, icon: iosIcon ?? macIcon, status: 'ready', evidence: ['package.json', `windows/${rn.windows.solution}`] });
+  }
+  return apps;
+}
+
 /** The apps of a project CapMac has loaded (names as the project's own tools see them). */
 export async function appsOf(project: ProjectInfo): Promise<ProjectApp[]> {
   if (project.kind === 'electron') return project.electron ? [electronApp(project.electron)] : [];
   if (project.kind === 'flutter') return project.flutter ? flutterApps(project.capDir, project.flutter) : [];
+  if (project.kind === 'react-native') return project.reactNative ? reactNativeApps(project.capDir, project.reactNative) : [];
   return capacitorApps({
     dir: project.capDir,
     configFile: project.configFile,
@@ -228,6 +264,7 @@ export async function chooseApp(project: ProjectInfo, app: string): Promise<Runn
   if (id === 'ios' && project.kind === 'electron') throw new ProjectError('This is an Electron app: it has no iOS app.', 'It runs on the Mac’s desktop: `capmac run` launches it there.');
   if (id === 'electron') requireElectron(project);
   if (project.kind === 'flutter' && id !== 'electron') requireFlutter(project, id);
+  if (project.kind === 'react-native' && id !== 'electron') requireReactNative(project, id);
   await remember(project.projectId, { app: id });
   return id;
 }
@@ -293,21 +330,12 @@ const flutter: Detector = async (dir, names) => {
   return { framework: 'flutter', name: flutterDisplayName(project), idName: project.name, apps: await flutterApps(dir, project), claims: ['ios', 'macos', 'android', 'web', 'windows', 'linux', 'build'] };
 };
 
-const reactNative: Detector = (dir, names) => {
+const reactNative: Detector = async (dir, names) => {
   if (!names.has('package.json')) return null;
-  const pkg = readPackageJson(dir);
-  const deps = allDependencies(pkg);
-  if (!deps['react-native'] && !deps.expo) return null;
-  const expo = Boolean(deps.expo);
-  const appJson = readJson(path.join(dir, 'app.json'));
-  const name = appJson?.expo?.name ?? appJson?.displayName ?? appJson?.name ?? pkg?.name ?? path.basename(dir);
-  const framework: AppFramework = expo ? 'expo' : 'react-native';
-  const version = deps['react-native'] ?? deps.expo ?? null;
-  const apps: ProjectApp[] = [];
-  // An Expo app without an ios folder makes one when it is built (prebuild).
-  if (names.has('ios') || expo) apps.push(recognised('ios', 'ios', framework, name, names.has('ios') ? 'ios' : '', ['package.json', names.has('ios') ? 'ios' : 'app.json'], version));
-  if (names.has('macos')) apps.push(recognised('macos', 'mac', framework, name, 'macos', ['package.json', 'macos'], version));
-  return { framework, name, idName: name, apps, claims: ['ios', 'macos', 'android', 'windows'] };
+  const rn = describeReactNativeProject(dir);
+  if (!rn) return null;
+  // The id comes from the app's registered name, as loadProject makes it.
+  return { framework: rn.expo ? 'expo' : 'react-native', name: rn.displayName, idName: rn.name, apps: await reactNativeApps(dir, rn), claims: ['ios', 'macos', 'android', 'windows', 'vendor'] };
 };
 
 const tauri: Detector = (dir, names) => {
@@ -613,7 +641,7 @@ function mayHaveOldPick(found: DetectedProject, memory: Record<string, ProjectMe
 /** The app CapMac works on in a project findApps found: appFor's rule, without loading the project. Null when it runs none of its apps. */
 export function currentApp(project: DetectedProject): RunnableApp | null {
   const has = (id: string) => project.apps.some((a) => a.id === id && canRun(a));
-  if (project.framework === 'flutter') {
+  if (project.framework === 'flutter' || project.framework === 'react-native' || project.framework === 'expo') {
     const runnable = project.apps.filter(canRun).map((a) => a.id).filter(isRunnableApp);
     if (project.chosen && runnable.includes(project.chosen)) return project.chosen;
     return runnable[0] ?? null;
@@ -667,13 +695,13 @@ export function nothingToRun(search: AppSearch): ProjectError {
   const others = [...new Set(search.projects.map((p) => frameworkName(p.framework)))];
   if (others.length === 1) {
     const name = others[0]!;
-    return new ProjectError(`CapMac found ${/^[aeiox]/i.test(name) ? 'an' : 'a'} ${name} app here, but it can't run ${name} apps yet.`, 'It runs Capacitor, Ionic, Flutter and Electron apps today.');
+    return new ProjectError(`CapMac found ${/^[aeiox]/i.test(name) ? 'an' : 'a'} ${name} app here, but it can't run ${name} apps yet.`, 'It runs Capacitor, Ionic, Flutter, React Native and Electron apps today.');
   }
   if (others.length > 1) {
-    return new ProjectError(`CapMac found ${others.slice(0, -1).join(', ')} and ${others.at(-1)} apps here, but it can't run those yet.`, 'It runs Capacitor, Ionic, Flutter and Electron apps today.');
+    return new ProjectError(`CapMac found ${others.slice(0, -1).join(', ')} and ${others.at(-1)} apps here, but it can't run those yet.`, 'It runs Capacitor, Ionic, Flutter, React Native and Electron apps today.');
   }
   return new ProjectError(
-    'No Capacitor, Flutter or Electron app found here (no capacitor.config.*, Flutter pubspec.yaml, or package.json that depends on electron, in this folder, the ones above it or the ones inside it).',
-    'Pick your app’s folder: the one with capacitor.config.ts, your Flutter app’s pubspec.yaml, or your Electron app’s package.json.',
+    'No Capacitor, Flutter, React Native or Electron app found here (no capacitor.config.*, Flutter pubspec.yaml, or package.json that depends on react-native, expo or electron, in this folder, the ones above it or the ones inside it).',
+    'Pick your app’s folder: the one with capacitor.config.ts, your Flutter app’s pubspec.yaml, or your React Native or Electron app’s package.json.',
   );
 }

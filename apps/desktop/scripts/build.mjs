@@ -7,6 +7,7 @@
 //   sample/                  the "Run the sample app" project, with prebuilt web assets
 //   sample-electron/         the Electron sample ("Try the Electron sample")
 //   sample-flutter/          the Flutter sample: its iOS, Mac and Windows apps
+//   sample-react-native/     the React Native sample: its iOS, Mac and Windows apps
 import { spawnSync } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -57,5 +58,9 @@ await fs.cp(electronSampleSrc, out('sample-electron'), { recursive: true, filter
 // (What Flutter makes on each machine stays out: it holds that machine's paths.)
 const FLUTTER_SKIP = new Set(['build', '.dart_tool', '.git', '.capmac', '.idea', 'ephemeral', 'Pods', '.symlinks', '.flutter-plugins', '.flutter-plugins-dependencies', 'xcuserdata', 'Generated.xcconfig', 'flutter_export_environment.sh', 'GeneratedPluginRegistrant.h', 'GeneratedPluginRegistrant.m']);
 await fs.cp(path.join(repoDir, 'examples', 'hello-flutter'), out('sample-flutter'), { recursive: true, filter: (src) => !FLUTTER_SKIP.has(path.basename(src)) && !src.endsWith('.iml') });
+
+// The React Native sample: source only (its packages install where it runs; CocoaPods and MSBuild make the rest).
+const REACT_NATIVE_SKIP = new Set(['node_modules', '.git', '.capmac', 'Pods', 'build', 'DerivedData', 'xcuserdata', '.xcode.env.local', 'vendor', '.bundle', 'x64', 'ARM64', 'AppPackages', 'BundleArtifacts', 'Generated Files', 'packages', 'obj', '.vs']);
+await fs.cp(path.join(repoDir, 'examples', 'hello-react-native'), out('sample-react-native'), { recursive: true, filter: (src) => !REACT_NATIVE_SKIP.has(path.basename(src)) && !/(^msbuild_\d+_build\.(binlog|err|wrn)|\.user)$/.test(path.basename(src)) });
 
 console.log(`CapMac Studio ${pkg.version}: built out/ in ${((Date.now() - started) / 1000).toFixed(1)} s`);

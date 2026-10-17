@@ -61,6 +61,7 @@ export function scanOptionsFor(project: ProjectInfo, includeWebDir: boolean): Sc
     // An electron/ folder is Capacitor's Electron platform (synced when present), or part of an Electron app.
     excludeElectron: project.kind === 'capacitor' && !project.electron,
     flutter: project.kind === 'flutter',
+    reactNative: project.kind === 'react-native',
     include: project.config.sync?.include,
     exclude: project.config.sync?.exclude,
     macBuildsFrom: macBuildRoots(project),

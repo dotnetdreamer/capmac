@@ -18,6 +18,7 @@ files:
   - '!out/sample/**'
   - '!out/sample-electron/**'
   - '!out/sample-flutter/**'
+  - '!out/sample-react-native/**'
   - '!out/remote/**'
   - '!**/*.map'
 # Outside app.asar: the agent is uploaded to Macs, the sample is copied to Documents,
@@ -34,6 +35,8 @@ extraResources:
     to: sample-electron
   - from: out/sample-flutter
     to: sample-flutter
+  - from: out/sample-react-native
+    to: sample-react-native
   # node-datachannel (native) for remote access, for this build's architecture.
   - from: out/remote/${arch}
     to: remote

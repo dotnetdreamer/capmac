@@ -86,8 +86,8 @@ export const engineMethods = {
   /** The app CapMac works on in this project from now on (the CLI too). */
   'projects.setApp': z.object({ path: fsPath, app: runnableApp }).strict(),
   'projects.syncSize': z.object({ path: fsPath }).strict(),
-  /** Copies a bundled sample to Documents\CapMac Studio: the Capacitor iOS app, the Electron app, or the Flutter app. */
-  'projects.createSample': z.object({ kind: z.enum(['ios', 'electron', 'flutter']).optional() }).strict(),
+  /** Copies a bundled sample to Documents\CapMac Studio: the Capacitor iOS app, the Electron app, the Flutter app, or the React Native app. */
+  'projects.createSample': z.object({ kind: z.enum(['ios', 'electron', 'flutter', 'react-native']).optional() }).strict(),
   'projects.installDeps': z.object({ path: fsPath }).strict(),
   /** Where the project's iOS app builds from now on: a paired Mac, or this PC (`capmac backend`, the CLI too). */
   'projects.setBackend': z.object({ path: fsPath, backend: buildBackend }).strict(),
@@ -107,8 +107,10 @@ export const engineMethods = {
   'sessions.rebuild': z.object({ sessionId: id, clean: z.boolean().optional() }).strict(),
   /** Live reload: start the app again (a Flutter app: a hot restart). */
   'sessions.relaunch': z.object({ sessionId: id }).strict(),
-  /** Live reload: an Electron app reloads its windows; a Flutter app hot-reloads. */
+  /** Live reload: an Electron app reloads its windows; a Flutter app hot-reloads; a React Native app reloads its JavaScript. */
   'sessions.reload': z.object({ sessionId: id }).strict(),
+  /** A React Native app in live reload: open React Native DevTools for it (Metro's j). */
+  'sessions.devtools': z.object({ sessionId: id }).strict(),
   'builds.ipa': z.object({
     projectPath: fsPath,
     mac: macName.optional(),
@@ -188,8 +190,8 @@ export interface DiscoveredMac {
 }
 
 export interface ProjectSummary {
-  /** A Capacitor app, an Electron app on its own, or a Flutter app. */
-  kind: 'capacitor' | 'electron' | 'flutter';
+  /** A Capacitor app, an Electron app on its own, a Flutter app, or a React Native app. */
+  kind: 'capacitor' | 'electron' | 'flutter' | 'react-native';
   path: string;
   appName: string;
   appId: string;
@@ -206,7 +208,9 @@ export interface ProjectSummary {
   electron: { flavor: ElectronFlavor; rel: string; name: string; electronRange: string | null } | null;
   /** A Flutter app: which of its platform folders are there, its entry point, and the Flutter it asks for. */
   flutter: { name: string; platforms: { ios: boolean; macos: boolean; windows: boolean }; target: string; flavor: string | null; wants: string | null } | null;
-  /** Its apps: the iOS app, the Electron app, a Flutter app's Mac and Windows apps, when it has them. */
+  /** A React Native app: which of its platform folders are there, whether it is an Expo app (and still needs `expo prebuild`), and the versions it asks for. */
+  reactNative: { name: string; expo: boolean; platforms: { ios: boolean; macos: boolean; windows: boolean }; prebuild: boolean; versions: { reactNative: string | null; macos: string | null; windows: string | null; expo: string | null } } | null;
+  /** Its apps: the iOS app, the Electron app, a Flutter or React Native app's Mac and Windows apps, when it has them. */
   apps: ProjectApp[];
   /** The app Run and Live use: the one picked for the project, else the iOS app, else the Electron app. */
   app: RunnableApp;
@@ -268,6 +272,7 @@ export interface MethodResults {
   'sessions.rebuild': void;
   'sessions.relaunch': void;
   'sessions.reload': void;
+  'sessions.devtools': { opened: boolean };
   'builds.ipa': { sessionId: string };
   'xcode.open': void;
   'logs.buildLog': { text: string };

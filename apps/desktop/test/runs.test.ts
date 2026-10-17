@@ -140,6 +140,39 @@ describe('the run timeline', () => {
     expect(run().phases.build).toBeUndefined();
   });
 
+  it('shows Metro as a React Native run’s first step, skipped in a release build', () => {
+    apply(
+      { type: 'session-started', mode: 'live', projectPath, mac: 'ik-s-m1', target: null },
+      { type: 'step', id: 'metro', title: 'Starting Metro on this PC', phase: 'devserver' },
+      { type: 'step-end', id: 'metro', status: 'ok', ms: 2500 },
+      { type: 'devserver', url: 'http://127.0.0.1:8081/', external: false, command: 'react-native start' },
+      { type: 'hmr', state: 'update', at: 5 },
+    );
+    expect(run().phases.devserver).toMatchObject({ status: 'done', ms: 2500 });
+    expect(run().live).toMatchObject({ devServerUrl: 'http://127.0.0.1:8081/', command: 'react-native start', hmrUpdatedAt: 5 });
+    apply({ type: 'session-ended', mode: 'live', ok: true, cancelled: true, ms: 1000 });
+    apply(
+      { type: 'session-started', mode: 'run', projectPath, mac: 'ik-s-m1', target: null },
+      { type: 'phase-skipped', phase: 'devserver', reason: 'a release build carries its JavaScript' },
+    );
+    expect(run().phases.devserver).toMatchObject({ status: 'skipped', detail: 'a release build carries its JavaScript' });
+  });
+
+  it('stays running while a React Native app loads its JavaScript after it opened', () => {
+    apply(
+      { type: 'session-started', mode: 'run', projectPath, mac: 'ik-s-m1', target: null },
+      { type: 'step', id: 'launch', title: 'Launching Hello React Native', phase: 'launch' },
+      { type: 'step-end', id: 'launch', status: 'ok', ms: 400 },
+      { type: 'app', state: 'running', name: 'Hello React Native', target: 'iPhone 17' },
+      { type: 'step', id: 'bundle', title: 'Bundling the JavaScript for iOS', phase: 'launch' },
+    );
+    expect(run().status).toBe('running');
+    expect(isBusy(run())).toBe(false);
+    apply({ type: 'step-end', id: 'bundle', status: 'ok', ms: 9000 });
+    expect(run().status).toBe('running');
+    expect(run().phases.launch).toMatchObject({ status: 'done', ms: 9000 });
+  });
+
   it('ignores events without a project', () => {
     useRuns.getState().apply([{ scope: { mac: 'ik-s-m1' }, event: { type: 'app', state: 'running' } }]);
     expect(useRuns.getState().byKey).toEqual({});

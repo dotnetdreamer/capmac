@@ -71,7 +71,7 @@ async function workspaceProjects(workspace: string): Promise<string[]> {
  * which (shared schemes first, then the Mac user's own). A scheme with no
  * file is one Xcode makes from the target of that name, like Capacitor's App.
  */
-async function schemeApp(ios: IosProject, scheme: string): Promise<SchemeApp | null> {
+export async function schemeApp(ios: IosProject, scheme: string): Promise<SchemeApp | null> {
   const containers = [...new Set([ios.workspace, ios.xcodeproj, ...(ios.workspace ? await workspaceProjects(ios.workspace) : [])].filter((p): p is string => !!p))];
   const user = `${os.userInfo().username}.xcuserdatad`;
   for (const relative of [path.join('xcshareddata', 'xcschemes'), path.join('xcuserdata', user, 'xcschemes')]) {
@@ -87,7 +87,7 @@ async function schemeApp(ios: IosProject, scheme: string): Promise<SchemeApp | n
   return { target: scheme, product: `${scheme}.app` };
 }
 
-function builtAppPath(productsDir: string, settings: Record<string, string> | null): string | null {
+export function builtAppPath(productsDir: string, settings: Record<string, string> | null): string | null {
   const product = settings?.FULL_PRODUCT_NAME;
   return product?.endsWith('.app') ? path.join(settings?.TARGET_BUILD_DIR || productsDir, product) : null;
 }
@@ -97,7 +97,7 @@ function builtAppPath(productsDir: string, settings: Record<string, string> | nu
  * folder: the scheme's other apps are there too, and so is what older builds
  * left, like a product since renamed (the scheme file may still name it).
  */
-async function findBuiltApp(productsDir: string, settings: Record<string, string> | null): Promise<string> {
+export async function findBuiltApp(productsDir: string, settings: Record<string, string> | null): Promise<string> {
   const appPath = builtAppPath(productsDir, settings);
   if (!appPath) throw new AgentError('The build succeeded, but CapMac could not read its build settings to find the app it made.', 'BUILD_FAILED', 'Run again. If it keeps happening, check that the scheme has an app selected in its Run action.');
   if (!(await exists(appPath))) throw new AgentError(`Build succeeded but the app was not found at ${appPath}`, 'BUILD_FAILED');
@@ -131,7 +131,7 @@ export async function bundledConfigMatches(appPath: string, iosAppDir: string): 
 }
 
 /** xcodebuild bookkeeping lines that never help explain a failure. */
-const BUILD_NOISE = /^\s*(cd |export |builtin-|\/Applications\/Xcode|ExecuteExternalTool|Build description (signature|path)|ClangStatCache|CpResource|SwiftDriver|SwiftEmitModule|EmitSwiftModule|SwiftCompile|CompileC|ProcessInfoPlistFile|CopySwiftLibs|RegisterExecutionPolicyException|Validate|Touch|CodeSign|ProcessProductPackaging|GenerateDSYMFile|Ld |WriteAuxiliaryFile|CreateBuildDirectory|MkDir|SymLink|PhaseScriptExecution|Command line invocation|note: |Prepare packages|ComputeTargetDependencyGraph|ComputePackagePrebuildTargetDependencyGraph|CreateBuildDescription|Resolve Package Graph|Resolved source packages|  [\w-]+: (https?:|\/))/;
+export const BUILD_NOISE = /^\s*(cd |export |builtin-|\/Applications\/Xcode|ExecuteExternalTool|Build description (signature|path)|ClangStatCache|CpResource|SwiftDriver|SwiftEmitModule|EmitSwiftModule|SwiftCompile|CompileC|ProcessInfoPlistFile|CopySwiftLibs|RegisterExecutionPolicyException|Validate|Touch|CodeSign|ProcessProductPackaging|GenerateDSYMFile|Ld |WriteAuxiliaryFile|CreateBuildDirectory|MkDir|SymLink|PhaseScriptExecution|Command line invocation|note: |Prepare packages|ComputeTargetDependencyGraph|ComputePackagePrebuildTargetDependencyGraph|CreateBuildDescription|Resolve Package Graph|Resolved source packages|  [\w-]+: (https?:|\/))/;
 
 function buildKey(params: BuildParams, scheme: string): string {
   const platform = params.target.kind === 'simulator' ? 'iphonesimulator' : 'iphoneos';
@@ -139,13 +139,14 @@ function buildKey(params: BuildParams, scheme: string): string {
   return [platform, params.configuration, scheme, device, params.team ?? '', params.auth?.keyId ?? '', ...(params.extraArgs?.length ? [JSON.stringify(params.extraArgs)] : [])].join('|');
 }
 
-/** Where xcodebuild builds for a target: a simulator, or a device by its UDID. */
+/** Where xcodebuild builds for a target: a simulator, a device by its UDID, or the Mac itself (a Mac app). */
 export function destinationFor(target: BuildParams['target']): string {
   if (target.kind === 'simulator') return `platform=iOS Simulator,id=${target.udid}`;
+  if (target.kind === 'mac') return 'platform=macOS';
   return `platform=iOS,id=${target.udid}`;
 }
 
-async function pruneLogs(dir: string, keep: number): Promise<void> {
+export async function pruneLogs(dir: string, keep: number): Promise<void> {
   const files = (await fs.readdir(dir).catch(() => [] as string[])).filter((f) => f.startsWith('build-')).sort();
   for (const name of files.slice(0, Math.max(0, files.length - keep))) {
     await fs.rm(path.join(dir, name), { force: true }).catch(() => undefined);
@@ -165,7 +166,7 @@ export function settingsArgs(ios: Pick<IosProject, 'workspace' | 'xcodeproj'>, s
     ...(ios.workspace ? ['-workspace', ios.workspace] : ['-project', ios.xcodeproj]),
     '-scheme', scheme,
     '-configuration', configuration,
-    '-destination', target?.kind === 'simulator' ? 'generic/platform=iOS Simulator' : 'generic/platform=iOS',
+    '-destination', target?.kind === 'simulator' ? 'generic/platform=iOS Simulator' : target?.kind === 'mac' ? 'generic/platform=macOS' : 'generic/platform=iOS',
     '-derivedDataPath', derivedData,
     '-IDEBuildLocationStyle=Unique',
     '-skipPackagePluginValidation',
@@ -224,7 +225,7 @@ export function teamOf(output: string, app: SchemeApp): string | null {
  * is the only way that also sees a team set in an .xcconfig or through a
  * `$(…)` variable, not only one written in the .pbxproj.
  */
-async function projectSettingsFor(ios: IosProject, scheme: string, app: SchemeApp, params: BuildParams, derivedData: string, signal: AbortSignal): Promise<Record<string, string> | null> {
+export async function projectSettingsFor(ios: IosProject, scheme: string, app: SchemeApp, params: Pick<BuildParams, 'team' | 'extraArgs' | 'configuration' | 'target'>, derivedData: string, signal: AbortSignal): Promise<Record<string, string> | null> {
   const extraArgs = [...(params.team ? [`DEVELOPMENT_TEAM=${params.team}`] : []), ...(params.extraArgs ?? [])];
   const args = settingsArgs(ios, scheme, params.configuration, derivedData, extraArgs, params.target);
   // Swift packages are resolved first, into the build's own derived data: the build then reuses them.
@@ -263,7 +264,7 @@ export function decideSigningTeam(input: {
  * when it knows the project names none, so it never overrides an explicit
  * choice nor blocks a build a configured project could make.
  */
-async function signingTeam(params: BuildParams, app: SchemeApp, settings: Record<string, string> | null, io: AgentIO): Promise<string | undefined> {
+export async function signingTeam(params: Pick<BuildParams, 'team' | 'target'>, app: SchemeApp, settings: Record<string, string> | null, io: AgentIO): Promise<string | undefined> {
   const isSimulator = params.target.kind === 'simulator';
   let projectTeam: string | null = '';
   let coveringTeams: string[] = [];

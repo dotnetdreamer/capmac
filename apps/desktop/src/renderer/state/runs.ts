@@ -7,7 +7,7 @@ import type { Diagnostic, Envelope, ErrorInfo, HostEvent, Target } from '../../s
 import { t } from '../../shared/i18n';
 import { projectKey } from './projects';
 
-export type TimelinePhase = 'web' | 'sync' | 'deps' | 'electron' | 'cap' | 'build' | 'boot' | 'install' | 'launch' | 'archive' | 'export' | 'download';
+export type TimelinePhase = 'web' | 'devserver' | 'sync' | 'deps' | 'electron' | 'cap' | 'build' | 'boot' | 'install' | 'launch' | 'archive' | 'export' | 'download';
 
 export const RUN_PHASES: TimelinePhase[] = ['web', 'sync', 'deps', 'cap', 'build', 'boot', 'install', 'launch'];
 export const IPA_PHASES: TimelinePhase[] = ['web', 'sync', 'deps', 'cap', 'archive', 'export', 'download'];
@@ -22,11 +22,23 @@ export const FLUTTER_PHASES: TimelinePhase[] = ['sync', 'deps', 'boot', 'build',
 export const FLUTTER_MAC_PHASES: TimelinePhase[] = ['sync', 'deps', 'build', 'launch'];
 export const FLUTTER_PC_PHASES: TimelinePhase[] = ['deps', 'build', 'launch'];
 export const FLUTTER_IPA_PHASES: TimelinePhase[] = ['sync', 'deps', 'build', 'download'];
+/**
+ * A React Native app: Metro starts on this PC first (it serves the JavaScript), then the native app builds where
+ * it builds and opens (its JavaScript bundles as it opens); its Mac app opens on the Mac's desktop, its Windows app here.
+ */
+export const REACT_NATIVE_PHASES: TimelinePhase[] = ['devserver', 'sync', 'deps', 'boot', 'build', 'install', 'launch'];
+export const REACT_NATIVE_MAC_PHASES: TimelinePhase[] = ['devserver', 'sync', 'deps', 'build', 'launch'];
+export const REACT_NATIVE_WINDOWS_PHASES: TimelinePhase[] = ['devserver', 'deps', 'build', 'install', 'launch'];
+export const REACT_NATIVE_PC_PHASES: TimelinePhase[] = ['devserver', 'deps', 'build', 'install', 'launch'];
 export const PHASE_LABELS: Record<TimelinePhase, string> = t.phases;
 
-/** A step's name: some read differently for an Electron app ("Build", not "Xcode build"), on this PC, or for a Flutter app. */
-export function phaseLabel(phase: TimelinePhase, onMac: boolean, pc = false, flutter = false): string {
-  const own = flutter ? (t.phasesFlutter as Partial<Record<TimelinePhase, string>>)[phase] : undefined;
+/**
+ * A step's name: some read differently for an Electron app ("Build", not "Xcode build"), on this PC, or for a Flutter
+ * or React Native app (`windowsApp`: a React Native app's Windows app, which has packages but no pods).
+ */
+export function phaseLabel(phase: TimelinePhase, onMac: boolean, pc = false, flutter = false, reactNative = false, windowsApp = false): string {
+  const windows = reactNative && windowsApp ? (t.phasesReactNativeWindows as Partial<Record<TimelinePhase, string>>)[phase] : undefined;
+  const own = windows ?? (reactNative ? (t.phasesReactNative as Partial<Record<TimelinePhase, string>>)[phase] : flutter ? (t.phasesFlutter as Partial<Record<TimelinePhase, string>>)[phase] : undefined);
   if (own) return own;
   if (pc) return (t.pc.phases as Partial<Record<TimelinePhase, string>>)[phase] ?? PHASE_LABELS[phase];
   return (onMac ? (t.phasesMac as Partial<Record<TimelinePhase, string>>)[phase] : undefined) ?? PHASE_LABELS[phase];
@@ -131,7 +143,7 @@ export function emptyRun(path: string): RunState {
 export const isActive = (run: RunState | undefined) => Boolean(run && run.sessionId && !['stopped', 'done'].includes(run.status));
 export const isBusy = (run: RunState | undefined) => Boolean(run && (run.status === 'starting' || run.status === 'building' || run.status === 'stopping'));
 
-const TIMELINE = new Set<string>([...RUN_PHASES, ...IPA_PHASES, ...CAP_ELECTRON_PHASES, ...FLUTTER_IPA_PHASES]);
+const TIMELINE = new Set<string>([...RUN_PHASES, ...IPA_PHASES, ...CAP_ELECTRON_PHASES, ...FLUTTER_IPA_PHASES, ...REACT_NATIVE_PHASES]);
 let noteId = 1;
 
 interface RunsState {
@@ -215,10 +227,12 @@ function reduce(run: RunState, event: HostEvent, sessionId: string | undefined, 
     case 'step': {
       if (!TIMELINE.has(event.phase)) return run.status === 'starting' ? { ...run, preparing: { id: event.id, title: event.title } } : run;
       const phase = event.phase as TimelinePhase;
+      // A launch step once the app runs is the app loading (React Native's first bundle from Metro), not a build.
+      const loading = phase === 'launch' && run.status === 'running' && run.app?.state === 'running';
       return {
         ...run,
         preparing: null,
-        status: run.status === 'starting' || run.status === 'idle' || run.status === 'running' ? 'building' : run.status,
+        status: !loading && (run.status === 'starting' || run.status === 'idle' || run.status === 'running') ? 'building' : run.status,
         phases: { ...run.phases, [phase]: { status: 'running', title: event.title, startedAt: now } },
         stepPhase: { ...run.stepPhase, [event.id]: phase },
       };

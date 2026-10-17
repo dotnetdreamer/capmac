@@ -11,10 +11,11 @@ import type { FlutterBuildOptions, FlutterBuildParams, FlutterBuildResult, Flutt
 import { PathMapper } from '../../shared/paths.js';
 import type { Target } from '../../shared/protocol.js';
 import { AgentCallError } from '../agent-client.js';
-import { log, startStep, type EngineContext } from '../context.js';
+import { log, type EngineContext } from '../context.js';
 import { macTarget } from '../electron.js';
 import { CancelledError, isCancelled, toErrorInfo, UserError } from '../errors.js';
 import { downloadFromMac } from '../ipa.js';
+import { launchMacApp as launchNativeMacApp } from '../mac-app.js';
 import type { MacLink } from '../link.js';
 import { Pipeline, type TargetOptions } from '../pipeline.js';
 import { appFor, requireFlutter, type ProjectInfo } from '../project.js';
@@ -158,69 +159,26 @@ export interface MacAppProcess {
   stop(): void;
 }
 
-/** Launches the built Mac app, behind whatever the Mac shows; its window shows in CapMac, its output in the console. */
+/** Launches the built Mac app, behind whatever the Mac shows; its window shows in CapMac, its output in the console (see mac-app.ts). */
 async function launchMacApp(session: MacSession, project: ProjectInfo, appPath: string, debug: boolean, mapper: PathMapper | null, ctx: EngineContext, where: string, signal?: AbortSignal): Promise<MacAppProcess> {
-  const appName = appNameOf(project, 'macos');
-  const bundleId = project.flutter?.macos?.bundleId ?? undefined;
-  const launch = startStep(ctx, `Launching ${appName}`, 'launch');
-  let running = false;
-  let markReady!: () => void;
-  let failReady!: (err: unknown) => void;
-  const ready = new Promise<void>((resolve, reject) => {
-    markReady = resolve;
-    failReady = reject;
-  });
-  ready.catch(() => undefined);
   let gotVm!: (uri: string | null) => void;
   const vm = new Promise<string | null>((resolve) => (gotVm = resolve));
-  const translator = new AgentEventTranslator(ctx, 'flutter-mac-launch', mapper);
-  const call = await session.agent.start<FlutterRunResult>('flutter-mac-launch', { projectId: project.projectId, appPath, debug }, {
-    signal,
+  const app = await launchNativeMacApp(session, {
+    op: 'flutter-mac-launch',
+    params: { projectId: project.projectId, appPath, debug },
+    appName: appNameOf(project, 'macos'),
+    bundleId: project.flutter?.macos?.bundleId ?? undefined,
+    where,
+    mapper,
+    logEntry: (text) => flutterLogEntry(text),
     onEvent: (event) => {
-      if (event.t === 'ready') {
-        if (running) return;
-        running = true;
-        launch.succeed();
-        ctx.emit({ type: 'app', state: 'running', name: appName, bundleId, target: where });
-        markReady();
-      } else if (event.t === 'flutter-vm') {
-        gotVm(event.uri);
-      } else if (event.t === 'app') {
-        const entry = flutterLogEntry(mapper ? mapper.mapText(event.text) : event.text);
-        if (entry) ctx.emit({ type: 'app-log', entry });
-      } else if (event.t === 'electron') {
-        if (event.event.e === 'note') log(ctx, 'note', event.event.message);
-      } else {
-        translator.handle(event);
-      }
+      if (event.t !== 'flutter-vm') return false;
+      gotVm(event.uri);
+      return true;
     },
-  });
-  const done = call.result.then(
-    (result) => {
-      gotVm(null);
-      if (!running) {
-        if (result.reason === 'cancelled') launch.cancel();
-        else launch.fail();
-        failReady(result.reason === 'cancelled' ? new CancelledError() : new UserError('The Mac app quit before its window opened.'));
-      } else {
-        ctx.emit({ type: 'app', state: result.reason === 'cancelled' ? 'stopped' : 'exited', name: appName, bundleId, target: where, exitCode: result.exitCode });
-      }
-      return result;
-    },
-    (err) => {
-      gotVm(null);
-      const error = asUserError(err, mapper);
-      if (!running) {
-        if (isCancelled(err)) launch.cancel();
-        else launch.fail();
-      }
-      translator.closeOpenSteps(isCancelled(err) ? 'cancelled' : 'failed');
-      failReady(error);
-      throw error;
-    },
-  );
-  done.catch(() => undefined);
-  return { ready, vm, done, stop: () => call.cancel() };
+  }, ctx, signal);
+  void app.done.then(() => gotVm(null), () => gotVm(null));
+  return { ready: app.ready, vm, done: app.done, stop: app.stop };
 }
 
 /** The Dart VM service, or null when the app does not say within `ms` (a release build has none). */

@@ -153,6 +153,23 @@ export interface DeployParams extends ProjectRef {
   showSimulator?: boolean;
   /** Mirror NSLog/os_log output into the console (OS_ACTIVITY_DT_MODE), like Xcode's console. */
   osLogs?: boolean;
+  /** Arguments the app is launched with (a React Native debug build: where Metro is). */
+  launchArgs?: string[];
+}
+
+/** `mac-app-launch`: opens a built Mac app with CapMac's module in it (its window shows in CapMac, its keys and clicks come from there). */
+export interface MacAppLaunchParams {
+  projectId: string;
+  appPath: string;
+  /** The app's command-line arguments. */
+  args?: string[];
+  /** Extra environment for the app. */
+  env?: Record<string, string>;
+}
+
+export interface MacAppLaunchResult {
+  reason: 'exited' | 'cancelled';
+  exitCode: number | null;
 }
 
 export interface DeployResult {

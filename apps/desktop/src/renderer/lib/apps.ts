@@ -5,6 +5,11 @@ import type { IconName } from '../ui/Icon';
 
 export const canRun = (app: Pick<ProjectApp, 'status'>) => app.status !== 'unsupported';
 
+/** The platform apps of a project with an app per platform folder (a Flutter or React Native app); null for the others. */
+export function platformApps(summary: Pick<ProjectSummary, 'flutter' | 'reactNative'> | null | undefined): { ios: boolean; macos: boolean; windows: boolean } | null {
+  return summary?.flutter?.platforms ?? summary?.reactNative?.platforms ?? null;
+}
+
 /** "iOS app", "Electron app". */
 export function appKind(app: Pick<ProjectApp, 'id' | 'platform'>): string {
   return t.apps.kind[app.id] ?? (app.platform === 'ios' ? t.apps.kind.ios! : t.apps.kind.macos!);

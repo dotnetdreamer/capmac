@@ -98,15 +98,20 @@ export interface DeployOptions {
   osLogs?: boolean;
   signal?: AbortSignal;
   onReady?: () => void;
+  /** Arguments the app is launched with (a React Native debug build: where Metro is). */
+  launchArgs?: string[];
 }
 
 /** The shared steps behind `run`, `dev` and `build`. */
 export class Pipeline {
   mapper: PathMapper | null = null;
   /** Keeps multi-line console messages together across relaunches. */
-  private readonly classifier = new AppLogClassifier();
+  private readonly classifier: AppLogClassifier;
 
-  constructor(public session: MacSession, readonly project: ProjectInfo, readonly ctx: EngineContext) {}
+  /** `classifier`: how the app's lines read (a React Native app's differ from a Capacitor app's). */
+  constructor(public session: MacSession, readonly project: ProjectInfo, readonly ctx: EngineContext, classifier?: AppLogClassifier) {
+    this.classifier = classifier ?? new AppLogClassifier();
+  }
 
   private ref() {
     return { projectId: this.project.projectId, projectRel: this.project.projectRel };
@@ -228,7 +233,7 @@ export class Pipeline {
     const appEvent = { name: build.displayName, bundleId: build.bundleId, target: target.name };
     const result = await this.call<DeployResult>(
       'deploy',
-      { ...this.ref(), target, appPath: build.appPath, bundleId: build.bundleId, attach: options.attach, showSimulator: options.showSimulator, osLogs: options.osLogs },
+      { ...this.ref(), target, appPath: build.appPath, bundleId: build.bundleId, attach: options.attach, showSimulator: options.showSimulator, osLogs: options.osLogs, ...(options.launchArgs?.length ? { launchArgs: options.launchArgs } : {}) },
       {
         signal: options.signal,
         onEvent: (event) => {

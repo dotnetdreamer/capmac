@@ -89,7 +89,7 @@ const routeOption = () => new Option('--route <how>', 'how to reach the Mac this
 const soundOption = () => new Option('--sound <where>', "an Electron app's sound: off, on the mac, or on this pc (in the window viewer); remembered for the project (default off)").choices(['off', 'mac', 'pc']);
 const streamOption = () => new Option('--stream <how>', 'how the screen viewer streams: smooth (video, far less data) or compatible (pictures); remembered, and CapMac Studio uses it too (default smooth)').choices(['smooth', 'compatible']);
 
-const appOption = () => new Option('-a, --app <app>', "which of the project's apps: ios, electron, or a Flutter app's macos or windows (see `capmac apps`; default: the one picked with `capmac apps use` or in CapMac Studio)");
+const appOption = () => new Option('-a, --app <app>', "which of the project's apps: ios, electron, or a Flutter or React Native app's macos or windows (see `capmac apps`; default: the one picked with `capmac apps use` or in CapMac Studio)");
 
 function wslOptions(cmd: Command): Command {
   return cmd
@@ -124,7 +124,7 @@ function backendOptions(cmd: Command): Command {
 function targetOptions(cmd: Command): Command {
   return cmd
     .addOption(appOption())
-    .option('-t, --target <name|udid>', 'simulator or device to use (see `capmac targets`); "mac" for the Mac desktop app (Electron, or a Flutter app’s), "pc" for a Flutter app’s Windows app')
+    .option('-t, --target <name|udid>', 'simulator or device to use (see `capmac targets`); "mac" for the Mac desktop app (Electron, or a Flutter or React Native app’s), "pc" for a Flutter or React Native app’s Windows app')
     .option('-d, --device', 'run on a connected iPhone/iPad instead of a simulator')
     .option('-s, --simulator', 'only consider simulators')
     .option('-e, --electron', "the Electron app, on the Mac's desktop (a Capacitor app with iOS too)");
@@ -313,7 +313,7 @@ program
 
 program
   .command('screen')
-  .description("show the Mac's simulator in your browser, with touch and keyboard input (a plugged-in iPhone: its screen; an Electron app or a Flutter app's Mac app, with --app mac: its window)")
+  .description("show the Mac's simulator in your browser, with touch and keyboard input (a plugged-in iPhone: its screen; an Electron app, or a Flutter or React Native app's Mac app with --app mac: its window)")
   .addOption(mac()).addOption(routeOption())
   .addOption(appOption())
   .option('-t, --target <name|udid>', 'simulator or device to show')
@@ -327,7 +327,7 @@ program
 
 program
   .command('screenshot [file]')
-  .description("save a PNG of the running simulator's screen, a plugged-in iPhone's, or a Mac app's window: the Electron app's, or a Flutter app's with --app mac (default: a temp file; the path is printed)")
+  .description("save a PNG of the running simulator's screen, a plugged-in iPhone's, or a Mac app's window: the Electron app's, or a Flutter or React Native app's with --app mac (default: a temp file; the path is printed)")
   .addOption(mac()).addOption(routeOption())
   .addOption(appOption())
   .option('-t, --target <name|udid>', 'simulator or device (default: the booted simulator this app last ran on)')

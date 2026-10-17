@@ -75,9 +75,9 @@ function ProjectCard({ recent }: { recent: RecentProject }) {
         </p>
       ) : (
         <div className="project-card__meta" title={current ? t.apps.current(appKind(current)) : undefined}>
-          {summary?.kind === 'flutter' && (
+          {(summary?.kind === 'flutter' || summary?.kind === 'react-native') && (
             <>
-              <Badge tone="neutral">{t.home.flutter}</Badge>
+              <Badge tone="neutral">{summary.kind === 'flutter' ? t.home.flutter : summary.reactNative?.expo ? t.home.expo : t.home.reactNative}</Badge>
               {summary.apps.filter(canRun).map((a) => (
                 <Badge key={a.id} tone={appTone(a.id)} icon={several ? appGlyph(a) : undefined}>
                   {t.home.flutterApp[a.id] ?? appKind(a)}
@@ -85,7 +85,7 @@ function ProjectCard({ recent }: { recent: RecentProject }) {
               ))}
             </>
           )}
-          {summary && summary.kind !== 'flutter' && (summary.hasIos || !summary.electron) && (
+          {summary && summary.kind !== 'flutter' && summary.kind !== 'react-native' && (summary.hasIos || !summary.electron) && (
             <Badge tone={appTone('ios')} icon={several ? 'phone' : undefined}>
               {summary.iosPackageManager === 'unknown' ? (summary.hasIos ? 'iOS' : t.home.noIos) : summary.iosPackageManager}
             </Badge>
@@ -161,7 +161,7 @@ function EmptyArt() {
 }
 
 /** Copies a bundled sample to Documents, opens it and runs it. */
-async function runSample(kind: 'ios' | 'electron' | 'flutter'): Promise<void> {
+async function runSample(kind: 'ios' | 'electron' | 'flutter' | 'react-native'): Promise<void> {
   try {
     const { path } = await call('projects.createSample', { kind });
     // Without a Mac, open it: the workspace shows how to pair one.
@@ -171,12 +171,12 @@ async function runSample(kind: 'ios' | 'electron' | 'flutter'): Promise<void> {
   }
 }
 
-function SampleButton({ variant = 'standard', kind = 'ios' }: { variant?: 'standard' | 'subtle'; kind?: 'ios' | 'electron' | 'flutter' }) {
+function SampleButton({ variant = 'standard', kind = 'ios' }: { variant?: 'standard' | 'subtle'; kind?: 'ios' | 'electron' | 'flutter' | 'react-native' }) {
   const [busy, setBusy] = useState(false);
   return (
     <Button
       variant={variant}
-      icon={kind === 'electron' ? 'desktop' : kind === 'flutter' ? 'sparkle' : 'rocket'}
+      icon={kind === 'electron' ? 'desktop' : kind === 'flutter' ? 'sparkle' : kind === 'react-native' ? 'code' : 'rocket'}
       busy={busy}
       onClick={async () => {
         setBusy(true);
@@ -184,7 +184,7 @@ function SampleButton({ variant = 'standard', kind = 'ios' }: { variant?: 'stand
         setBusy(false);
       }}
     >
-      {kind === 'electron' ? t.home.trySampleElectron : kind === 'flutter' ? t.home.trySampleFlutter : t.home.trySample}
+      {kind === 'electron' ? t.home.trySampleElectron : kind === 'flutter' ? t.home.trySampleFlutter : kind === 'react-native' ? t.home.trySampleReactNative : t.home.trySample}
     </Button>
   );
 }
@@ -207,6 +207,7 @@ function SampleMenu() {
           { id: 'ios', label: t.home.sampleIos, icon: 'phone', onSelect: () => void runSample('ios') },
           { id: 'electron', label: t.home.sampleElectron, icon: 'desktop', onSelect: () => void runSample('electron') },
           { id: 'flutter', label: t.home.sampleFlutter, icon: 'sparkle', onSelect: () => void runSample('flutter') },
+          { id: 'react-native', label: t.home.sampleReactNative, icon: 'code', onSelect: () => void runSample('react-native') },
         ]}
       />
     </>
@@ -247,6 +248,7 @@ export function Home() {
                   <SampleButton />
                   <SampleButton kind="electron" />
                   <SampleButton kind="flutter" />
+                  <SampleButton kind="react-native" />
                 </>
               }
             >

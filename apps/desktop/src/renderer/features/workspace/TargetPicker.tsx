@@ -28,6 +28,8 @@ export function thisPcTarget(): Target {
 export function targetTone(target: Target): Tone {
   if (target.kind === 'mac' || target.kind === 'pc') return 'ok';
   if (target.kind === 'simulator') return target.state === 'Booted' ? 'ok' : target.state === 'Booting' || target.state === 'Shutting Down' ? 'busy' : 'idle';
+  // Plugged in, but it can't open your app until you do something on it.
+  if (target.state === 'connected' && (target.developerMode === 'disabled' || target.paired === false)) return 'warn';
   if (target.state === 'connected') return 'ok';
   return target.available ? 'warn' : 'error';
 }
@@ -38,10 +40,18 @@ export function targetState(target: Target): string {
   if (target.kind === 'simulator') {
     return target.state === 'Booted' ? s.running : target.state === 'Shutdown' ? s.off : target.state === 'Booting' ? s.starting : target.state === 'Shutting Down' ? s.stopping : target.state;
   }
+  if (target.paired === false) return s.notTrusted;
   if (target.developerMode === 'disabled') return s.devModeOff;
   if (target.state === 'connected') return target.connection === 'network' ? s.wifi : s.usb;
-  if (target.paired === false) return s.notTrusted;
   return target.available ? s.pairedNotConnected : s.notConnected;
+}
+
+/** What to do on a device before it can open your app, when something is in the way. `pc`: it's plugged into this PC. */
+export function targetHint(target: Target, pc = false): string | null {
+  if (target.kind !== 'device') return null;
+  if (target.paired === false) return pc ? t.pc.trustHint : t.devices.trustHint;
+  if (target.developerMode === 'disabled') return t.devices.devModeHint;
+  return null;
 }
 
 export function targetGlyph(target: Target): IconName {
@@ -122,7 +132,8 @@ export function TargetPicker({ targets, selected, auto, onSelect, loading, disab
           {selected && (
             <span className="tb-picker__sub truncate">
               <StatusDot tone={targetTone(selected)} />
-              {selected.os} · {targetState(selected)}
+              {/* What needs doing comes first, so a narrow toolbar cuts the OS instead */}
+              {targetHint(selected) ? `${targetState(selected)} · ${selected.os}` : `${selected.os} · ${targetState(selected)}`}
               {auto && <span className="tb-picker__auto">{t.targets.auto}</span>}
             </span>
           )}
@@ -163,6 +174,7 @@ export function TargetPicker({ targets, selected, auto, onSelect, loading, disab
                 const i = index;
                 const isSelected = selected?.udid === target.udid;
                 const unusable = target.kind === 'device' && !target.available;
+                const hint = targetHint(target, pc);
                 return (
                   <div
                     key={target.udid}
@@ -170,7 +182,7 @@ export function TargetPicker({ targets, selected, auto, onSelect, loading, disab
                     role="option"
                     aria-selected={isSelected}
                     aria-disabled={unusable || undefined}
-                    className={`target-option${i === active ? ' is-active' : ''}${isSelected ? ' is-selected' : ''}${unusable ? ' is-unusable' : ''}`}
+                    className={`target-option${i === active ? ' is-active' : ''}${isSelected ? ' is-selected' : ''}${unusable ? ' is-unusable' : ''}${hint ? ' has-hint' : ''}`}
                     title={target.kind === 'mac' ? (macLabel ? t.targets.macHintFlutter : t.targets.macHint) : undefined}
                     onPointerMove={() => i !== active && setActive(i)}
                     onClick={() => choose(target)}
@@ -182,6 +194,7 @@ export function TargetPicker({ targets, selected, auto, onSelect, loading, disab
                       {target.kind === 'device' ? targetState(target) : target.os}
                     </span>
                     {isSelected && <Icon name="check" size={16} className="target-option__check" />}
+                    {hint && <span className="target-option__hint">{hint}</span>}
                   </div>
                 );
               })}

@@ -7,7 +7,7 @@
 Keep your editor, web build and dev server on Windows.
 CapMac builds your Capacitor or Ionic app with Xcode on a paired Mac and brings the simulator screen, build errors and app logs back to your PC.
 
-Run on iOS simulators or connected iPhones, export signed builds, and run Flutter apps (iOS, Mac and Windows) and Electron apps through the same CLI or Windows app.
+Run on iOS simulators or connected iPhones, export signed builds, and run Flutter and React Native apps (iOS, Mac and Windows) and Electron apps through the same CLI or Windows app.
 
 **Your own Mac · SSH connection · CLI and CapMac Studio**
 
@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/d55fac9f-92fc-4e6e-953a-574a824a5ecb
 
 </div>
 
-[CapMac Studio](#capmac-studio) | [Capacitor and Ionic commands](#keep-your-capacitor-and-ionic-commands) | [Commands](#commands) | [Flutter apps](#flutter-apps) | [Electron apps](#electron-apps) | [AI coding agents](#ai-coding-agents) | [Remote access](#away-from-the-macs-network) | [Development](#developing-capmac)
+[CapMac Studio](#capmac-studio) | [Capacitor and Ionic commands](#keep-your-capacitor-and-ionic-commands) | [Commands](#commands) | [Flutter apps](#flutter-apps) | [React Native apps](#react-native-apps) | [Electron apps](#electron-apps) | [AI coding agents](#ai-coding-agents) | [Remote access](#away-from-the-macs-network) | [Development](#developing-capmac)
 
 ## Why CapMac
 
@@ -36,6 +36,7 @@ CapMac handles the file sync, Xcode build and app launch, then brings the result
 | Prepare a release | Exports signed IPA files and uploads builds to App Store Connect for TestFlight |
 
 Flutter projects use the same pairing and commands: the iOS app in simulators and on iPhones with hot reload, the Mac app on the Mac's desktop, and the Windows app on your PC.
+React Native projects do too, with Metro on your PC: each save shows in the app at once.
 Electron projects run on macOS the same way, with the app's window and consoles available on Windows.
 The [coding agent skill](#ai-coding-agents) lets your agent build, read logs and take screenshots through the CLI.
 
@@ -170,7 +171,7 @@ It is not enabled automatically by a temporary `npx capmac` copy or when `CI=tru
 | `capmac open` | Open the project in Xcode on the Mac |
 
 Use `--target "<name or UDID>"` to select a simulator or device and `--mac <name>` to select a paired Mac.
-For [projects with several apps](#one-folder-several-apps), use `--app ios`, `--app electron`, or a Flutter app's `--app mac` and `--app windows` to choose which app to run.
+For [projects with several apps](#one-folder-several-apps), use `--app ios`, `--app electron`, or a Flutter or React Native app's `--app mac` and `--app windows` to choose which app to run.
 For scripts, `capmac run --no-logs` returns after launch, while `capmac run --for 20` captures the console for 20 seconds and then stops the app.
 
 Build errors use Windows file paths so you can open them from your terminal.
@@ -277,6 +278,45 @@ Live mode has **Hot reload** and **Hot restart** buttons, and the **More** menu 
 **Try a sample › iPhone, Mac and Windows app (Flutter)** creates a small Flutter app with all three ([examples/hello-flutter](examples/hello-flutter)).
 With no Mac, the iOS app builds on this PC too: see the [WSL backend](#experimental-wsl-backend).
 
+## React Native apps
+
+CapMac runs a React Native app's iOS app, its Mac app ([react-native-macos](https://github.com/microsoft/react-native-macos)) and its Windows app ([react-native-windows](https://github.com/microsoft/react-native-windows)).
+
+```powershell
+cd my-react-native-app
+capmac run                   # the iOS app, in a simulator on the Mac
+capmac dev                   # live: each save shows in the app at once (Fast Refresh)
+capmac run --app mac         # the Mac app, on the Mac's desktop
+capmac run --app windows     # the Windows app, on this PC (no Mac needed)
+capmac run --release         # the JavaScript built into the app, no Metro
+```
+
+Metro runs on this PC and serves the app's JavaScript, and CapMac connects the app to it on the Mac.
+The Mac installs the app's packages and runs `pod install` when they change, and Xcode builds the app only when something native changed, so after the first build a run takes seconds.
+The app's `console.log` lines come back to Windows with its native logs, and a JavaScript error shows its file and line on this PC.
+
+`capmac dev` keeps Metro running: save a file and the app shows it at once, with no build.
+In the terminal, press `r` to reload the JavaScript, `j` to open React Native DevTools, `b` to rebuild the app and `B` for a clean rebuild.
+A change to `package.json`, a Podfile or the app's native code rebuilds the app.
+
+The Mac app opens behind the windows on the Mac and never takes its keyboard.
+Its window comes to Studio and to `capmac screen --app mac`, and `capmac screenshot --app mac` saves a PNG of it.
+
+The Windows app builds with react-native-windows on this PC.
+It needs Windows' Developer Mode and Visual Studio 2022 with **Desktop development with C++** and **Universal Windows Platform development**, with its C++ tools.
+CapMac checks before building and offers to add what's missing with Visual Studio's installer.
+
+Defaults for every run go in `capmac.json`:
+
+```json
+{ "reactNative": { "port": 8081, "metroArgs": ["--max-workers", "4"], "podEnv": { "USE_FRAMEWORKS": "static" }, "macosScheme": "MyApp-macOS", "windowsArch": "x64" } }
+```
+
+In Studio, the toolbar's app picker switches between the apps.
+Live mode has **Reload**, **DevTools**, **Restart app** and **Rebuild** buttons, and the **More** menu runs a release build.
+**Try a sample › iPhone, Mac and Windows app (React Native)** creates a small app with all three ([examples/hello-react-native](examples/hello-react-native)), and offers to install its packages, which Metro needs on this PC.
+With no Mac, the iOS app builds on this PC too: see the [WSL backend](#experimental-wsl-backend).
+
 ## Electron apps
 
 CapMac runs plain Electron, electron-vite and Electron Forge apps, and Capacitor's Electron platform (`@capacitor-community/electron`), on the Mac's desktop.
@@ -324,7 +364,7 @@ Change how the app is found, built or started in `capmac.json`.
 
 ## One folder, several apps
 
-A folder can contain both a Capacitor iOS app and an Electron app for the Mac, and a Flutter project has an iOS, a Mac and a Windows app.
+A folder can contain both a Capacitor iOS app and an Electron app for the Mac, and a Flutter or React Native project has an iOS, a Mac and a Windows app.
 CapMac finds the apps by reading their files, without running them.
 It also checks subfolders in a monorepo.
 
@@ -341,7 +381,7 @@ capmac apps use electron    # from now on, in the CLI and Studio
 capmac run --app ios        # just this once
 ```
 
-CapMac also recognizes React Native, Expo, Tauri, .NET MAUI, Cordova, NativeScript and Xcode projects, but can't run them yet.
+CapMac also recognizes Tauri, .NET MAUI, Cordova, NativeScript and Xcode projects, but can't run them yet.
 
 ## Configuration
 

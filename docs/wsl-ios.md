@@ -10,6 +10,8 @@ For **SPM projects**, CapMac imports the original Xcode application and extensio
 
 For **Flutter apps**, CapMac builds the iOS app's Runner project the same way, after doing in WSL what Flutter's Xcode scripts do on a Mac (see [Flutter apps](#flutter-apps)).
 
+For **React Native apps**, CapMac runs CocoaPods in WSL with React Native's prebuilt core, so only the app and its native modules compile (see [React Native apps](#react-native-apps)).
+
 This remains an experimental build backend, not a guarantee that every Xcode feature or Capacitor plugin works. See the compatibility limits below before choosing it for a project.
 
 ## Start here
@@ -151,6 +153,8 @@ capmac wsl targets
 
 For iOS 17.4 and newer, CapMac opens apps through pymobiledevice3's userspace tunnel, which needs no administrator rights. While the iPhone is locked, iOS opens no apps: the run waits and says "Unlock your iPhone to open the app", however long it takes (Stop ends the wait).
 
+From iOS 16, the iPhone opens the apps CapMac installs only with **Developer Mode** on (Settings › Privacy & Security › Developer Mode; the iPhone restarts, then asks to turn it on). CapMac reads it over the cable: Studio's iPhone picker says "Developer Mode off" and the iPhone pane lists the steps, and `capmac wsl targets` prints them. iOS hides that switch until a developer tool asks, so CapMac shows it in Settings when it finds Developer Mode off. A run warns at the start, builds and installs anyway, and at "Open app" waits until Developer Mode is on, through the restart (Stop ends the wait). An iPhone that doesn't trust the PC yet shows as "Not trusted".
+
 ### Over Wi-Fi
 
 After the first run over the cable, the iPhone also runs over Wi-Fi, with no cable, when it and the PC are on the same network. In that first run, after installing, CapMac pairs the iPhone for Wi-Fi over the trusted cable (RemotePairing, as Xcode does; there is no prompt on the iPhone), and the run says so. Unplugged, the iPhone then shows as "Connected · Wi-Fi" in Studio and as `Wi-Fi` in `capmac wsl targets`, and `capmac wsl run` installs, opens, logs and stops the app over Wi-Fi through the same no-administrator tunnel. An asleep iPhone leaves the network: a run waits up to five minutes for it ("Unlock your iPhone to install the app") and goes on once it is unlocked. If Windows asks whether Python may use the network, allow it on private networks; CapMac finds the iPhone with mDNS. Wi-Fi needs iOS 17 or later.
@@ -230,9 +234,35 @@ On a real iPhone, a Flutter app runs release or profile builds here. Debug build
 
 Plugins must come as Swift packages, which Flutter uses by default. A plugin that has only a CocoaPods podspec stops the build with its name: update it, or build the app on a Mac.
 
+## React Native apps
+
+A React Native app's iOS app builds on this PC with the same setup and commands:
+
+```powershell
+cd my-react-native-app
+capmac wsl setup             # signing for the app's bundle ID, once
+capmac wsl build --unsigned  # check that it builds, without signing
+capmac backend wsl
+capmac run
+```
+
+What a Mac's `pod install` and Xcode do, CapMac does in WSL:
+
+- React Native's Podfile and build scripts run Node.js, so CapMac puts Node.js in its WSL distro once, from nodejs.org, checked against its published SHA-256.
+- CocoaPods resolves the app's native libraries with React Native's prebuilt core (`RCT_USE_PREBUILT_RNCORE` and `RCT_USE_RN_DEP`): React and its dependencies come as frameworks from React Native's own release on Maven, so only the app and its native modules compile. The sample's first build takes about 2 minutes for `pod install` and 2 for compiling.
+- The Pods folder lives on WSL's own disk, which is far faster than the Windows disk for its thousands of files, and is mounted into the build's workspace.
+- `pod install` runs again only when something it reads changes: the Podfile and its lock, the app's Xcode project, the packages' lockfile and patches, and your workspace's own packages. Otherwise the next build reuses its result in about a second.
+- A release build carries the JavaScript, which Metro bundles and Hermes compiles on this PC.
+
+The build's files stay outside your project, in `%LOCALAPPDATA%\CapMac\wsl-builds\<project>`, because Metro watches the project's folder.
+`capmac wsl build --clean` starts over, Pods included.
+
+React Native's template launch screen uses a bold system font, which the Linux storyboard compiler can't build yet.
+The app then gets a plain launch screen instead (`UILaunchScreen` in its Info.plist), and the build says so.
+
 ## Compatibility limits
 
-CocoaPods support means using CocoaPods' real resolver and generated projects; it does not reproduce every Apple build tool. The portable resource compilers support specific resource features. Unsupported assets or Interface Builder features fail with diagnostics rather than being silently omitted. Metal shader sources, Core ML model/package compilation, Core Data mapping models, and Rez phases currently need additional compiler support. Objective-C Core Data automatic class generation needs manual classes or a compatible generator.
+CocoaPods support means using CocoaPods' real resolver and generated projects; it does not reproduce every Apple build tool. The portable resource compilers support specific resource features. Unsupported assets or Interface Builder features fail with diagnostics rather than being silently omitted, with one exception: a launch screen the storyboard compiler can't build becomes a plain one, and the build says so. App icon sizes listed without an image are left out, as Xcode does. Metal shader sources, Core ML model/package compilation, Core Data mapping models, and Rez phases currently need additional compiler support. Objective-C Core Data automatic class generation needs manual classes or a compatible generator.
 
 Application extensions are imported; other unsupported product types are rejected. Scripts and pod `prepare_command` hooks that require macOS executables or unavailable Linux tools need a Linux-compatible implementation. Build phases are not skipped to make a build appear successful. Existing custom native code is preserved, but it still has to compile with the supplied cross-compilation toolchain.
 

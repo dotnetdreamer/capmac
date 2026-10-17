@@ -6,7 +6,7 @@ import { scanProject } from './scan.js';
 import { scanOptionsFor } from './sync-client.js';
 
 export interface ProjectSummary {
-  /** A Capacitor app, an Electron app on its own, or a Flutter app. */
+  /** A Capacitor app, an Electron app on its own, a Flutter app, or a React Native app. */
   kind: ProjectInfo['kind'];
   /** Folder with capacitor.config.* (or the Electron app's package.json). */
   path: string;
@@ -42,7 +42,16 @@ export interface ProjectSummary {
     /** The Flutter version the project pins (FVM, capmac.json), else its pubspec constraint. */
     wants: string | null;
   } | null;
-  /** Its apps: the iOS app, the Electron app, a Flutter app's Mac and Windows apps, when it has them (see apps.ts). */
+  /** A React Native app's details: its platform folders, whether it is an Expo app, and the versions it asks for. */
+  reactNative: {
+    name: string;
+    expo: boolean;
+    platforms: NonNullable<ProjectInfo['reactNative']>['platforms'];
+    /** An Expo app whose ios/ folder `expo prebuild` makes on its first build. */
+    prebuild: boolean;
+    versions: NonNullable<ProjectInfo['reactNative']>['versions'];
+  } | null;
+  /** Its apps: the iOS app, the Electron app, a Flutter or React Native app's Mac and Windows apps, when it has them (see apps.ts). */
   apps: ProjectApp[];
   /** The app Run and Live use: the one picked for the project, else the iOS app, else the Electron app. */
   app: RunnableApp;
@@ -60,9 +69,12 @@ export async function inspectProject(dir: string): Promise<ProjectSummary> {
 export async function summarizeProject(project: ProjectInfo): Promise<ProjectSummary> {
   const electron = project.electron;
   // An Electron app's dev command runs on the Mac: nothing to install on this PC for it.
-  const devCommand = project.kind !== 'capacitor'
-    ? null
-    : project.config.web?.devUrl ?? project.config.web?.dev ?? (project.scripts.dev ? 'dev' : project.scripts.start ? 'start' : project.scripts.serve ? 'serve' : null);
+  const devCommand = project.kind === 'react-native'
+    // Metro runs on this PC: it needs the app's packages here.
+    ? (project.reactNative?.expo ? 'expo start' : 'react-native start')
+    : project.kind !== 'capacitor'
+      ? null
+      : project.config.web?.devUrl ?? project.config.web?.dev ?? (project.scripts.dev ? 'dev' : project.scripts.start ? 'start' : project.scripts.serve ? 'serve' : null);
   const apps = await appsOf(project);
   const app = appFor(project);
   return {
@@ -82,6 +94,9 @@ export async function summarizeProject(project: ProjectInfo): Promise<ProjectSum
     electron: electron ? { flavor: electron.flavor, rel: electron.rel, name: electron.name, electronRange: electron.electronRange } : null,
     flutter: project.flutter
       ? { name: project.flutter.name, platforms: project.flutter.platforms, target: project.flutter.target, flavor: project.flutter.options.flavor ?? null, wants: project.flutter.wantsFlutter.exact ?? project.flutter.wantsFlutter.constraint }
+      : null,
+    reactNative: project.reactNative
+      ? { name: project.reactNative.name, expo: project.reactNative.expo, platforms: project.reactNative.platforms, prebuild: project.reactNative.prebuild, versions: project.reactNative.versions }
       : null,
     apps,
     app,

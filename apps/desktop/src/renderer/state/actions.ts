@@ -149,7 +149,7 @@ export async function setBackend(path: string, backend: BuildBackend, mac?: stri
 }
 
 /** On this PC: set up first, then build for the iPhone picked (when it is plugged in), else the one that is. */
-async function startOnPc(path: string, mode: 'run' | 'live' | 'build', picked: string | undefined, options: { clean?: boolean; flutterMode?: 'debug' | 'profile' | 'release' }): Promise<void> {
+async function startOnPc(path: string, mode: 'run' | 'live' | 'build', picked: string | undefined, options: { clean?: boolean; flutterMode?: 'debug' | 'profile' | 'release'; configuration?: string }): Promise<void> {
   const pc = usePc.getState();
   const status = pc.byKey[projectKey(path)]?.status ?? (await pc.refresh(path));
   if (!pcReady(status)) {
@@ -160,14 +160,14 @@ async function startOnPc(path: string, mode: 'run' | 'live' | 'build', picked: s
   const plugged = usePc.getState().byKey[projectKey(path)]?.devices?.devices ?? [];
   const target = picked && plugged.some((device) => device.udid === picked) ? picked : undefined;
   try {
-    await call('sessions.start', { projectPath: path, mode, app: 'ios', backend: 'wsl', target, options: { clean: options.clean, flutterMode: options.flutterMode } });
+    await call('sessions.start', { projectPath: path, mode, app: 'ios', backend: 'wsl', target, options: { clean: options.clean, flutterMode: options.flutterMode, configuration: options.configuration } });
   } catch (err) {
     failStart(path, errorInfo(err));
   }
 }
 
-/** `build`: on this PC, build the app and its .ipa without installing it. `flutterMode`: a Flutter app's Run in profile or release mode. */
-export async function startSession(path: string, mode: 'run' | 'live' | 'build', options: { clean?: boolean; full?: boolean; flutterMode?: 'debug' | 'profile' | 'release' } = {}): Promise<void> {
+/** `build`: on this PC, build the app and its .ipa without installing it. `flutterMode`: a Flutter app's Run in profile or release mode; `configuration`: a React Native app's (Release). */
+export async function startSession(path: string, mode: 'run' | 'live' | 'build', options: { clean?: boolean; full?: boolean; flutterMode?: 'debug' | 'profile' | 'release'; configuration?: string } = {}): Promise<void> {
   const prefs = projectPrefs(path);
   const summary = useProjects.getState().byKey[projectKey(path)]?.summary;
   const app = appOf(summary, prefs);
@@ -175,7 +175,7 @@ export async function startSession(path: string, mode: 'run' | 'live' | 'build',
   if (app === 'windows') {
     if (mode === 'build') return;
     try {
-      await call('sessions.start', { projectPath: path, mode, app, options: { flutterMode: options.flutterMode } });
+      await call('sessions.start', { projectPath: path, mode, app, options: { flutterMode: options.flutterMode, configuration: options.configuration } });
     } catch (err) {
       failStart(path, errorInfo(err));
     }
@@ -233,6 +233,18 @@ export async function reloadApp(path: string): Promise<void> {
   const run = useRuns.getState().byKey[projectKey(path)];
   if (!run?.sessionId || run.mode !== 'live') return;
   await call('sessions.reload', { sessionId: run.sessionId }).catch((err) => toast({ tone: 'critical', title: t.actions.reloadFailed, body: tidy(errorInfo(err).message) }));
+}
+
+/** A React Native app in live reload: opens React Native DevTools for it (in the browser Metro picks). */
+export async function openDevTools(path: string): Promise<void> {
+  const run = useRuns.getState().byKey[projectKey(path)];
+  if (!run?.sessionId || run.mode !== 'live') return;
+  try {
+    const { opened } = await call('sessions.devtools', { sessionId: run.sessionId });
+    if (!opened) toast({ tone: 'caution', title: t.actions.devToolsFailed, body: t.actions.devToolsFailedBody });
+  } catch (err) {
+    toast({ tone: 'critical', title: t.actions.devToolsFailed, body: tidy(errorInfo(err).message) });
+  }
 }
 
 export async function openInXcode(path: string): Promise<void> {

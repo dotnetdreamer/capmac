@@ -53,6 +53,22 @@ export interface ProjectState {
   electronBuilt: boolean;
   /** Electron (Capacitor): the web assets were copied into the app after the last change to them. */
   electronCopied: boolean;
+  /** React Native: what its builds depend on (see ops/react-native.ts); absent until the first one. */
+  rn?: ReactNativeState;
+}
+
+/** React Native: what the iOS and Mac apps' builds depend on. A React Native project never runs `prepare`, so `rn-prepare` reads pendingChanges. */
+export interface ReactNativeState {
+  /** Bumped when what an app's native build reads changes. */
+  nativeGen: { ios: number; macos: number };
+  /** Bumped when the JavaScript changes (a release build bundles it into the app). */
+  jsGen: number;
+  /** The packages' hash at the last install on this Mac. */
+  depsHash?: string;
+  /** `pod install` has to run again for that app. */
+  podsStale: { ios: boolean; macos: boolean };
+  /** The hash of the PC's Podfile.lock last written for that app (see ReactNativePrepareParams.podfileLock). */
+  podLock?: { ios?: string; macos?: string };
 }
 
 export interface ProjectPaths {

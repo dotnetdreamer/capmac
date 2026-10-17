@@ -143,12 +143,21 @@ describe('the apps in a folder', () => {
     ]);
   });
 
-  it('recognises apps CapMac cannot run yet, so it can say what it found', async () => {
+  it('runs the React Native and Expo apps it finds, an Expo app without ios/ once expo prebuild makes it', async () => {
     write('rn/package.json', { name: 'RnApp', dependencies: { 'react-native': '0.82.0' } });
     write('rn/app.json', { name: 'RnApp', displayName: 'Rn App' });
-    write('rn/ios/RnApp.xcodeproj/project.pbxproj');
+    write('rn/ios/RnApp.xcodeproj/project.pbxproj', 'isa = PBXNativeTarget; name = RnApp; productType = "com.apple.product-type.application"; PRODUCT_BUNDLE_IDENTIFIER = com.example.rn;');
     write('expo/package.json', { name: 'expo-app', dependencies: { expo: '~54.0.0' } });
     write('expo/app.json', { expo: { name: 'Expo App' } });
+    const search = await findApps(dir);
+    const summary = Object.fromEntries(search.projects.map((p) => [p.rel, [p.framework, p.name, p.apps.map((a) => `${a.id}:${a.platform}:${a.status}`)]]));
+    expect(summary).toEqual({
+      expo: ['expo', 'Expo App', ['ios:ios:ready']],
+      rn: ['react-native', 'Rn App', ['ios:ios:ready']],
+    });
+  });
+
+  it('recognises apps CapMac cannot run yet, so it can say what it found', async () => {
     write('tauri/package.json', { name: 'tauri-app', devDependencies: { '@tauri-apps/cli': '^2.11.4' } });
     write('tauri/src-tauri/tauri.conf.json', { productName: 'Screenshots' });
     write('tauri/src-tauri/gen/apple/project.yml');
@@ -165,15 +174,13 @@ describe('the apps in a folder', () => {
     const summary = Object.fromEntries(search.projects.map((p) => [p.rel, [p.framework, p.name, p.apps.map((a) => `${a.id}:${a.platform}:${a.status}`)]]));
     expect(summary).toEqual({
       cordova: ['cordova', 'Cordova App', ['ios:ios:unsupported']],
-      expo: ['expo', 'Expo App', ['ios:ios:unsupported']],
       maui: ['maui', 'Maui App', ['ios:ios:unsupported', 'macos:mac:unsupported']],
       native: ['xcode', 'Native', ['ios:ios:unsupported', 'macos:mac:unsupported']],
-      rn: ['react-native', 'Rn App', ['ios:ios:unsupported']],
       swift: ['xcode', 'SwiftApp', ['ios:ios:unsupported']],
       tauri: ['tauri', 'Screenshots', ['ios:ios:unsupported', 'macos:mac:unsupported']],
     });
     expect(search.suggested).toBeNull();
-    expect(nothingToRun(search).message).toBe("CapMac found Cordova, Expo, .NET MAUI, Xcode, React Native and Tauri apps here, but it can't run those yet.");
+    expect(nothingToRun(search).message).toBe("CapMac found Cordova, .NET MAUI, Xcode and Tauri apps here, but it can't run those yet.");
   });
 
   it('runs a Flutter app it finds in a folder inside', async () => {
@@ -195,15 +202,15 @@ describe('the apps in a folder', () => {
   });
 
   it('says what it found when it cannot run it, or that there was nothing', async () => {
-    write('package.json', { name: 'expo-app', dependencies: { expo: '~54.0.0' } });
-    write('app.json', { expo: { name: 'Expo App' } });
-    expect(nothingToRun(await findApps(dir)).message).toBe("CapMac found an Expo app here, but it can't run Expo apps yet.");
+    write('package.json', { name: 'ns-app', dependencies: { '@nativescript/core': '~9.0.0' } });
+    write('nativescript.config.ts', 'export default {}');
+    expect(nothingToRun(await findApps(dir)).message).toBe("CapMac found a NativeScript app here, but it can't run NativeScript apps yet.");
     rmSync(at('package.json'));
-    rmSync(at('app.json'));
+    rmSync(at('nativescript.config.ts'));
     write('App.xcodeproj/project.pbxproj', 'productType = "com.apple.product-type.application"; SDKROOT = iphoneos;');
     expect(nothingToRun(await findApps(dir)).message).toBe("CapMac found an Xcode app here, but it can't run Xcode apps yet.");
     rmSync(at('App.xcodeproj'), { recursive: true });
-    expect(nothingToRun(await findApps(dir)).message).toMatch(/^No Capacitor, Flutter or Electron app found here/);
+    expect(nothingToRun(await findApps(dir)).message).toMatch(/^No Capacitor, Flutter, React Native or Electron app found here/);
   });
 });
 

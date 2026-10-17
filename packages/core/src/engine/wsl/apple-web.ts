@@ -719,8 +719,8 @@ async function explained(run: Run, page: WebPage | undefined, error: unknown): P
 
 /**
  * Apple's developer website for one team, signed in and hidden. It makes what
- * Apple's API refuses CapMac's own client (certificates, profiles and devices
- * answer 421 there) the way the website's pages ask for them.
+ * Apple's API refuses CapMac's own client (certificates, profiles, devices and
+ * new App IDs answer 421 there) the way the website's pages ask for them.
  */
 export class AppleWebsite {
   private constructor(private readonly page: WebPage, private readonly run: Run & { team: { id: string; name: string } }) {}
@@ -750,6 +750,11 @@ export class AppleWebsite {
       log(this.run.ctx, 'success', 'Apple made the certificate on its website.');
       return made;
     });
+  }
+
+  /** Adds an App ID (explicit, iOS) to the team; Apple's id for it. */
+  bundleId(app: { name: string; identifier: string }): Promise<string> {
+    return this.#doing(async () => (await this.#create('bundleIds', { name: app.name, identifier: app.identifier, platform: 'IOS' })).id);
   }
 
   /** Registers an iPhone with the team; Apple's id for it. */
@@ -863,6 +868,6 @@ export const appleWeb = {
   findBrowser: findWebBrowser,
   hasSignIn: hasAppleWebSignIn,
   makeCertificate: makeCertificateOnAppleWeb,
-  open: (team: { id: string; name: string }, ctx: EngineContext, signal?: AbortSignal): Promise<Pick<AppleWebsite, 'device' | 'profile' | 'close'>> => AppleWebsite.open(team, ctx, signal),
+  open: (team: { id: string; name: string }, ctx: EngineContext, signal?: AbortSignal): Promise<Pick<AppleWebsite, 'bundleId' | 'device' | 'profile' | 'close'>> => AppleWebsite.open(team, ctx, signal),
 };
 export type AppleWeb = typeof appleWeb;

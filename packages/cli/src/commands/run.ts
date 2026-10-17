@@ -3,6 +3,7 @@ import { answerAppDialog, appFor, loadApiKey, loadProject, MacLink, requireElect
 import { cancelOnSigint } from '../cli-context.js';
 import { announceApp } from './apps.js';
 import { flutterRunCommand, type FlutterCommandOptions } from './flutter.js';
+import { reactNativeRunCommand } from './react-native.js';
 import { terminalContext } from '../terminal.js';
 import { log } from '../ui.js';
 
@@ -47,6 +48,7 @@ function parseSeconds(value: string | undefined): number | undefined {
 export async function runCommand(options: RunOptions & FlutterCommandOptions): Promise<void> {
   const project = await loadProject(process.cwd());
   if (project.kind === 'flutter') return flutterRunCommand(project, options);
+  if (project.kind === 'react-native') return reactNativeRunCommand(project, options);
   const app = appFor(project, options);
   await announceApp(project, app);
   if (app === 'electron') return runOnMac(project, options);

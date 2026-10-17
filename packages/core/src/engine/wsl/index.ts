@@ -13,11 +13,19 @@ import { findCocoaPodsDirectory, inspectCocoaPods, prepareCocoaPodsProject } fro
 import { buildNativeWithToolchain } from './native-compiler.js';
 import { prepareXcodeProject } from './xcode.js';
 import { prepareFlutterIos, type WslFlutterMode } from './flutter.js';
+import { dropReactNativePods, prepareReactNativeIos, reactNativeWorkDir } from './react-native.js';
+import { ensureIosFolder } from '../react-native/mac.js';
+import { ReactNativeLogClassifier } from '../react-native/logs.js';
+import { startMetro, type MetroServer } from '../react-native/metro.js';
+import { classifyReactNativeChange, metroLaunchArgs, needsNativeRebuild } from '../../shared/react-native.js';
 import { classifyFlutterChange } from '../flutter/changes.js';
 import { flutterLogEntry } from '../flutter/runner.js';
 import { watchWrites } from '../watch.js';
 import { inspectWslResourceTools, installWslResourceTools } from './resources.js';
-import { ensureWslWifiPairing, inspectWslDeviceTools, installWslApp, launchWslApp, listWslDevices, selectWslDevice, stopWslApp, streamWslDeviceLogs, wslDeviceTarget, type WslDevice } from './device.js';
+import {
+  DEVELOPER_MODE_STEPS, ensureWslWifiPairing, inspectWslDeviceTools, installWslApp, launchWslApp, listWslDevices, selectWslDevice, stopWslApp, streamWslDeviceLogs,
+  waitForDeveloperMode, wslDeviceTarget, type WslDevice,
+} from './device.js';
 import { chooseLiveHost, startWslLiveRelay } from './live.js';
 import { loadWslOptions, saveWslOptions, settingsPath, validateWslOptions, type WslOptions } from './settings.js';
 import { inspectWslToolchain, WslExecutor, type WslToolchainConfig, type WslToolchainReport } from './toolchain.js';
@@ -29,7 +37,7 @@ import { inspectAppleDeviceServer, requireAppleDeviceServer } from './apple-devi
 
 export type { WslOptions } from './settings.js';
 export type { WslBuildPlan } from './compiler.js';
-export { listWslDevices, wslDeviceTarget } from './device.js';
+export { DEVELOPER_MODE_STEPS, listWslDevices, wslDeviceTarget } from './device.js';
 export { readWslSetupStatus, wslSetupState, type WslSetupState, type WslSetupStatus } from './setup.js';
 export { inspectAppleDeviceServer, startAppleDeviceServer, type AppleDeviceServerState } from './apple-devices.js';
 export { loadWslOptions } from './settings.js';
@@ -37,6 +45,14 @@ export { loadWslOptions } from './settings.js';
 export interface WslCheck { id: string; level: 'ok' | 'warn' | 'fail' | 'info'; label: string; detail?: string; fix?: string }
 export interface WslDoctorResult { ready: boolean; checks: WslCheck[] }
 export interface WslBuildResult { appPath: string; ipaPath: string; bundleId: string; processName?: string; signed?: boolean }
+
+/** The builder's output: all of it with --verbose, and its own notes ("capmac note: …", such as a resource built differently) for everyone. */
+function builderOutput(ctx: EngineContext): (text: string, stream: 'stdout' | 'stderr') => void {
+  return (text, stream) => {
+    ctx.emit({ type: 'tool-output', text, stream });
+    for (const match of text.matchAll(/^\s*capmac note: (.+)$/gm)) log(ctx, 'info', match[1]!.trim());
+  };
+}
 
 function toolchainConfig(options: WslOptions, native = false): WslToolchainConfig {
   return { distro: options.distro, native, sdkPath: options.sdk, swiftcPath: options.swift, linkerPath: options.linker, signerPath: options.signer, swiftResourcePath: options.swiftResources,
@@ -49,6 +65,7 @@ async function projectAndOptions(input: WslOptions): Promise<{ project: ProjectI
   const project = await loadProject(input.cwd ?? process.cwd());
   if (project.kind === 'electron') throw new UserError('An Electron app runs on a Mac’s desktop: it has no iPhone app to build on this PC.');
   if (project.kind === 'flutter' && !project.flutter?.platforms.ios) throw new UserError('This Flutter app has no iOS app.', 'Add one with `flutter create --platforms ios .` in its folder.');
+  if (project.kind === 'react-native' && !project.reactNative?.platforms.ios) throw new UserError('This React Native app has no iOS app.', 'Its Windows app runs on this PC with `capmac run --app windows`.');
   const options = await loadWslOptions(input, project.capDir);
   return { project, options };
 }
@@ -60,7 +77,7 @@ export async function doctorWsl(input: WslOptions, _ctx: EngineContext, signal: 
   try { project = await loadProject(cwd); cwd = project.capDir; } catch { /* Setup can be checked before opening a project. */ }
   const options = await loadWslOptions(input, cwd);
   const [toolchain, device, server] = await Promise.all([
-    inspectWslToolchain(toolchainConfig(options, project?.kind === 'capacitor' || project?.kind === 'flutter'), { signal }),
+    inspectWslToolchain(toolchainConfig(options, project?.kind === 'capacitor' || project?.kind === 'flutter' || project?.kind === 'react-native'), { signal }),
     inspectWslDeviceTools({ python: options.python, signal }),
     inspectAppleDeviceServer(signal),
   ]);
@@ -74,7 +91,10 @@ export async function doctorWsl(input: WslOptions, _ctx: EngineContext, signal: 
     const file = options[key] ? path.resolve(cwd, options[key]!) : undefined;
     checks.push({ id: key, level: file && existsSync(file) ? 'ok' : 'fail', label, detail: file ?? 'not configured', fix: 'Run `capmac wsl setup` in your app’s folder: it sets up signing with your Apple Account. To use your own files, add --certificate <file.p12> --profile <file.mobileprovision>.' });
   }
-  if (project?.kind === 'flutter') {
+  if (project?.kind === 'react-native') {
+    checks.push({ id: 'project', level: project.reactNative?.platforms.ios ? 'ok' : 'fail', label: 'React Native iOS app',
+      detail: project.reactNative?.platforms.ios ? 'CocoaPods runs in WSL with React Native’s prebuilt core; the first build also gets Node.js for WSL. A debug build loads its JavaScript from Metro on this PC over Wi-Fi.' : 'This React Native app has no ios/ folder.' });
+  } else if (project?.kind === 'flutter') {
     checks.push({ id: 'project', level: project.flutter?.platforms.ios ? 'ok' : 'fail', label: 'Flutter iOS app',
       detail: project.flutter?.platforms.ios ? 'Flutter compiles the Dart code in WSL; the first build also gets Flutter for Linux, Dart’s iPhone compiler (built once, about 5 minutes) and Flutter’s iPhone engine.' : 'This Flutter app has no ios/ folder.',
       fix: project.flutter?.platforms.ios ? undefined : 'Add it with `flutter create --platforms ios .`' });
@@ -196,7 +216,45 @@ async function buildFlutterProject(project: ProjectInfo, options: WslOptions, ct
       outputDirectory: path.resolve(project.capDir, options.out ?? '.capmac/wsl/output'), signing, rubyPath: options.ruby, xcodeVersion: options.xcodeVersion,
     }, ctx, signal);
     const built = await withStep(ctx, options.unsigned ? 'Compiling the native app in WSL' : 'Building and signing the native app in WSL', 'build', () => buildNativeWithToolchain({ ...plan, unsigned: options.unsigned }, executor, toolchain.tools, {
-      signal, onOutput: (text, stream) => ctx.emit({ type: 'tool-output', text, stream }),
+      signal, onOutput: builderOutput(ctx),
+    }));
+    const result = { appPath: built.appPath, ipaPath: built.ipaPath, bundleId: built.bundleIdentifier, processName: built.executableName, signed: built.signed };
+    await fs.writeFile(path.join(generated, 'last-build.json'), `${JSON.stringify(result, null, 2)}\n`);
+    return result;
+  });
+}
+
+/** The Xcode configuration of a React Native build here: Debug (JavaScript from Metro on this PC) unless asked otherwise. */
+function reactNativeConfiguration(options: WslOptions): string {
+  return options.configuration ?? (options.release ? 'Release' : 'Debug');
+}
+
+/** A React Native app's iOS app: CocoaPods in WSL with React Native's prebuilt core (see react-native.ts), then built and signed like any app. */
+async function buildReactNativeProject(project: ProjectInfo, options: WslOptions, ctx: EngineContext, signal: AbortSignal, cachedPassword?: string): Promise<WslBuildResult> {
+  project = await ensureIosFolder(project, ctx, signal);
+  const toolchain = await checkedToolchain(options, ctx, signal, true);
+  if (!options.unsigned && (!options.certificate || !options.profile)) throw new UserError('Apple development signing is not configured.', 'Run `capmac wsl setup` in your app’s folder: it sets up signing with your Apple Account. Or build with --unsigned to check the build first.');
+  const signing: WslBuildPlan['signing'] = {
+    certificatePath: options.certificate ? path.resolve(project.capDir, options.certificate) : '',
+    provisioningProfilePath: options.profile ? path.resolve(project.capDir, options.profile) : '',
+    password: options.unsigned ? '' : cachedPassword ?? await password(options, ctx, project.capDir),
+    extensionProfiles: Object.fromEntries(Object.entries(options.extensionProfiles ?? {}).map(([id, file]) => [id, path.resolve(project.capDir, file)])),
+  };
+  // Outside the project: Metro watches its folder (see reactNativeWorkDir).
+  const generated = reactNativeWorkDir(project);
+  const executor = new WslExecutor(toolchain.distro);
+  return withPodsBuildLock(generated, async () => {
+    if (options.clean) await withStep(ctx, 'Removing earlier native build files', 'other', async () => {
+      await dropReactNativePods(path.join(generated, 'rn-inputs'), project.projectId, executor, signal);
+      await fs.rm(path.join(generated, 'rn-inputs'), { recursive: true, force: true });
+      await executor.run(['sh', '-c', 'rm -rf "$HOME/.cache/capmac/module-cache"'], { signal, allowFailure: true });
+    });
+    const plan = await prepareReactNativeIos(project, {
+      executor, tools: toolchain.tools, directory: path.join(generated, 'rn-inputs'), configuration: reactNativeConfiguration(options),
+      outputDirectory: options.out ? path.resolve(project.capDir, options.out) : path.join(generated, 'output'), signing, rubyPath: options.ruby, podPath: options.pod, xcodeVersion: options.xcodeVersion,
+    }, ctx, signal);
+    const built = await withStep(ctx, options.unsigned ? 'Compiling the native app in WSL' : 'Building and signing the native app in WSL', 'build', () => buildNativeWithToolchain({ ...plan, unsigned: options.unsigned }, executor, toolchain.tools, {
+      signal, onOutput: builderOutput(ctx),
     }));
     const result = { appPath: built.appPath, ipaPath: built.ipaPath, bundleId: built.bundleIdentifier, processName: built.executableName, signed: built.signed };
     await fs.writeFile(path.join(generated, 'last-build.json'), `${JSON.stringify(result, null, 2)}\n`);
@@ -207,6 +265,7 @@ async function buildFlutterProject(project: ProjectInfo, options: WslOptions, ct
 async function buildProject(project: ProjectInfo, options: WslOptions, ctx: EngineContext, signal: AbortSignal, liveUrl?: string, cachedPassword?: string): Promise<WslBuildResult> {
   throwIfAborted(signal);
   if (project.kind === 'flutter') return buildFlutterProject(project, options, ctx, signal, cachedPassword);
+  if (project.kind === 'react-native') return buildReactNativeProject(project, options, ctx, signal, cachedPassword);
   const pods = project.iosPackageManager === 'CocoaPods';
   if (!pods && project.iosPackageManager !== 'SPM') throw new UserError('No CocoaPods or SPM iOS project was detected.');
   const toolchain = await checkedToolchain(options, ctx, signal, true);
@@ -234,7 +293,7 @@ async function buildProject(project: ProjectInfo, options: WslOptions, ctx: Engi
         rubyPath: options.ruby, podPath: options.pod, scheme: options.scheme, xcodeVersion: options.xcodeVersion,
       }, ctx, signal));
       const built = await withStep(ctx, options.unsigned ? 'Compiling the native app in WSL' : 'Building and signing the native app in WSL', 'build', () => buildNativeWithToolchain({ ...plan, unsigned: options.unsigned }, executor, toolchain.tools, {
-        signal, onOutput: (text, stream) => ctx.emit({ type: 'tool-output', text, stream }),
+        signal, onOutput: builderOutput(ctx),
       }));
       const result = { appPath: built.appPath, ipaPath: built.ipaPath, bundleId: built.bundleIdentifier, processName: built.executableName, signed: built.signed };
       await fs.writeFile(path.join(generated, 'last-build.json'), `${JSON.stringify(result, null, 2)}\n`);
@@ -271,6 +330,8 @@ export async function buildWsl(input: WslOptions, ctx: EngineContext, signal: Ab
 async function chooseDevice(options: WslOptions, ctx: EngineContext, signal: AbortSignal): Promise<WslDevice> {
   const device = await pickDevice(options, ctx, signal);
   ctx.emit({ type: 'target', target: wslDeviceTarget(device) });
+  // Said now, so it can be turned on while the app builds.
+  if (device.developerMode === 'disabled') log(ctx, 'warn', `Developer Mode is off on ${device.name}. Your app opens after you turn it on.`, DEVELOPER_MODE_STEPS);
   return device;
 }
 
@@ -280,10 +341,11 @@ async function pickDevice(options: WslOptions, ctx: EngineContext, signal: Abort
   if (options.target || !ctx.prompter.interactive) return selectWslDevice(options.target, deviceOptions);
   const devices = await listWslDevices(deviceOptions);
   if (devices.length < 2) return devices[0] ?? selectWslDevice(undefined, deviceOptions);
-  return ctx.prompter.choose({ message: 'Run on which iPhone?', items: devices.map((device) => ({ label: device.name, hint: device.productVersion, value: device })) });
+  const hint = (device: WslDevice) => [device.productVersion, device.paired === false ? 'not trusted' : device.developerMode === 'disabled' ? 'Developer Mode off' : undefined].filter(Boolean).join(' · ') || undefined;
+  return ctx.prompter.choose({ message: 'Run on which iPhone?', items: devices.map((device) => ({ label: device.name, hint: hint(device), value: device })) });
 }
 
-async function deploy(built: WslBuildResult, device: WslDevice, options: WslOptions, ctx: EngineContext, signal: AbortSignal): Promise<void> {
+async function deploy(built: WslBuildResult, device: WslDevice, options: WslOptions, ctx: EngineContext, signal: AbortSignal, launchArgs: string[] = []): Promise<void> {
   if (built.signed === false) throw new UserError('An unsigned build cannot be installed on an iPhone.', 'Configure signing and rebuild without --unsigned.');
   const hooks = { python: options.python, signal, onLog: (text: string) => ctx.emit({ type: 'tool-output' as const, stream: 'stdout' as const, text }) };
   // A locked iPhone opens no apps, and an asleep one leaves the Wi-Fi: wait for the user, however long it takes.
@@ -298,7 +360,19 @@ async function deploy(built: WslBuildResult, device: WslDevice, options: WslOpti
     return false;
   });
   if (wifi) log(ctx, 'info', `${device.name} can now also run your app over Wi-Fi, without the cable.`);
-  await withStep(ctx, `Launching on ${device.name}`, 'launch', (step) => launchWslApp(built.bundleId, device, { ...hooks, onLocked: unlock(step, 'open the app') }));
+  await withStep(ctx, `Launching on ${device.name}`, 'launch', async (step) => {
+    // iOS opens the app only with Developer Mode on: wait while the user turns it on, however long it takes.
+    if (device.developerMode === 'disabled') {
+      step.update('Turn on Developer Mode on your iPhone');
+      log(ctx, 'info', `Waiting for Developer Mode on ${device.name}.`);
+      await waitForDeveloperMode(device, hooks);
+      device.developerMode = 'enabled';
+      ctx.emit({ type: 'target', target: wslDeviceTarget(device) });
+      log(ctx, 'info', `Developer Mode is on. Opening the app on ${device.name}.`);
+      step.update(`Launching on ${device.name}`);
+    }
+    await launchWslApp(built.bundleId, device, { ...hooks, args: launchArgs, onLocked: unlock(step, 'open the app') });
+  });
   ctx.emit({ type: 'app', state: 'running', bundleId: built.bundleId, target: device.name });
 }
 
@@ -308,18 +382,129 @@ function appLogEntry(text: string, flutter: boolean) {
   return (dart ? flutterLogEntry(`flutter: ${dart[1]}`) : null) ?? { text, kind: 'native' as const, level: 'info' as const, stream: 'stdout' as const, ts: Date.now() };
 }
 
-function logOptions(options: WslOptions, ctx: EngineContext, signal: AbortSignal, processName = 'App', flutter = false) {
+function logOptions(options: WslOptions, ctx: EngineContext, signal: AbortSignal, processName = 'App', flutter = false, reactNative?: ReactNativeLogClassifier) {
   return {
     python: options.python, signal, processName,
-    onLog: (text: string) => ctx.emit({ type: 'app-log' as const, entry: appLogEntry(text, flutter) }),
+    onLog: (text: string) => {
+      // A React Native app's lines: its RCTLog ones read (its console comes from Metro in a debug build).
+      const entry = reactNative ? reactNative.classify(text.replace(/^.*?\b(?=\d{4}-\d{2}-\d{2} |\[(?:trace|info|warn|error|fatal)\]\[tid:)/, '')) : appLogEntry(text, flutter);
+      if (entry) ctx.emit({ type: 'app-log' as const, entry });
+    },
     // Over Wi-Fi, a locked or asleep iPhone drops its logs until it is unlocked again.
     onLocked: () => log(ctx, 'info', 'Unlock your iPhone to see the app’s logs. They come back as soon as you do.'),
   };
 }
 
+/**
+ * Metro for an iPhone on this PC's Wi-Fi: Metro itself listens on this PC's
+ * loopback only (no Windows Firewall prompt for Node.js); CapMac's relay
+ * carries it, its WebSockets too, on the address the iPhone reaches.
+ */
+async function metroForIphone(project: ProjectInfo, options: WslOptions, ctx: EngineContext, signal: AbortSignal): Promise<{ metro: MetroServer; relay: Awaited<ReturnType<typeof startWslLiveRelay>>; hostPort: string }> {
+  const metro = await startMetro(project, { signal }, ctx);
+  try {
+    const relay = await startWslLiveRelay(new URL(`http://127.0.0.1:${metro.port}`), await chooseLiveHost(options.liveHost, ctx));
+    const hostPort = new URL(relay.url).host;
+    log(ctx, 'info', `The app loads its JavaScript from Metro at ${hostPort}: keep the iPhone on this PC's Wi-Fi network, and allow CapMac through Windows Firewall if it asks.`);
+    return { metro, relay, hostPort };
+  } catch (err) {
+    await metro.stop();
+    throw err;
+  }
+}
+
+/** `capmac run` for a React Native app on this PC: Metro (a debug build), build, install and open, then its logs. */
+async function runWslReactNative(project: ProjectInfo, options: WslOptions, ctx: EngineContext, signal: AbortSignal): Promise<void> {
+  const debug = /debug/i.test(reactNativeConfiguration(options));
+  const device = await chooseDevice(options, ctx, signal);
+  let served: Awaited<ReturnType<typeof metroForIphone>> | null = null;
+  try {
+    if (debug) served = await metroForIphone(project, options, ctx, signal);
+    else ctx.emit({ type: 'phase-skipped', phase: 'devserver', reason: 'a release build carries its JavaScript' });
+    const built = await buildProject(project, options, ctx, signal);
+    await deploy(built, device, options, ctx, signal, served ? metroLaunchArgs(served.hostPort) : []);
+    if (options.logs !== false) {
+      try { await streamWslDeviceLogs(device, logOptions(options, ctx, signal, built.processName, false, new ReactNativeLogClassifier(debug))); }
+      finally { await stopWslApp(built.bundleId, device, { python: options.python }).catch(() => undefined); }
+    }
+  } finally {
+    await served?.relay.stop().catch(() => undefined);
+    await served?.metro.stop().catch(() => undefined);
+  }
+}
+
+/**
+ * Live mode for a React Native app on this PC: a debug build on the iPhone
+ * loads its JavaScript from Metro here, so every save shows at once (Fast
+ * Refresh); a change to the packages or the iOS app's folder rebuilds it and
+ * opens it again.
+ */
+async function devWslReactNative(project: ProjectInfo, options: WslOptions, ctx: EngineContext, signal: AbortSignal): Promise<void> {
+  if (!/debug/i.test(reactNativeConfiguration(options))) throw new UserError('Live mode needs a debug build (its JavaScript comes from Metro).', 'Leave out --release, or use `capmac wsl run --release`.');
+  const device = await chooseDevice(options, ctx, signal);
+  await checkedToolchain(options, ctx, signal, true);
+  const signingPassword = await password(options, ctx, project.capDir);
+  const lifetime = new AbortController();
+  const abort = () => lifetime.abort();
+  throwIfAborted(signal);
+  signal.addEventListener('abort', abort, { once: true });
+  let served: Awaited<ReturnType<typeof metroForIphone>> | null = null;
+  let pending = false;
+  let building = false;
+  let first = true;
+  let activeBuild: Promise<void> = Promise.resolve();
+  let launched: WslBuildResult | undefined;
+  let watcher: FSWatcher | undefined;
+  try {
+    served = await metroForIphone(project, options, ctx, lifetime.signal);
+    const args = metroLaunchArgs(served.hostPort);
+    const rebuild = async () => {
+      building = true;
+      try {
+        do {
+          pending = false;
+          const fresh = await loadProject(project.capDir);
+          const built = await buildProject(fresh, first ? options : { ...options, clean: false }, ctx, lifetime.signal, undefined, signingPassword);
+          first = false;
+          await deploy(built, device, options, ctx, lifetime.signal, args);
+          launched = built;
+        } while (pending && !lifetime.signal.aborted);
+      } finally { building = false; }
+    };
+    if (options.watch !== false) watcher = watchWrites(project.syncRoot, (rel) => classifyReactNativeChange(rel, project.projectRel) !== 'ignore', (paths) => {
+      const native = paths.some((rel) => needsNativeRebuild(classifyReactNativeChange(rel, project.projectRel), 'ios'));
+      if (!native) {
+        ctx.emit({ type: 'hmr', state: 'update', at: Date.now(), detail: 'Sent to the app (Fast Refresh)' });
+        return;
+      }
+      ctx.emit({ type: 'native-change', kinds: ['native'], paths });
+      if (building) { pending = true; return; }
+      activeBuild = rebuild().catch((error) => { if (!isCancelled(error)) ctx.emit({ type: 'error', error: toErrorInfo(error) }); });
+    }, 300);
+    activeBuild = rebuild();
+    await activeBuild;
+    const metroGone = served.metro.exited.then((code) => { throw new UserError(`Metro stopped (exit code ${code ?? 'unknown'}).`, 'The app needs it for its JavaScript: start live mode again.'); });
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      if (lifetime.signal.aborted) reject(new CancelledError());
+      else lifetime.signal.addEventListener('abort', () => reject(new CancelledError()), { once: true });
+    });
+    const logs = options.logs === false ? cancelled : streamWslDeviceLogs(device, logOptions(options, ctx, lifetime.signal, launched?.processName, false, new ReactNativeLogClassifier(true)));
+    await Promise.race([metroGone, logs, cancelled]);
+  } finally {
+    lifetime.abort();
+    watcher?.close();
+    await activeBuild.catch(() => undefined);
+    signal.removeEventListener('abort', abort);
+    await served?.relay.stop().catch(() => undefined);
+    await served?.metro.stop().catch(() => undefined);
+    if (launched) await stopWslApp(launched.bundleId, device, { python: options.python }).catch(() => undefined);
+  }
+}
+
 export async function runWsl(input: WslOptions, ctx: EngineContext, signal: AbortSignal): Promise<void> {
   const { project, options } = await projectAndOptions(input);
   if (options.unsigned) throw new UserError('Use `capmac wsl build --unsigned` to validate compilation; running requires signing.');
+  if (project.kind === 'react-native') return runWslReactNative(project, options, ctx, signal);
   const device = await chooseDevice(options, ctx, signal);
   const built = await buildProject(project, options, ctx, signal);
   await deploy(built, device, options, ctx, signal);
@@ -389,6 +574,7 @@ export async function devWsl(input: WslOptions, ctx: EngineContext, signal: Abor
   const { project, options } = await projectAndOptions(input);
   if (options.unsigned) throw new UserError('Use `capmac wsl build --unsigned` to validate compilation; live development requires signing.');
   if (project.kind === 'flutter') return devWslFlutter(project, options, ctx, signal);
+  if (project.kind === 'react-native') return devWslReactNative(project, options, ctx, signal);
   const device = await chooseDevice(options, ctx, signal);
   // Preflight before starting a server. Missing SDKs must not leave a background web process behind.
   await checkedToolchain(options, ctx, signal, true);
