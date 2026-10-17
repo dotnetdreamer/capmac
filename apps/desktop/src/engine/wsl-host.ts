@@ -113,10 +113,11 @@ export function createWslHost(deps: WslHostDeps) {
   /**
    * A run, live or build session on this PC, until it ends or `signal` aborts.
    * `target`: the iPhone's UDID (none: the only one plugged in, or a question);
-   * `clean`: drop earlier native build files first (`--clean`); `flutterMode`: a Flutter app's release (default) or profile build; `configuration`: a React Native app's (Debug unless Release).
+   * `clean`: drop earlier native build files first (`--clean`); `webBuild: false`: use the web files already built (`--no-web-build`);
+   * `flutterMode`: a Flutter app's release (default) or profile build; `configuration`: a React Native app's (Debug unless Release).
    */
-  async function session(mode: 'run' | 'live' | 'build', project: ProjectInfo, target: string | undefined, ctx: EngineContext, signal: AbortSignal, onIpa: (file: string, size: number) => void, options: { clean?: boolean; flutterMode?: 'debug' | 'profile' | 'release'; configuration?: string } = {}): Promise<void> {
-    const input = { cwd: project.capDir, ...(target ? { target } : {}), ...(options.clean ? { clean: true } : {}), ...(options.flutterMode ? { mode: options.flutterMode } : {}), ...(options.configuration ? { configuration: options.configuration } : {}) };
+  async function session(mode: 'run' | 'live' | 'build', project: ProjectInfo, target: string | undefined, ctx: EngineContext, signal: AbortSignal, onIpa: (file: string, size: number) => void, options: { clean?: boolean; webBuild?: boolean; flutterMode?: 'debug' | 'profile' | 'release'; configuration?: string } = {}): Promise<void> {
+    const input = { cwd: project.capDir, ...(target ? { target } : {}), ...(options.clean ? { clean: true } : {}), ...(options.webBuild === false ? { webBuild: false } : {}), ...(options.flutterMode ? { mode: options.flutterMode } : {}), ...(options.configuration ? { configuration: options.configuration } : {}) };
     if (mode === 'run') return engine.runWsl(input, ctx, signal);
     if (mode === 'live') return engine.devWsl(input, ctx, signal);
     const built = await engine.buildWsl(input, ctx, signal);

@@ -173,6 +173,37 @@ describe('the run timeline', () => {
     expect(run().phases.launch).toMatchObject({ status: 'done', ms: 9000 });
   });
 
+  it('remembers a run without building, for Try again', () => {
+    apply(
+      { type: 'session-started', mode: 'run', projectPath, mac: 'ik-s-m1', target: null, webBuild: false },
+      { type: 'phase-skipped', phase: 'web', reason: 'using the web files already built' },
+    );
+    expect(run().keepsWebFiles).toBe(true);
+    expect(run().phases.web).toMatchObject({ status: 'skipped' });
+    // The next plain run builds the web app again.
+    apply({ type: 'session-ended', mode: 'run', ok: true, cancelled: false, ms: 1000 }, { type: 'session-started', mode: 'run', projectPath, mac: 'ik-s-m1', target: null });
+    expect(run().keepsWebFiles).toBe(false);
+  });
+
+  it('follows a sync to done, then shows it as the last session', () => {
+    apply(
+      { type: 'session-started', mode: 'sync', projectPath, mac: 'ik-s-m1', target: null },
+      { type: 'step', id: 'sync', title: 'Syncing', phase: 'sync' },
+      { type: 'step-end', id: 'sync', status: 'ok', ms: 400 },
+      { type: 'phase-skipped', phase: 'deps', reason: 'dependencies unchanged' },
+      { type: 'step', id: 'prepare:cap', title: 'npx cap sync ios', phase: 'cap' },
+    );
+    expect(run()).toMatchObject({ mode: 'sync', status: 'building' });
+    expect(isActive(run())).toBe(true);
+    apply({ type: 'step-end', id: 'prepare:cap', status: 'ok', ms: 3000 }, { type: 'session-ended', mode: 'sync', ok: true, cancelled: false, ms: 3500 });
+    expect(run().status).toBe('done');
+    expect(isActive(run())).toBe(false);
+    expect(run().phases.cap).toMatchObject({ status: 'done', ms: 3000 });
+
+    apply({ type: 'session-started', mode: 'run', projectPath, mac: 'ik-s-m1', target: null });
+    expect(run().previous).toMatchObject({ runNumber: 1, mode: 'sync', ok: true });
+  });
+
   it('ignores events without a project', () => {
     useRuns.getState().apply([{ scope: { mac: 'ik-s-m1' }, event: { type: 'app', state: 'running' } }]);
     expect(useRuns.getState().byKey).toEqual({});

@@ -7,6 +7,9 @@ import { AgentCallError } from '../../packages/core/src/engine/agent-client.js';
 import { SshError } from '../../packages/core/src/engine/ssh.js';
 import { PathMapper } from '../../packages/core/src/shared/paths.js';
 import { localChecks, macChecks } from '../../packages/core/src/engine/doctor.js';
+import type { MacLink } from '../../packages/core/src/engine/link.js';
+import type { ProjectInfo } from '../../packages/core/src/engine/project.js';
+import { runApp } from '../../packages/core/src/engine/run.js';
 import type { ProbeResult } from '../../packages/core/src/shared/protocol.js';
 
 function recorder(): { ctx: EngineContext; events: EngineEvent[] } {
@@ -89,6 +92,17 @@ describe('AppLogClassifier', () => {
     expect(second).toMatchObject({ kind: 'console', level: 'error', text: '    at main.js:10:5', continuation: true });
     expect(native).toMatchObject({ kind: 'native' });
     expect(native?.continuation).toBeUndefined();
+  });
+});
+
+describe('a run without building', () => {
+  it('shows the web build as skipped, keeping the web files built before (like `cap run`)', async () => {
+    const { ctx, events } = recorder();
+    const project = { kind: 'capacitor', hasIos: true, iosDir: 'ios' } as unknown as ProjectInfo;
+    // No Mac: the run stops at connecting, after the web step was decided.
+    const link = { session: () => Promise.reject(new Error('no Mac here')) } as unknown as MacLink;
+    await expect(runApp(project, link, { webBuild: false }, ctx, new AbortController().signal)).rejects.toThrow('no Mac here');
+    expect(events).toEqual([{ type: 'phase-skipped', phase: 'web', reason: 'using the web files already built' }]);
   });
 });
 

@@ -5,7 +5,7 @@ import type { FSWatcher } from 'node:fs';
 import { log, throwIfAborted, withStep, type EngineContext, type StepHandle } from '../context.js';
 import { startDevServer, type DevServer } from '../devserver.js';
 import { CancelledError, isCancelled, toErrorInfo, UserError } from '../errors.js';
-import { buildWeb } from '../pipeline.js';
+import { buildWeb, skipWebBuild } from '../pipeline.js';
 import { loadProject, type ProjectInfo } from '../project.js';
 import { watchNativeChanges } from '../watch.js';
 import type { WslBuildPlan } from './compiler.js';
@@ -276,7 +276,8 @@ async function buildProject(project: ProjectInfo, options: WslOptions, ctx: Engi
     password: options.unsigned ? '' : cachedPassword ?? await password(options, ctx, project.capDir),
     extensionProfiles: Object.fromEntries(Object.entries(options.extensionProfiles ?? {}).map(([id, file]) => [id, path.resolve(project.capDir, file)])),
   };
-  if (options.webBuild !== false && (!liveUrl || !existsSync(path.join(project.capDir, project.webDir, 'index.html')))) await buildWeb(project, ctx, signal);
+  if (options.webBuild === false) skipWebBuild(ctx);
+  else if (!liveUrl || !existsSync(path.join(project.capDir, project.webDir, 'index.html'))) await buildWeb(project, ctx, signal);
   const generated = path.join(project.capDir, '.capmac', 'wsl');
   const executor = new WslExecutor(toolchain.distro);
   return withPodsBuildLock(generated, async () => {

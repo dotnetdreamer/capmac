@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ErrorInfo, MacSummary } from '../../../shared/contract';
 import { t, tidy } from '../../../shared/i18n';
 import { emitWorkspace } from '../../app/commands';
-import { openDevTools, rebuild, relaunch, reloadApp, startSession } from '../../state/actions';
+import { openDevTools, rebuild, relaunch, reloadApp, startAgain } from '../../state/actions';
 import { isActive, isBusy, type RunState } from '../../state/runs';
 import { clockTime, formatDuration, timeAgo } from '../../lib/format';
 import { Button } from '../../ui/Button';
@@ -230,6 +230,23 @@ function RunCard({ run }: { run: RunState }) {
   );
 }
 
+/** Sync: the project going to the Mac, `cap sync` there, nothing built or opened. */
+function SyncCard({ mac }: { mac: MacSummary | null }) {
+  return (
+    <div className="session-bar" role="status">
+      <span className="session-bar__mode session-bar__mode--run">
+        <Icon name="sync" size={14} />
+        {t.session.sync}
+      </span>
+      <span className="session-bar__text">
+        <Spinner size={14} /> {t.session.syncing(mac?.label ?? t.session.mac)}
+      </span>
+      <span className="session-bar__spacer" />
+      <span className="faint">{t.session.syncNote}</span>
+    </div>
+  );
+}
+
 /**
  * The engine's hint for a failed build is written for the terminal ("re-run with
  * --verbose"); here the problems, the output and the build log are one click away.
@@ -267,7 +284,7 @@ function FailureCard({ path, run }: { path: string; run: RunState }) {
                 {t.session.buildLog}
               </Button>
             )}
-            <Button size="sm" variant="subtle" icon="refresh" onClick={() => void startSession(path, run.mode === 'live' ? 'live' : run.mode === 'ipa' && run.backend === 'wsl' ? 'build' : 'run')}>
+            <Button size="sm" variant="subtle" icon="refresh" onClick={() => void startAgain(path, run)}>
               {t.common.tryAgain}
             </Button>
           </>
@@ -302,6 +319,7 @@ export function SessionBar({ path, run, mac, electron = null, flutter = false, r
   if (active && run.mode === 'live' && run.live && run.onMac && electron !== 'capacitor') return <MacLiveCard path={path} run={run} mac={mac} />;
   if (active && run.mode === 'live' && run.live) return <LiveCard path={path} run={run} mac={mac} />;
   if (active && run.mode === 'run') return <RunCard run={run} />;
+  if (active && run.mode === 'sync') return <SyncCard mac={mac} />;
   if (mac && mac.state === 'restored' && active) {
     return (
       <div className="session-banner">

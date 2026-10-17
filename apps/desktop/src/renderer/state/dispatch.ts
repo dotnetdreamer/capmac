@@ -1,5 +1,5 @@
 /** Routes engine event batches to the stores that show them. */
-import type { AppDialog, Envelope } from '../../shared/contract';
+import type { AppDialog, Envelope, SessionMode } from '../../shared/contract';
 import { t, tidy } from '../../shared/i18n';
 import { toast, useApp } from './app';
 import { consoleFor, type ConsoleLevel } from './console';
@@ -33,6 +33,14 @@ function dialogLine(dialog: AppDialog): string {
   if (dialog.kind === 'message') return t.appDialog.asks(app, dialog.message || dialog.title || t.appDialog.message);
   if (dialog.kind === 'save') return t.appDialog.wantsSave(app);
   return dialog.properties.includes('openDirectory') && !dialog.properties.includes('openFile') ? t.appDialog.wantsFolder(app) : t.appDialog.wantsFile(app);
+}
+
+/** The console line a session starts with. */
+function startedLine(mode: SessionMode, keepsWebFiles: boolean): string {
+  if (mode === 'live') return t.console.liveStarted;
+  if (mode === 'ipa') return t.console.ipaStarted;
+  if (mode === 'sync') return t.console.syncStarted;
+  return keepsWebFiles ? t.console.runNoBuildStarted : t.console.runStarted;
 }
 
 function showsProject(path: string): boolean {
@@ -69,7 +77,7 @@ export function handleBatch(batch: Envelope[]): void {
           buffer.pushText('capmac', t.console.nativeChange(event.paths.slice(0, 3).join(', '), Math.max(0, event.paths.length - 3)), 'info');
           break;
         case 'session-started':
-          buffer.pushText('capmac', event.mode === 'live' ? t.console.liveStarted : event.mode === 'ipa' ? t.console.ipaStarted : t.console.runStarted, 'info');
+          buffer.pushText('capmac', startedLine(event.mode, event.webBuild === false), 'info');
           break;
         case 'app-dialogs': {
           // An Electron app asks something: it shows over the app's window, and in the console.
@@ -102,8 +110,14 @@ export function handleBatch(batch: Envelope[]): void {
             buffer.pushText('capmac', event.error.hint ? `${event.error.message} → ${event.error.hint}` : event.error.message, 'error');
             if (!showsProject(scope.projectPath)) {
               const path = scope.projectPath;
-              toast({ tone: 'critical', title: t.console.buildFailed(projectName(path), event.mode === 'ipa'), body: tidy(event.error.message), action: { label: t.common.open, run: () => useApp.getState().navigate({ name: 'project', path }) } });
+              const title = event.mode === 'sync' ? t.console.syncFailed(projectName(path)) : t.console.buildFailed(projectName(path), event.mode === 'ipa');
+              toast({ tone: 'critical', title, body: tidy(event.error.message), action: { label: t.common.open, run: () => useApp.getState().navigate({ name: 'project', path }) } });
             }
+          } else if (event.mode === 'sync' && event.ok && !event.cancelled) {
+            // A sync opens nothing on the Mac: say it's done.
+            buffer.pushText('capmac', t.console.syncDone, 'info');
+            const mac = useMacs.getState().macs.find((m) => m.name === scope.mac);
+            toast({ tone: 'success', title: t.session.synced(mac?.label ?? scope.mac ?? t.session.mac), body: t.session.syncedBody });
           }
           break;
         case 'ipa-ready': {

@@ -67,6 +67,7 @@ import {
   thisPc,
   shutdownSimulator,
   summarizeProject,
+  syncApp,
   syncSize,
   takeAppScreenshot,
   takeScreenshot,
@@ -336,11 +337,11 @@ async function findTarget(mac: string, udid: string): Promise<Target> {
   return target;
 }
 
-// ─── Sessions (run, live, ipa) ─────────────────────────────────────────────
+// ─── Sessions (run, live, ipa, sync) ───────────────────────────────────────
 
 interface HostSession {
   id: string;
-  mode: 'run' | 'live' | 'ipa';
+  mode: 'run' | 'live' | 'ipa' | 'sync';
   projectPath: string;
   /** None when it builds on this PC. */
   mac: string | null;
@@ -392,10 +393,13 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
   const existing = sessionFor(params.projectPath);
   if (existing) await stopSession(existing.id);
   const project = await loadProject(params.projectPath);
+  // Sync is Capacitor's `cap sync ios`, on the Mac.
+  if (params.mode === 'sync' && (project.kind === 'flutter' || project.kind === 'react-native')) throw new UserError(t.host.syncCapacitorOnly, t.host.syncCapacitorOnlyHint);
   if (project.kind === 'flutter') return startFlutterSession(params, project);
   if (project.kind === 'react-native') return startReactNativeSession(params, project);
   // The app asked for (the toolbar's app picker), else the Mac's desktop as the target, else the one picked for the project.
-  const onMac = params.mode !== 'ipa' && runsOnMac(project, { app: 'app' in params ? params.app : undefined, target: 'target' in params && params.target === MAC_TARGET_ID ? 'mac' : undefined });
+  // A sync is the iOS app's (`cap sync ios`).
+  const onMac = params.mode !== 'ipa' && params.mode !== 'sync' && runsOnMac(project, { app: 'app' in params ? params.app : undefined, target: 'target' in params && params.target === MAC_TARGET_ID ? 'mac' : undefined });
   if (!onMac) requireIos(project);
   // An Electron app runs on the Mac's desktop; the iOS app builds where the project builds.
   if (params.mode !== 'ipa' && !onMac && ((params.backend ?? (await backendOf(project))) === 'wsl')) return startPcSession(params, project);
@@ -407,8 +411,10 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
   const controller = new AbortController();
   const l = link(mac);
   const started = Date.now();
-  const target = 'target' in params && !onMac && params.target !== MAC_TARGET_ID ? params.target : undefined;
-  emit(scope, { type: 'session-started', mode: params.mode, projectPath: project.capDir, mac, target: onMac ? MAC_TARGET_ID : target ?? null });
+  const target = 'target' in params && !onMac && params.mode !== 'sync' && params.target !== MAC_TARGET_ID ? params.target : undefined;
+  // Run without building: the timeline and "Try again" keep to it.
+  const keepsWebFiles = params.mode === 'run' && params.options?.webBuild === false;
+  emit(scope, { type: 'session-started', mode: params.mode, projectPath: project.capDir, mac, target: onMac ? MAC_TARGET_ID : target ?? null, ...(keepsWebFiles ? { webBuild: false as const } : {}) });
   const end = (err?: unknown) => {
     sessions.delete(id);
     const info = err === undefined ? undefined : toErrorInfo(err);
@@ -424,6 +430,9 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
   } else if (params.mode === 'run') {
     const options = params.options ?? {};
     session.done = runApp(project, l, { target, ...options, osLogs: options.osLogs ?? settings.osLogs }, ctx, controller.signal).then(() => end(), end);
+  } else if (params.mode === 'sync') {
+    const options = params.options ?? {};
+    session.done = l.session().then((s) => syncApp(project, s, { full: options.full }, ctx, controller.signal)).then(() => end(), end);
   } else if (params.mode === 'live') {
     const options = params.options ?? {};
     const live = onMac
@@ -443,6 +452,8 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
 
 /** Run, live or build on this PC: no Mac, the iPhone plugged into this PC. */
 function startPcSession(params: MethodParams<'sessions.start'>, project: ProjectInfo): { sessionId: string } {
+  // Sync copies the project to a Mac: here every Run brings it up to date.
+  if (params.mode === 'sync') throw new UserError(t.host.syncMacOnly, t.host.syncMacOnlyHint);
   const id = newId('s');
   const scope: Scope = { sessionId: id, projectPath: project.capDir };
   const ctx = contextFor(scope);
@@ -451,7 +462,9 @@ function startPcSession(params: MethodParams<'sessions.start'>, project: Project
   // A build here makes the .ipa: it shows like the Mac's IPA builds.
   const mode = params.mode === 'build' ? 'ipa' : params.mode;
   const target = params.target && params.target !== MAC_TARGET_ID ? params.target : undefined;
-  emit(scope, { type: 'session-started', mode, projectPath: project.capDir, mac: null, target: target ?? null, backend: 'wsl' });
+  // Run without building: the timeline and "Try again" keep to it.
+  const keepsWebFiles = params.mode === 'run' && params.options?.webBuild === false;
+  emit(scope, { type: 'session-started', mode, projectPath: project.capDir, mac: null, target: target ?? null, backend: 'wsl', ...(keepsWebFiles ? { webBuild: false as const } : {}) });
   const end = (err?: unknown) => {
     sessions.delete(id);
     const info = err === undefined ? undefined : toErrorInfo(err);
@@ -460,7 +473,7 @@ function startPcSession(params: MethodParams<'sessions.start'>, project: Project
   };
   const session: HostSession = { id, mode, projectPath: project.capDir, mac: null, controller, live: null, done: Promise.resolve() };
   sessions.set(id, session);
-  session.done = wslHost.session(params.mode, project, target, ctx, controller.signal, (file, size) => emit(scope, { type: 'ipa-ready', file, size }), { clean: params.options?.clean, flutterMode: params.options?.flutterMode, configuration: params.options?.configuration }).then(() => end(), end);
+  session.done = wslHost.session(params.mode, project, target, ctx, controller.signal, (file, size) => emit(scope, { type: 'ipa-ready', file, size }), { clean: params.options?.clean, webBuild: params.options?.webBuild, flutterMode: params.options?.flutterMode, configuration: params.options?.configuration }).then(() => end(), end);
   return { sessionId: id };
 }
 

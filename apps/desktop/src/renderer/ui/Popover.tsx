@@ -2,7 +2,8 @@ import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, ty
 import { Icon, type IconName } from './Icon';
 import { Kbd } from './Feedback';
 
-export type Placement = 'bottom-start' | 'bottom-end' | 'top-start' | 'top-end' | 'right-start';
+/** `point`: where `showAt` says (a context menu at the pointer). */
+export type Placement = 'bottom-start' | 'bottom-end' | 'top-start' | 'top-end' | 'right-start' | 'point';
 
 /**
  * Popover state shared by a trigger and its flyout. The flyout lives in the
@@ -35,12 +36,31 @@ export function usePopover() {
       // already open
     }
   }, []);
+  /** Opens a `point` flyout at (x, y), kept inside the window (flipped up or left near its edges). */
+  const showAt = useCallback((x: number, y: number) => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+    try {
+      el.showPopover();
+    } catch {
+      // already open: moved
+    }
+    // Placed before the first paint: the size is known once it is open.
+    const { offsetWidth: width, offsetHeight: height } = el;
+    const left = x + width > window.innerWidth - 4 ? Math.max(4, x - width) : x;
+    const top = y + height > window.innerHeight - 4 ? Math.max(4, y - height) : y;
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+  }, []);
   return {
     id,
     ref,
     open,
     close,
     show,
+    showAt,
     triggerProps: { popoverTarget: id, 'aria-expanded': open, 'aria-controls': id } as const,
   };
 }
@@ -70,6 +90,8 @@ export function Popover({
 export interface MenuItemSpec {
   id: string;
   label: string;
+  /** A second, smaller line under the label. */
+  description?: string;
   icon?: IconName;
   shortcut?: string;
   hint?: string;
@@ -120,7 +142,7 @@ export function Menu({ state, items, label, placement = 'bottom-end', width }: {
               type="button"
               role={item.checked !== undefined ? 'menuitemcheckbox' : 'menuitem'}
               aria-checked={item.checked}
-              className={`menu__item${item.danger ? ' is-danger' : ''}`}
+              className={`menu__item${item.danger ? ' is-danger' : ''}${item.description ? ' has-description' : ''}`}
               disabled={item.disabled}
               onClick={() => {
                 state.close();
@@ -129,7 +151,14 @@ export function Menu({ state, items, label, placement = 'bottom-end', width }: {
             >
               {hasChecks && <span className="menu__check">{item.checked && <Icon name="check" size={16} />}</span>}
               {item.icon && <Icon name={item.icon} size={16} />}
-              <span className="menu__label">{item.label}</span>
+              {item.description ? (
+                <span className="menu__text">
+                  <span className="menu__label">{item.label}</span>
+                  <span className="menu__description">{item.description}</span>
+                </span>
+              ) : (
+                <span className="menu__label">{item.label}</span>
+              )}
               {item.hint && <span className="menu__hint">{item.hint}</span>}
               {item.shortcut && <Kbd keys={item.shortcut} />}
             </button>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { t, tidy } from '../../../shared/i18n';
 import { formatDuration } from '../../lib/format';
 import { Rich } from '../../ui/Rich';
-import { CAP_ELECTRON_PHASES, ELECTRON_PHASES, FLUTTER_IPA_PHASES, FLUTTER_MAC_PHASES, FLUTTER_PC_PHASES, FLUTTER_PHASES, IPA_PHASES, isBusy, PC_IPA_PHASES, PC_PHASES, phaseLabel, REACT_NATIVE_MAC_PHASES, REACT_NATIVE_PC_PHASES, REACT_NATIVE_PHASES, REACT_NATIVE_WINDOWS_PHASES, RUN_PHASES, type PhaseState, type RunState, type TimelinePhase } from '../../state/runs';
+import { CAP_ELECTRON_PHASES, ELECTRON_PHASES, FLUTTER_IPA_PHASES, FLUTTER_MAC_PHASES, FLUTTER_PC_PHASES, FLUTTER_PHASES, IPA_PHASES, isBusy, PC_IPA_PHASES, PC_PHASES, phaseLabel, REACT_NATIVE_MAC_PHASES, REACT_NATIVE_PC_PHASES, REACT_NATIVE_PHASES, REACT_NATIVE_WINDOWS_PHASES, RUN_PHASES, SYNC_PHASES, type PhaseState, type RunState, type TimelinePhase } from '../../state/runs';
 import { ProgressBar, Spinner } from '../../ui/Feedback';
 import { Icon } from '../../ui/Icon';
 
@@ -16,6 +16,7 @@ const SHORT_DETAIL: Array<[RegExp, string]> = [
   [/not needed on a device/i, t.timeline.short.device],
   [/turned off/i, t.timeline.short.off],
   [/not installed on this PC/i, t.timeline.short.prebuilt],
+  [/already built/i, t.timeline.short.prebuilt],
   [/no build script/i, t.timeline.short.noScript],
   [/app unchanged/i, t.timeline.short.unchanged],
   [/already on the Mac/i, t.timeline.short.upToDate],
@@ -77,11 +78,15 @@ export function Timeline({ run, electron = null, macSelected = false, pcSelected
   const starting = busy && !hasCurrent;
   const showingPrevious = !hasCurrent && !starting && Boolean(run?.previous);
   const phases: Partial<Record<TimelinePhase, PhaseState>> = hasCurrent || starting ? run!.phases : run?.previous?.phases ?? {};
-  const order = reactNative && run?.mode !== 'ipa'
+  // The steps of the session shown (the last one, dimmed, until the new one has some).
+  const mode = showingPrevious ? run?.previous?.mode : run?.mode;
+  const order = mode === 'sync'
+    ? SYNC_PHASES
+    : reactNative && mode !== 'ipa'
     ? pc ? REACT_NATIVE_PC_PHASES : onPcDesktop ? REACT_NATIVE_WINDOWS_PHASES : onMac ? REACT_NATIVE_MAC_PHASES : REACT_NATIVE_PHASES
     : flutter && !pc
-    ? run?.mode === 'ipa' ? FLUTTER_IPA_PHASES : onPcDesktop ? FLUTTER_PC_PHASES : onMac ? FLUTTER_MAC_PHASES : FLUTTER_PHASES
-    : pc ? (run?.mode === 'ipa' ? PC_IPA_PHASES : PC_PHASES) : run?.mode === 'ipa' ? IPA_PHASES : onMac ? (electron === 'capacitor' ? CAP_ELECTRON_PHASES : ELECTRON_PHASES) : RUN_PHASES;
+    ? mode === 'ipa' ? FLUTTER_IPA_PHASES : onPcDesktop ? FLUTTER_PC_PHASES : onMac ? FLUTTER_MAC_PHASES : FLUTTER_PHASES
+    : pc ? (mode === 'ipa' ? PC_IPA_PHASES : PC_PHASES) : mode === 'ipa' ? IPA_PHASES : onMac ? (electron === 'capacitor' ? CAP_ELECTRON_PHASES : ELECTRON_PHASES) : RUN_PHASES;
   const runningPhase = order.find((p) => phases[p]?.status === 'running');
   const running = runningPhase ? phases[runningPhase] : undefined;
   const failed = order.find((p) => phases[p]?.status === 'failed');
@@ -114,7 +119,9 @@ export function Timeline({ run, electron = null, macSelected = false, pcSelected
     <div className={`timeline${showingPrevious ? ' is-previous' : ''}`}>
       <div className="timeline__summary" aria-live="polite">
         <span className="timeline__run">
-          {showingPrevious ? t.timeline.lastRun(run.previous!.runNumber) : t.timeline.run(run.runNumber)}
+          {showingPrevious
+            ? (mode === 'sync' ? t.timeline.lastSync : t.timeline.lastRun)(run.previous!.runNumber)
+            : (mode === 'sync' ? t.timeline.sync : t.timeline.run)(run.runNumber)}
           {run.mode === 'live' && !showingPrevious && <span className="badge badge--success">{t.common.live}</span>}
         </span>
         {elapsed !== null && <span className="timeline__time tabular">{formatDuration(elapsed)}</span>}

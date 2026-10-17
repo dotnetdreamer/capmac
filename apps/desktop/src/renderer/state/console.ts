@@ -5,6 +5,7 @@
  */
 import type { AppLogEntry } from '../../shared/contract';
 import { t } from '../../shared/i18n';
+import { clockTime } from '../lib/format';
 import { projectKey } from './projects';
 
 /** 'main' and 'electron': an Electron app's main process, and Chromium inside it. */
@@ -23,6 +24,26 @@ export interface ConsoleLine {
 
 export const SOURCE_LABELS: Record<ConsoleSource, string> = t.console.sources;
 export const SOURCE_TAGS: Record<ConsoleSource, string> = t.console.tags;
+
+/**
+ * What a project's app calls its sources. `dart`: a Flutter app, whose 'js'
+ * lines are Dart's print() and debugPrint(). `appNative`: a Flutter or React
+ * Native app, whose native lines come from iOS, the Mac or Windows: APP, not iOS.
+ */
+export interface SourceNames {
+  dart?: boolean;
+  appNative?: boolean;
+}
+
+export function sourceTag(source: ConsoleSource, names: SourceNames = {}): string {
+  if (names.dart && source === 'js') return t.console.dartTag;
+  if (names.appNative && source === 'native') return t.console.flutterNativeTag;
+  return SOURCE_TAGS[source];
+}
+
+export function sourceLabel(source: ConsoleSource, names: SourceNames = {}): string {
+  return names.dart && source === 'js' ? t.console.dart : SOURCE_LABELS[source];
+}
 
 const KIND_TO_SOURCE: Record<AppLogEntry['kind'], ConsoleSource> = { console: 'js', capacitor: 'cap', native: 'native', bridge: 'bridge', main: 'main', electron: 'electron' };
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
@@ -135,38 +156,93 @@ export const DEFAULT_FILTER: ConsoleFilter = {
   levels: { error: true, warn: true, info: true, log: true, debug: true },
 };
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** A case-insensitive test for `needle` (a regular expression allocates nothing per line, unlike toLowerCase). */
+function matcherFor(needle: string): (text: string) => boolean {
+  const re = new RegExp(escapeRegExp(needle), 'i');
+  return (text) => re.test(text);
+}
+
+/** The first position in sorted `values` (up to `end`) whose value is at least `value`. */
+export function lowerBound(values: ArrayLike<number>, value: number, end = values.length): number {
+  let lo = 0;
+  let hi = end;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (values[mid]! < value) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 /**
- * The lines a filter shows (`ids`) and where a search query matches among
- * them (`matches`, positions in `ids`). Both are kept up to date
- * incrementally as lines arrive; they are rebuilt only when the filter or
- * query changes, or when old lines were dropped.
+ * The lines a filter shows (`ids`, ascending) and where a search query
+ * matches among them (`matches`, ascending positions in `ids`). Both are kept
+ * up to date incrementally as lines arrive. `generation` counts the times
+ * `ids` changed other than by lines added at the end: a new filter or a
+ * cleared console rebuilds it; old lines dropped at the line limit only cut
+ * its front (`trimmed` says how many). Typing more of a query only re-checks
+ * the lines that matched before.
  */
 export class ConsoleView {
   ids: number[] = [];
   matches: number[] = [];
+  /** Bumped whenever `ids` changed other than by lines added at the end. */
+  generation = 0;
+  /** At the last generation: how many ids were cut from the front (old lines dropped), or -1 (rebuilt). */
+  trimmed = -1;
   private processedUpTo = 0;
   private epoch = -1;
   private filterKey = '';
   private needle = '';
+  private test: ((text: string) => boolean) | null = null;
   private lastSeen: { id: number; text: string } | null = null;
 
   update(buffer: ConsoleBuffer, filter: ConsoleFilter, query: string): void {
     const key = JSON.stringify(filter);
     const needle = query.trim().toLowerCase();
     const accepts = (line: ConsoleLine) => filter.sources[line.source] && filter.levels[line.level];
-    const hit = (line: ConsoleLine) => needle !== '' && line.text.toLowerCase().includes(needle);
+    if (needle !== this.needle || (needle && !this.test)) this.test = needle ? matcherFor(needle) : null;
+    const test = this.test;
+    const hit = (line: ConsoleLine) => test !== null && test(line.text);
+    if (key === this.filterKey && this.epoch !== buffer.epoch && buffer.lines.length > 0 && this.processedUpTo >= buffer.firstId - 1) {
+      // Old lines were dropped at the line limit: the same view without its first lines.
+      this.epoch = buffer.epoch;
+      const cut = lowerBound(this.ids, buffer.firstId);
+      if (cut > 0) {
+        this.ids = this.ids.slice(cut);
+        const firstMatch = lowerBound(this.matches, cut);
+        this.matches = this.matches.slice(firstMatch);
+        for (let i = 0; i < this.matches.length; i++) this.matches[i]! -= cut;
+        this.generation += 1;
+        this.trimmed = cut;
+      }
+    }
     if (key !== this.filterKey || this.epoch !== buffer.epoch) {
       this.filterKey = key;
       this.epoch = buffer.epoch;
+      this.generation += 1;
+      this.trimmed = -1;
       this.ids = [];
       this.matches = [];
       this.processedUpTo = buffer.firstId - 1;
       this.lastSeen = null;
       this.needle = needle;
     } else if (needle !== this.needle) {
+      // A longer query only matches lines the shorter one did: re-check those alone.
+      const narrower = this.needle !== '' && needle.includes(this.needle);
       this.needle = needle;
-      this.matches = [];
-      if (needle) this.ids.forEach((id, i) => hit(buffer.byId(id)!) && this.matches.push(i));
+      if (!needle) this.matches = [];
+      else if (narrower) this.matches = this.matches.filter((pos) => hit(buffer.byId(this.ids[pos]!)!));
+      else {
+        const matches: number[] = [];
+        const ids = this.ids;
+        for (let i = 0; i < ids.length; i++) if (hit(buffer.byId(ids[i]!)!)) matches.push(i);
+        this.matches = matches;
+      }
     }
     // The newest line may have grown (a merged multi-line console message): re-check it.
     const lastLine = buffer.lines[buffer.lines.length - 1];
@@ -191,6 +267,82 @@ export class ConsoleView {
       this.lastSeen = { id: lastLine.id, text: lastLine.text };
     }
   }
+}
+
+// ─── Copying ───────────────────────────────────────────────────────────────
+
+/**
+ * A line as text ("12:04:05.123 JS  ERROR message"), and where each of its
+ * columns starts in that text: copying part of a row maps a point in the
+ * row's time, tag, level or message to an offset here.
+ */
+export interface RowText {
+  text: string;
+  /** End of the time (0 without timestamps). */
+  timeEnd: number;
+  tagStart: number;
+  tagEnd: number;
+  levelStart: number;
+  /** Where the message starts. */
+  textStart: number;
+}
+
+export function rowText(line: ConsoleLine, timestamps = true, names: SourceNames = {}): RowText {
+  const time = timestamps ? clockTime(line.ts, true) : '';
+  const tag = sourceTag(line.source, names);
+  const level = line.level === 'error' ? 'ERROR ' : line.level === 'warn' ? 'WARN ' : '';
+  const tagStart = time ? time.length + 1 : 0;
+  const levelStart = tagStart + Math.max(3, tag.length) + 1;
+  return {
+    text: `${time ? `${time} ` : ''}${tag.padEnd(3)} ${level}${line.text}`,
+    timeEnd: time.length,
+    tagStart,
+    tagEnd: tagStart + tag.length,
+    levelStart,
+    textStart: levelStart + level.length,
+  };
+}
+
+/** A line as one line of text, for copying and saving. */
+export function lineText(line: ConsoleLine, timestamps = true, names: SourceNames = {}): string {
+  return rowText(line, timestamps, names).text;
+}
+
+/** A point in the console's text: the line and an offset in its `rowText` (`END`: its end). */
+export interface TextPoint {
+  id: number;
+  offset: number;
+  /** In an expanded JSON tree, where offsets don't follow the line's text: the whole message counts. */
+  json?: boolean;
+}
+
+export const END = Number.MAX_SAFE_INTEGER;
+
+/**
+ * The text between two points (in either order) over the lines a view shows,
+ * as copied: whole lines in between, the first and last cut at the points.
+ * Lines that went away since (filtered out or dropped) are skipped.
+ */
+export function textBetween(a: TextPoint, b: TextPoint, ids: ArrayLike<number>, count: number, lineOf: (id: number) => ConsoleLine | undefined, timestamps: boolean, names: SourceNames = {}): string {
+  const [from, to] = a.id < b.id || (a.id === b.id && a.offset <= b.offset) ? [a, b] : [b, a];
+  const first = lowerBound(ids, from.id, count);
+  // The last line: `to`'s own, or the one before where it would be.
+  let last = lowerBound(ids, to.id, count);
+  const lastExact = last < count && ids[last] === to.id;
+  if (!lastExact) last -= 1;
+  const firstExact = first < count && ids[first] === from.id;
+  const out: string[] = [];
+  for (let i = first; i <= last; i++) {
+    const line = lineOf(ids[i]!);
+    if (!line) continue;
+    const row = rowText(line, timestamps, names);
+    let start = 0;
+    let end = row.text.length;
+    if (i === first && firstExact) start = from.json ? row.textStart : Math.min(from.offset, end);
+    if (i === last && lastExact) end = to.json ? row.text.length : Math.min(to.offset, end);
+    out.push(row.text.slice(start, Math.max(start, end)));
+  }
+  return out.join('\n');
 }
 
 // ─── JSON in console.log output ────────────────────────────────────────────

@@ -91,6 +91,10 @@
 .ws-toolbar__session .btn {
   min-width: 76px;
 }
+/* Run's arrow (more ways to run) is just the arrow. */
+.ws-toolbar__session .split__more {
+  min-width: 0;
+}
 .ws-toolbar__session .btn .dot {
   margin-left: 2px;
 }
@@ -973,6 +977,8 @@
 }
 
 .console__scroll {
+  /* Rows measure their place from here (offsetTop). */
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -985,15 +991,24 @@
     box-shadow: inset 0 0 0 2px var(--focus-outer);
   }
 }
-.console__inner {
-  position: relative;
+/* Only the rows near the view are here, in normal flow, between two spacers
+   that stand in for the rest (so the browser's scroll anchoring works). */
+.console__rows {
   width: 100%;
 }
-.console__item {
+.console__gap {
+  /* Never the line the browser keeps in place. */
+  overflow-anchor: none;
+}
+/* Measures the monospace font's width (characters per wrapped line). */
+.cl-probe {
   position: absolute;
   top: 0;
   left: 0;
-  width: 100%;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre;
+  font: var(--type-mono);
 }
 .cl-row {
   display: flex;
@@ -1085,14 +1100,16 @@
     overflow-wrap: anywhere;
   }
 }
+/* Back to the latest line: a round arrow, or a pill saying how many lines came in. */
 .console__jump {
   position: absolute;
   right: var(--s-5);
   bottom: var(--s-4);
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: var(--s-1_5);
-  height: 28px;
+  height: 32px;
   padding: 0 var(--s-3);
   border: 1px solid var(--stroke-surface);
   border-radius: var(--r-pill);
@@ -1105,6 +1122,16 @@
   &:hover {
     background: var(--flyout-solid);
   }
+  &:active {
+    color: var(--text-2);
+  }
+  .icon {
+    color: var(--accent-text);
+  }
+}
+.console__jump--icon {
+  width: 32px;
+  padding: 0;
 }
 
 /* JSON in console.log */

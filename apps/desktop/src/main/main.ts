@@ -67,7 +67,7 @@ let quitting = false;
 let engineStatus: EngineStatus = { state: 'starting' };
 const mica = micaSupported();
 const pendingPrompts: PromptRequest[] = [];
-const running = new Map<string, { projectPath: string; mode: 'run' | 'live' | 'ipa' }>();
+const running = new Map<string, { projectPath: string; mode: 'run' | 'live' | 'ipa' | 'sync' }>();
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -139,7 +139,7 @@ function onEngineEvents(batch: Envelope[]): void {
   for (const { scope, event } of batch) {
     switch (event.type) {
       case 'session-started':
-        if (scope.sessionId) running.set(scope.sessionId, { projectPath: event.projectPath, mode: event.mode === 'live' || event.mode === 'ipa' ? event.mode : 'run' });
+        if (scope.sessionId) running.set(scope.sessionId, { projectPath: event.projectPath, mode: event.mode === 'live' || event.mode === 'ipa' || event.mode === 'sync' ? event.mode : 'run' });
         if (scope.sessionId) launchedAt.set(scope.sessionId, Date.now());
         updateTray();
         break;
@@ -148,8 +148,9 @@ function onEngineEvents(batch: Envelope[]): void {
         updateTray();
         if (!event.ok && event.error && scope.projectPath) {
           const name = projectName(scope.projectPath);
-          settings.recordRun(scope.projectPath, { at: Date.now(), mode: event.mode === 'live' ? 'live' : 'run', ok: false, ms: event.ms });
-          notify(t.console.buildFailed(name, event.mode === 'ipa'), tidy(event.error.message), () => command({ type: 'open-project', path: scope.projectPath! }));
+          // A sync is not a run: the project's last run stays as it was.
+          if (event.mode !== 'sync') settings.recordRun(scope.projectPath, { at: Date.now(), mode: event.mode === 'live' ? 'live' : 'run', ok: false, ms: event.ms });
+          notify(event.mode === 'sync' ? t.console.syncFailed(name) : t.console.buildFailed(name, event.mode === 'ipa'), tidy(event.error.message), () => command({ type: 'open-project', path: scope.projectPath! }));
         }
         break;
       case 'app':

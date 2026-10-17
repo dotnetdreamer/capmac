@@ -522,6 +522,10 @@
   position-area: inline-end span-block-end;
   translate: 4px 0;
 }
+/* At the pointer (a context menu): left and top come from showAt(), already kept inside the window. */
+.popover--point {
+  position-try-fallbacks: none;
+}
 
 .menu__list {
   display: flex;
@@ -581,6 +585,63 @@
 .menu__hint {
   color: var(--text-3);
   font: var(--type-small);
+}
+/* Two-line items: what it is, and what it does */
+.menu__item.has-description {
+  height: auto;
+  min-height: 32px;
+  padding-block: 6px;
+  align-items: flex-start;
+  > .icon,
+  > .kbd,
+  > .menu__check {
+    margin-top: 1px;
+  }
+}
+.menu__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  > .menu__label {
+    flex: none;
+  }
+}
+.menu__description {
+  color: var(--text-3);
+  font: var(--type-small);
+  white-space: normal;
+  text-wrap: pretty;
+  .menu__item:disabled & {
+    color: var(--text-disabled);
+  }
+}
+
+/* A button with an arrow for other ways to do it (Run ▾) */
+.split {
+  display: inline-flex;
+  flex: none;
+  > .btn:first-child {
+    border-start-end-radius: 0;
+    border-end-end-radius: 0;
+  }
+}
+.split__more {
+  width: 26px;
+  padding: 0;
+  margin-left: -1px;
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  .icon {
+    color: var(--text-2);
+  }
+  &:disabled .icon {
+    color: inherit;
+  }
+  &[aria-expanded='true'] {
+    background: var(--fill-control-pressed);
+  }
 }
 
 /* ─── Dialog (native <dialog>) ───────────────────────────────────────────── */

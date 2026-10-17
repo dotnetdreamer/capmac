@@ -8,7 +8,7 @@ import { withStep, type EngineContext } from './context.js';
 import { UserError } from './errors.js';
 import { formatBytes } from './format.js';
 import type { MacLink } from './link.js';
-import { buildWeb, Pipeline, unlockKeychain, type TargetOptions } from './pipeline.js';
+import { buildWeb, Pipeline, skipWebBuild, unlockKeychain, type TargetOptions } from './pipeline.js';
 import { requireIos, type ProjectInfo } from './project.js';
 import type { MacSession } from './session.js';
 import type { ApiKey } from './signing.js';
@@ -47,6 +47,7 @@ export async function buildApp(project: ProjectInfo, link: MacLink, options: Bui
   const sessionPromise = link.session();
   sessionPromise.catch(() => undefined);
   if (options.webBuild !== false) await buildWeb(project, ctx, signal);
+  else skipWebBuild(ctx);
   const session = await sessionPromise;
   const pipeline = new Pipeline(session, project, ctx);
   await pipeline.sync(true, signal);

@@ -93,8 +93,11 @@ export const engineMethods = {
   'projects.setBackend': z.object({ path: fsPath, backend: buildBackend }).strict(),
   'sessions.start': z.object({
     projectPath: fsPath,
-    /** `build`: on this PC, build the app and its .ipa without installing it. */
-    mode: z.enum(['run', 'live', 'build']),
+    /**
+     * `build`: on this PC, build the app and its .ipa without installing it.
+     * `sync`: copy the project to the Mac and run `cap sync` there, like `capmac sync` (the iOS app; nothing is built or launched).
+     */
+    mode: z.enum(['run', 'live', 'build', 'sync']),
     mac: macName.optional(),
     /** Which of the project's apps (default: the one picked for it). */
     app: runnableApp.optional(),
@@ -311,7 +314,8 @@ export interface Scope {
 /** Engine events plus the host's own bookkeeping. */
 export type HostEvent =
   | EngineEvent
-  | { type: 'session-started'; mode: SessionMode; projectPath: string; mac: string | null; target: string | null; backend?: BuildBackend }
+  /** `webBuild: false`: a run that keeps the web files built before (Run without building). */
+  | { type: 'session-started'; mode: SessionMode; projectPath: string; mac: string | null; target: string | null; backend?: BuildBackend; webBuild?: false }
   /** Setting up this PC ended: done, stopped, or failed. */
   | { type: 'setup-ended'; ok: boolean; cancelled: boolean; error?: ErrorInfo }
   | { type: 'session-ended'; mode: SessionMode; ok: boolean; cancelled: boolean; error?: ErrorInfo; ms: number }

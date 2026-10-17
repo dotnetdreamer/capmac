@@ -8,7 +8,7 @@ import { call, errorInfo } from './engine';
 import { resolveMac, useMacs } from './macs';
 import { pcReady, usePc } from './pc';
 import { projectKey, useProjects } from './projects';
-import { emptyRun, isActive, MAC_TARGET_ID, PC_TARGET_ID, useRuns } from './runs';
+import { emptyRun, isActive, MAC_TARGET_ID, PC_TARGET_ID, useRuns, type RunState } from './runs';
 
 export function projectPrefs(path: string): { mac?: string; target?: string } {
   return useApp.getState().settings?.projectPrefs[projectKey(path)] ?? {};
@@ -32,10 +32,12 @@ export function both(e: { message: string; hint?: string }): string {
   return e.hint ? `${tidy(e.message)}. ${tidy(e.hint)}` : tidy(e.message);
 }
 
-function failStart(path: string, error: ErrorInfo): void {
+/** A session that couldn't start: shown as failed, with what was asked for (so Try again does it again). */
+function failStart(path: string, error: ErrorInfo, mode: RunState['mode'], asked: { keepsWebFiles?: boolean; backend?: RunState['backend'] } = {}): void {
   const key = projectKey(path);
   const run = useRuns.getState().byKey[key] ?? emptyRun(path);
-  useRuns.setState((s) => ({ byKey: { ...s.byKey, [key]: { ...run, status: 'failed', error, sessionId: null, endedAt: Date.now() } } }));
+  const backend = asked.backend ?? run.backend;
+  useRuns.setState((s) => ({ byKey: { ...s.byKey, [key]: { ...run, mode, keepsWebFiles: asked.keepsWebFiles ?? false, backend, status: 'failed', error, sessionId: null, endedAt: Date.now() } } }));
 }
 
 /** Chosen in onboarding ("No Mac? Build on this PC"): the next Capacitor app opened builds on this PC. */
@@ -149,7 +151,7 @@ export async function setBackend(path: string, backend: BuildBackend, mac?: stri
 }
 
 /** On this PC: set up first, then build for the iPhone picked (when it is plugged in), else the one that is. */
-async function startOnPc(path: string, mode: 'run' | 'live' | 'build', picked: string | undefined, options: { clean?: boolean; flutterMode?: 'debug' | 'profile' | 'release'; configuration?: string }): Promise<void> {
+async function startOnPc(path: string, mode: 'run' | 'live' | 'build', picked: string | undefined, options: { clean?: boolean; webBuild?: boolean; flutterMode?: 'debug' | 'profile' | 'release'; configuration?: string }): Promise<void> {
   const pc = usePc.getState();
   const status = pc.byKey[projectKey(path)]?.status ?? (await pc.refresh(path));
   if (!pcReady(status)) {
@@ -160,29 +162,39 @@ async function startOnPc(path: string, mode: 'run' | 'live' | 'build', picked: s
   const plugged = usePc.getState().byKey[projectKey(path)]?.devices?.devices ?? [];
   const target = picked && plugged.some((device) => device.udid === picked) ? picked : undefined;
   try {
-    await call('sessions.start', { projectPath: path, mode, app: 'ios', backend: 'wsl', target, options: { clean: options.clean, flutterMode: options.flutterMode, configuration: options.configuration } });
+    await call('sessions.start', { projectPath: path, mode, app: 'ios', backend: 'wsl', target, options: { clean: options.clean, webBuild: options.webBuild, flutterMode: options.flutterMode, configuration: options.configuration } });
   } catch (err) {
-    failStart(path, errorInfo(err));
+    // A build here makes the .ipa: it shows like an IPA build.
+    failStart(path, errorInfo(err), mode === 'build' ? 'ipa' : mode, { keepsWebFiles: options.webBuild === false, backend: 'wsl' });
   }
 }
 
-/** `build`: on this PC, build the app and its .ipa without installing it. `flutterMode`: a Flutter app's Run in profile or release mode; `configuration`: a React Native app's (Release). */
-export async function startSession(path: string, mode: 'run' | 'live' | 'build', options: { clean?: boolean; full?: boolean; flutterMode?: 'debug' | 'profile' | 'release'; configuration?: string } = {}): Promise<void> {
+/**
+ * Run, Live, Build (on this PC: the app and its .ipa, not installed) or Sync
+ * (the project copied to the Mac and `cap sync` run there, like `capmac sync`;
+ * a Capacitor app's iOS app). `webBuild: false` runs without building the web
+ * app first, like `capmac run --no-web-build` and `npx cap run`. `flutterMode`:
+ * a Flutter app's Run in profile or release mode; `configuration`: a React
+ * Native app's (Release).
+ */
+export async function startSession(path: string, mode: 'run' | 'live' | 'build' | 'sync', options: { clean?: boolean; full?: boolean; webBuild?: boolean; flutterMode?: 'debug' | 'profile' | 'release'; configuration?: string } = {}): Promise<void> {
   const prefs = projectPrefs(path);
   const summary = useProjects.getState().byKey[projectKey(path)]?.summary;
-  const app = appOf(summary, prefs);
-  // A Flutter app's Windows app builds and runs on this PC: no Mac.
+  const keepsWebFiles = options.webBuild === false;
+  // A sync is the iOS app's, on the Mac.
+  const app = mode === 'sync' ? undefined : appOf(summary, prefs);
+  // A Flutter or React Native app's Windows app builds and runs on this PC: no Mac.
   if (app === 'windows') {
     if (mode === 'build') return;
     try {
       await call('sessions.start', { projectPath: path, mode, app, options: { flutterMode: options.flutterMode, configuration: options.configuration } });
     } catch (err) {
-      failStart(path, errorInfo(err));
+      failStart(path, errorInfo(err), mode, { backend: 'mac' });
     }
     return;
   }
   // Desktop apps run on the Mac's desktop; the iOS app builds where the project builds.
-  if (summary?.backend === 'wsl' && app === 'ios') return startOnPc(path, mode, prefs.target, options);
+  if (summary?.backend === 'wsl' && app === 'ios' && mode !== 'sync') return startOnPc(path, mode, prefs.target, options);
   if (mode === 'build') return;
   const mac = macFor(path);
   if (!mac) {
@@ -191,15 +203,23 @@ export async function startSession(path: string, mode: 'run' | 'live' | 'build',
       toast({ tone: 'info', title: t.actions.pairFirst, body: t.actions.pairFirstBody, action: { label: t.common.pairMac, run: () => useApp.getState().navigate({ name: 'onboarding' }) } });
       return;
     }
-    failStart(path, { message: t.actions.noMacSelected, hint: t.actions.noMacSelectedHint, expected: true });
+    failStart(path, { message: t.actions.noMacSelected, hint: t.actions.noMacSelectedHint, expected: true }, mode, { keepsWebFiles, backend: 'mac' });
     return;
   }
   const settings = useApp.getState().settings;
   try {
+    // Only the iOS app runs on a picked simulator or iPhone (a sync has no target).
     await call('sessions.start', { projectPath: path, mode, mac, app, target: app !== 'ios' || prefs.target === MAC_TARGET_ID || prefs.target === PC_TARGET_ID ? undefined : prefs.target, options: { ...options, osLogs: settings?.osLogs } });
   } catch (err) {
-    failStart(path, errorInfo(err));
+    failStart(path, errorInfo(err), mode, { keepsWebFiles, backend: 'mac' });
   }
+}
+
+/** Starts a session again the way it was started: Live, Run (with or without the web build), Sync, or a build on this PC. */
+export function startAgain(path: string, run: RunState): Promise<void> {
+  if (run.mode === 'live' || run.mode === 'sync') return startSession(path, run.mode);
+  if (run.mode === 'ipa' && run.backend === 'wsl') return startSession(path, 'build');
+  return startSession(path, 'run', run.keepsWebFiles ? { webBuild: false } : {});
 }
 
 export async function stopSession(path: string): Promise<void> {

@@ -23,6 +23,7 @@ import {
   scanProject,
   streamAppLogs,
   streamPreference,
+  syncApp,
   syncToMac,
   unlockKeychain,
   UserError,
@@ -190,11 +191,12 @@ export async function infoCommand(options: { files?: boolean; live?: boolean }):
 export async function syncCommand(options: MacOption & { live?: boolean; full?: boolean; prepare?: boolean }): Promise<void> {
   const { ctx } = terminalContext();
   const { project, session } = await openForProject(options);
+  const controller = new AbortController();
+  const restore = cancelOnSigint(controller);
   try {
-    const pipeline = new Pipeline(session, project, ctx);
-    await pipeline.sync(!options.live);
-    if (options.prepare !== false && project.hasIos) await pipeline.prepare(null, { full: options.full });
+    await syncApp(project, session, { live: options.live, full: options.full, prepare: options.prepare }, ctx, controller.signal);
   } finally {
+    restore();
     session.close();
   }
 }
