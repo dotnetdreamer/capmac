@@ -223,7 +223,7 @@ describe('Flutter’s output', () => {
 });
 
 /** A runner fed by hand, with what it sends back recorded. */
-function fakeRunner(options: { attached?: boolean } = {}) {
+function fakeRunner(options: { attached?: boolean; desktop?: boolean } = {}) {
   const events: EngineEvent[] = [];
   const sent: Array<{ id: number; method: string; params: Record<string, unknown> }> = [];
   let finish!: (result: FlutterRunResult) => void;
@@ -270,6 +270,39 @@ describe('a Flutter run', () => {
     feed({ event: 'app.start', params: { appId: 'a1' } }, { event: 'app.progress', params: { id: '2', progressId: 'devFS.update', message: 'Syncing files...' } }, { event: 'app.started', params: { appId: 'a1' } });
     await runner.started;
     expect(events.filter((event) => event.type === 'step' || event.type === 'app')).toEqual([]);
+  });
+
+  it('shows a Windows app’s Dart lines, which come outside the protocol without "flutter: "', async () => {
+    // What `flutter run --machine -d windows` printed for the sample (Flutter 3.47.7).
+    const { runner, events, feed } = fakeRunner({ desktop: true });
+    feed({ event: 'app.start', params: { appId: 'a1', supportsRestart: true } });
+    runner.output('Launching lib\\main.dart on Windows in debug mode...', 'stdout');
+    feed({ event: 'app.progress', params: { appId: 'a1', id: '0', progressId: null, message: 'Building Windows application...', finished: false } });
+    feed({ event: 'app.progress', params: { appId: 'a1', id: '0', progressId: null, finished: true } });
+    runner.output('√ Built build\\windows\\x64\\runner\\Debug\\hello_flutter.exe', 'stdout');
+    runner.output('[IMPORTANT:flutter/shell/platform/embedder/embedder_surface_gl_impeller.cc(126)] Using the Impeller rendering backend (OpenGLESSDF).', 'stdout');
+    feed({ event: 'app.progress', params: { appId: 'a1', id: '1', progressId: 'devFS.update', message: 'Syncing files to device Windows...', finished: false } });
+    runner.output('Hello CapMac! Running on windows', 'stdout');
+    feed({ event: 'app.progress', params: { appId: 'a1', id: '1', progressId: 'devFS.update', finished: true } }, { event: 'app.started', params: { appId: 'a1' } });
+    await runner.started;
+    runner.output('Counter: 1', 'stdout');
+    runner.output('Application finished.', 'stdout');
+    const logs = events.filter((event) => event.type === 'app-log').map((event) => (event as { entry: { kind: string; text: string } }).entry);
+    expect(logs).toEqual([
+      expect.objectContaining({ kind: 'native', text: expect.stringContaining('Impeller') }),
+      expect.objectContaining({ kind: 'console', text: 'Hello CapMac! Running on windows' }),
+      expect.objectContaining({ kind: 'console', text: 'Counter: 1' }),
+    ]);
+    // Flutter's own lines stay Flutter's.
+    const tool = events.filter((event) => event.type === 'tool-output').map((event) => (event as { text: string }).text);
+    expect(tool).toEqual([expect.stringContaining('Launching'), expect.stringContaining('Built build'), 'Application finished.']);
+  });
+
+  it('keeps an iPhone run’s unprefixed lines as Flutter’s', () => {
+    const { runner, events } = fakeRunner();
+    runner.output('[IMPORTANT:flutter/shell/platform/darwin/graphics/FlutterDarwinContextMetalImpeller.mm(45)] Using the Impeller rendering backend (Metal).', 'stdout');
+    runner.output('Some tool line', 'stdout');
+    expect(events.filter((event) => event.type === 'tool-output').map((event) => (event as { text: string }).text)).toEqual(['Some tool line']);
   });
 
   it('says Flutter’s own error when it stops before the app starts', async () => {

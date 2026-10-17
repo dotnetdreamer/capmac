@@ -5,7 +5,8 @@ import { parseDevices, parseSimulators } from '../../packages/core/src/agent/ops
 import { parseDestination } from '../../packages/core/src/engine/pair.js';
 import { pickDevUrl } from '../../packages/core/src/engine/devserver.js';
 import { parseDiscovery, pickNode } from '../../packages/core/src/engine/remote-env.js';
-import { chooseTarget } from '../../packages/core/src/engine/targets.js';
+import { pcTarget } from '../../packages/core/src/engine/flutter/pc.js';
+import { chooseTarget, describeTarget } from '../../packages/core/src/engine/targets.js';
 import type { TargetsResult } from '../../packages/core/src/shared/protocol.js';
 
 const SIMS = JSON.stringify({
@@ -123,6 +124,11 @@ describe('chooseTarget', () => {
   it('explains when nothing matches', () => {
     expect(() => chooseTarget(all, { wanted: 'Pixel 9' })).toThrow(/No simulator or device matches/);
     expect(() => chooseTarget({ ...all, devices: [] }, { device: true })).toThrow(/No iPhone or iPad/);
+  });
+  it('names where an app runs: a simulator, a cable or Wi-Fi, or a desktop', () => {
+    expect(describeTarget(all.simulators.find((s) => s.udid === 'NEW-16')!)).toMatch(/\(iOS .*, Simulator\)$/);
+    expect(describeTarget(all.devices[0]!)).toBe('My iPhone (iOS 18.1, USB)');
+    expect(describeTarget(pcTarget())).toBe('This PC (Windows)');
   });
 });
 

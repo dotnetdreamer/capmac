@@ -46,13 +46,19 @@ const DART_PRINT = /^flutter: ?/;
 /** The Flutter engine's own notes ("[IMPORTANT:flutter/shell/…] Using the Impeller rendering backend"). */
 const ENGINE_LOG = /^\[(IMPORTANT|ERROR|WARNING|INFO|FATAL):flutter\//;
 
+/** Flutter's own lines outside its protocol on a desktop run, where the app's lines come the same way. */
+const FLUTTER_OWN = /^(Launching .+ mode\.\.\.|\S+ Built .+|Application finished\.|Lost connection to device\.)$/;
+
 /** Where a debug build's Dart VM service and DevTools listen: CapMac uses them itself (hot reload). */
 const VM_NOTICE = /^(flutter: )?(The Dart VM service is listening on|The Dart DevTools debugger and profiler is available at)\b/;
 
-/** One line from a Flutter app: Dart's print() and debugPrint() (the console), else the engine's and the plugins' native logs. */
-export function flutterLogEntry(text: string, error = false): AppLogEntry | null {
+/**
+ * One line from a Flutter app: Dart's print() and debugPrint() (the console), else the engine's and the plugins' native logs.
+ * `desktop`: an app on this PC's desktop writes Dart's print() to its stdout as it is, without "flutter: ".
+ */
+export function flutterLogEntry(text: string, error = false, desktop = false): AppLogEntry | null {
   if (!text.trim() || VM_NOTICE.test(text)) return null;
-  const dart = DART_PRINT.test(text);
+  const dart = DART_PRINT.test(text) || (desktop && !ENGINE_LOG.test(text));
   return {
     kind: dart ? 'console' : 'native',
     level: error ? 'error' : /\b(error|exception)\b/i.test(text) ? 'error' : /\bwarn(ing)?\b/i.test(text) ? 'warn' : dart ? 'log' : 'info',
@@ -80,6 +86,8 @@ export interface FlutterRunnerOptions {
   appLogs?: boolean;
   /** Flutter attaches to an app CapMac launched: that launch has the steps and the app's states, so this adds none. */
   attached?: boolean;
+  /** The app runs on this PC's desktop (the Windows app): its Dart print() lines come without "flutter: ". */
+  desktop?: boolean;
 }
 
 /** A Dart compile error or warning as Flutter prints it: `lib/main.dart:12:5: Error: Expected ';' after this.` */
@@ -94,6 +102,8 @@ export class FlutterRunner {
   private resolveStarted!: () => void;
   private rejectStarted!: (err: unknown) => void;
   private isStarted = false;
+  /** A desktop app wrote its first line (its engine's): its later lines outside the protocol are the app's. */
+  private appWrote = false;
   private readonly steps = new Map<string, StepHandle>();
   private launchStep: StepHandle | null = null;
   private nextId = 1;
@@ -179,16 +189,20 @@ export class FlutterRunner {
 
   private appLine(text: string, error: boolean): void {
     if (this.options.appLogs === false) return;
-    const entry = flutterLogEntry(text, error);
+    const entry = flutterLogEntry(text, error, this.options.desktop);
     if (entry) this.ctx.emit({ type: 'app-log', entry });
   }
 
   /** A line Flutter printed outside its protocol (before machine mode starts, or a tool's own output). */
   output(text: string, stream: 'stdout' | 'stderr'): void {
     const mapped = this.map(text);
+    // A desktop app writes to Flutter's own output, its print() without "flutter: ": after the
+    // engine's first line, every line but Flutter's own few is the app's.
+    const desktop = this.options.desktop === true && !FLUTTER_OWN.test(mapped.trim());
+    if (desktop && ENGINE_LOG.test(mapped)) this.appWrote = true;
     // The app's own early lines can come this way too (before Flutter says it started).
-    if (DART_PRINT.test(mapped) || ENGINE_LOG.test(mapped)) {
-      this.appLine(mapped, false);
+    if (DART_PRINT.test(mapped) || ENGINE_LOG.test(mapped) || (desktop && this.appWrote)) {
+      this.appLine(mapped, desktop && stream === 'stderr');
       return;
     }
     this.ctx.emit({ type: 'tool-output', stream, text: mapped });

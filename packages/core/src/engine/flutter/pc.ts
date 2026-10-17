@@ -195,7 +195,7 @@ export function startFlutterOnPc(project: ProjectInfo, sdk: FlutterSdkInfo, opti
       void done.finally(() => clearTimeout(timer));
     },
   };
-  runner = new FlutterRunner(transport, ctx, { appName: project.appName, where: 'this PC', live });
+  runner = new FlutterRunner(transport, ctx, { appName: project.appName, where: 'this PC', live, desktop: true });
   return runner;
 }
 
