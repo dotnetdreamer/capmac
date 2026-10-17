@@ -39,7 +39,7 @@ test('launches, shows Home and opens a project', async () => {
 
   // Home, empty.
   await expect(page.getByRole('heading', { name: 'Projects', level: 1 })).toBeVisible();
-  await expect(page.getByText('Add your Capacitor or Electron app')).toBeVisible();
+  await expect(page.getByText('Add your Capacitor, Flutter, React Native or Electron app')).toBeVisible();
 
   // Add the sample through the (stubbed) folder picker.
   await app.evaluate(({ dialog }, dir) => {
