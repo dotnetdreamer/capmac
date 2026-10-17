@@ -1353,9 +1353,9 @@
     "build": "node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json",
-    "package": "node scripts/build.mjs --production --remote && vsce package --no-dependencies",
-    "package:win32-x64": "node scripts/build.mjs --production --remote --target win32-x64 && vsce package --no-dependencies --target win32-x64",
-    "package:win32-arm64": "node scripts/build.mjs --production --remote --target win32-arm64 && vsce package --no-dependencies --target win32-arm64",
+    "package": "node scripts/build.mjs --production --remote && vsce package --no-dependencies --baseContentUrl https://github.com/dotnetdreamer/capmac/blob/HEAD/apps/vscode --baseImagesUrl https://github.com/dotnetdreamer/capmac/raw/HEAD/apps/vscode",
+    "package:win32-x64": "node scripts/build.mjs --production --remote --target win32-x64 && vsce package --no-dependencies --baseContentUrl https://github.com/dotnetdreamer/capmac/blob/HEAD/apps/vscode --baseImagesUrl https://github.com/dotnetdreamer/capmac/raw/HEAD/apps/vscode --target win32-x64",
+    "package:win32-arm64": "node scripts/build.mjs --production --remote --target win32-arm64 && vsce package --no-dependencies --baseContentUrl https://github.com/dotnetdreamer/capmac/blob/HEAD/apps/vscode --baseImagesUrl https://github.com/dotnetdreamer/capmac/raw/HEAD/apps/vscode --target win32-arm64",
     "test:integration": "node scripts/build.mjs && node scripts/build-tests.mjs && vscode-test"
   },
   "devDependencies": {
