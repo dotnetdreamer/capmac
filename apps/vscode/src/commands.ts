@@ -6,6 +6,7 @@ import { s, studio, tidy } from './i18n.js';
 import { checkPc, setupPc } from './pcSetup.js';
 import { setStreamPreference, streamPreference, type ScreenPanel } from './screen/panel.js';
 import type { Sessions } from './session.js';
+import { addSkill } from './skill.js';
 import { errorText, type Model, type WorkspaceApp } from './state/model.js';
 import { appOfNode } from './ui/appsTree.js';
 import type { DeviceNode } from './ui/devicesTree.js';
@@ -367,5 +368,6 @@ export function registerCommands(context: vscode.ExtensionContext, model: Model,
     vscode.window.setStatusBarMessage(s.screen.streamSet(picked.value === 'smooth' ? s.screen.smooth : s.screen.compatible), 4000);
     await screen.reopen();
   });
+  register('capmac.addSkill', () => addSkill(context, model));
   register('capmac.getStarted', () => vscode.commands.executeCommand('workbench.action.openWalkthrough', `${context.extension.id}#capmac.start`, false));
 }

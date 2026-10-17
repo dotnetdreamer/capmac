@@ -32,7 +32,7 @@ CapMac drives a Mac over SSH. It syncs the project, builds it with Xcode on the 
 capmac doctor
 \`\`\`
 
-If it reports that no Mac is paired, stop and ask the user to run \`capmac pair\` in their own terminal. Pairing needs the Mac's password, which you must never ask for or type. \`capmac info\` shows what CapMac detected about the app (app id, web folder, iOS project) without contacting the Mac. A folder can hold more than one app (a Capacitor project's iOS app and its Electron platform, or the apps of a monorepo): \`capmac apps\` lists them and the one CapMac uses, which the user may have picked in CapMac Studio. Add \`--app ios\` or \`--app electron\` to be sure which one a command is for.
+If the shell can't find \`capmac\`, stop and tell the user: the command comes with CapMac for VS Code (in VS Code's terminals and agents) and CapMac Studio, or installs with \`npm install -g capmac\`. If it reports that no Mac is paired, stop and ask the user to run \`capmac pair\` in their own terminal. Pairing needs the Mac's password, which you must never ask for or type. \`capmac info\` shows what CapMac detected about the app (app id, web folder, iOS project) without contacting the Mac. A folder can hold more than one app (a Capacitor project's iOS app and its Electron platform, or the apps of a monorepo): \`capmac apps\` lists them and the one CapMac uses, which the user may have picked in CapMac Studio. Add \`--app ios\` or \`--app electron\` to be sure which one a command is for.
 
 ## Commands that finish on their own
 

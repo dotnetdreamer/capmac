@@ -463,6 +463,12 @@
         "icon": "$(settings)"
       },
       {
+        "command": "capmac.addSkill",
+        "title": "%cmd.addSkill%",
+        "category": "CapMac",
+        "icon": "$(sparkle)"
+      },
+      {
         "command": "capmac.getStarted",
         "title": "%cmd.getStarted%",
         "category": "CapMac",
@@ -679,9 +685,14 @@
           "group": "4_more@2"
         },
         {
-          "command": "capmac.getStarted",
+          "command": "capmac.addSkill",
           "when": "view == capmac.run",
           "group": "4_more@3"
+        },
+        {
+          "command": "capmac.getStarted",
+          "when": "view == capmac.run",
+          "group": "4_more@4"
         },
         {
           "command": "capmac.trySample",
@@ -1133,6 +1144,21 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "%cfg.terminal.capmacCommand%"
+        },
+        "capmac.agents.addSkill": {
+          "type": "string",
+          "enum": [
+            "project",
+            "global",
+            "off"
+          ],
+          "default": "project",
+          "enumDescriptions": [
+            "%cfg.agents.addSkill.project%",
+            "%cfg.agents.addSkill.global%",
+            "%cfg.agents.addSkill.off%"
+          ],
+          "markdownDescription": "%cfg.agents.addSkill%"
         }
       }
     },
@@ -1198,7 +1224,8 @@
               "markdown": "media/walkthrough/ai.md"
             },
             "completionEvents": [
-              "onLink:https://code.visualstudio.com/docs/copilot/chat/chat-agent-mode"
+              "onLink:https://code.visualstudio.com/docs/copilot/chat/chat-agent-mode",
+              "onCommand:capmac.addSkill"
             ]
           }
         ]

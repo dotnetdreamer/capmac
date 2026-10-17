@@ -138,6 +138,7 @@ CapMac finds the apps in the workspace (Capacitor, Flutter, React Native, Electr
 - Xcode, Swift, Dart, TypeScript and Vite errors land in **Problems**; the **Run** view shows each build step; the **Devices** view lists your Macs, simulators, iPhones, health checks and this PC.
 - Building on this PC with no Mac, pairing, remote access and the keychain all work from VS Code.
 - AI agents in VS Code get tools to run the app, read its console and look at its screen.
+- Claude Code, Codex, Gemini CLI and other coding agents get the [CapMac skill](#ai-coding-agents) in each project with an app, for the agents CapMac finds.
 
 Install the `.vsix` from [GitHub Releases](https://github.com/dotnetdreamer/capmac/releases/latest) (`code --install-extension capmac-vscode-<version>.vsix`).
 From a development checkout, `npm run vscode:build` builds it and `npm run vscode:package` makes the `.vsix`; open `apps/vscode` in VS Code and press F5 to try it. See [apps/vscode/README.md](apps/vscode/README.md) and the [design notes](docs/vscode-extension.md).
@@ -465,6 +466,8 @@ For an explicit choice, use `capmac skill add --agent claude-code,codex --global
 Start a new agent session after installation.
 
 Studio has the same setup under **Settings › Terminal commands › AI coding agents**.
+CapMac for VS Code adds the skill by itself to each project it finds an app in, for the agents it finds, and asks before it replaces a skill that is already there.
+**CapMac: Add the CapMac Skill for AI Agents…** adds it again, in the project or for all your projects.
 `capmac skill` shows installed copies and `capmac skill show` prints the instructions for other agents.
 
 ## Troubleshooting

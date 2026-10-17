@@ -7,15 +7,18 @@
  * Most of them also read the shared `.agents/skills` folder, so one copy there
  * serves many; Claude Code reads only `.claude/skills`. Folders as documented
  * by each vendor in October 2026.
+ *
+ * An agent counts as used on this PC when its config folder is there, and in
+ * a project when its instruction files are (CLAUDE.md, AGENTS.md, GEMINI.md…).
  */
 import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { UserError } from './errors.js';
-import type { AgentSkillStatus, SkillChange, SkillPlace, SkillScope, SkillState } from '../shared/skills.js';
+import type { AgentSkillStatus, SkillChange, SkillPlace, SkillPlanEntry, SkillPlanState, SkillScope, SkillState } from '../shared/skills.js';
 import { SKILL_MARKER, SKILL_NAME, skillFiles } from './skill-content.js';
 
-export type { AgentSkillStatus, SkillChange, SkillPlace, SkillScope, SkillState } from '../shared/skills.js';
+export type { AgentSkillStatus, SkillChange, SkillPlace, SkillPlanEntry, SkillPlanState, SkillScope, SkillState } from '../shared/skills.js';
 
 export interface SkillAgent {
   id: string;
@@ -26,6 +29,8 @@ export interface SkillAgent {
   reads: { global: string[]; project: string[] };
   /** Config folders whose presence means the agent is used on this PC. */
   detect: string[];
+  /** Files or folders at a project's root that mean the agent is used in it (its instructions or settings). */
+  marks: string[];
 }
 
 const home = () => os.homedir();
@@ -47,6 +52,7 @@ export function skillAgents(): SkillAgent[] {
       install: { global: path.join(claudeDir(), 'skills'), project: '.claude/skills' },
       reads: { global: [path.join(claudeDir(), 'skills')], project: ['.claude/skills'] },
       detect: [claudeDir()],
+      marks: ['CLAUDE.md', 'CLAUDE.local.md', '.claude'],
     },
     {
       id: 'codex',
@@ -54,6 +60,7 @@ export function skillAgents(): SkillAgent[] {
       install: { global: shared(), project: SHARED_PROJECT },
       reads: { global: [shared(), path.join(codexHome(), 'skills')], project: [SHARED_PROJECT, '.codex/skills'] },
       detect: [codexHome()],
+      marks: ['AGENTS.md', 'AGENTS.override.md', '.codex'],
     },
     {
       id: 'copilot',
@@ -64,6 +71,7 @@ export function skillAgents(): SkillAgent[] {
         project: [SHARED_PROJECT, '.github/skills', '.claude/skills'],
       },
       detect: [process.env.COPILOT_HOME ?? path.join(h, '.copilot'), path.join(appData(), 'Code', 'User')],
+      marks: ['.github/copilot-instructions.md', '.github/instructions', '.github/prompts', '.github/agents', '.github/skills'],
     },
     {
       id: 'cursor',
@@ -74,6 +82,7 @@ export function skillAgents(): SkillAgent[] {
         project: [SHARED_PROJECT, '.cursor/skills', '.claude/skills', '.codex/skills'],
       },
       detect: [path.join(h, '.cursor')],
+      marks: ['.cursor', '.cursorrules'],
     },
     {
       id: 'gemini',
@@ -81,6 +90,24 @@ export function skillAgents(): SkillAgent[] {
       install: { global: shared(), project: SHARED_PROJECT },
       reads: { global: [shared(), path.join(h, '.gemini', 'skills')], project: [SHARED_PROJECT, '.gemini/skills'] },
       detect: [path.join(h, '.gemini')],
+      marks: ['GEMINI.md', '.gemini'],
+    },
+    {
+      // Antigravity's editor and app; projects use the shared folder (its older .agent/skills still works).
+      id: 'antigravity',
+      name: 'Antigravity',
+      install: { global: path.join(h, '.gemini', 'config', 'skills'), project: SHARED_PROJECT },
+      reads: { global: [path.join(h, '.gemini', 'config', 'skills'), path.join(h, '.gemini', 'antigravity', 'skills')], project: [SHARED_PROJECT, '.agent/skills'] },
+      detect: [path.join(h, '.gemini', 'antigravity-ide'), path.join(h, '.gemini', 'antigravity'), path.join(h, '.gemini', 'config')],
+      marks: ['.agent'],
+    },
+    {
+      id: 'antigravity-cli',
+      name: 'Antigravity CLI',
+      install: { global: path.join(h, '.gemini', 'antigravity-cli', 'skills'), project: SHARED_PROJECT },
+      reads: { global: [path.join(h, '.gemini', 'antigravity-cli', 'skills')], project: [SHARED_PROJECT, '.agent/skills'] },
+      detect: [path.join(h, '.gemini', 'antigravity-cli')],
+      marks: [],
     },
     {
       id: 'windsurf',
@@ -91,6 +118,7 @@ export function skillAgents(): SkillAgent[] {
         project: ['.windsurf/skills', '.devin/skills', SHARED_PROJECT],
       },
       detect: [path.join(h, '.codeium', 'windsurf'), path.join(xdgConfig(), 'devin')],
+      marks: ['.windsurf', '.windsurfrules', '.devin'],
     },
     {
       id: 'opencode',
@@ -98,6 +126,7 @@ export function skillAgents(): SkillAgent[] {
       install: { global: path.join(xdgConfig(), 'opencode', 'skills'), project: SHARED_PROJECT },
       reads: { global: [path.join(xdgConfig(), 'opencode', 'skills')], project: [SHARED_PROJECT, '.opencode/skills', '.claude/skills'] },
       detect: [path.join(xdgConfig(), 'opencode')],
+      marks: ['.opencode', 'opencode.json', 'opencode.jsonc'],
     },
     {
       id: 'cline',
@@ -105,6 +134,7 @@ export function skillAgents(): SkillAgent[] {
       install: { global: shared(), project: SHARED_PROJECT },
       reads: { global: [shared(), path.join(h, '.cline', 'skills')], project: [SHARED_PROJECT, '.cline/skills', '.clinerules/skills', '.claude/skills'] },
       detect: [path.join(h, '.cline'), path.join(vscodeStorage, 'saoudrizwan.claude-dev')],
+      marks: ['.clinerules', '.cline'],
     },
     {
       id: 'kilo',
@@ -112,6 +142,7 @@ export function skillAgents(): SkillAgent[] {
       install: { global: shared(), project: SHARED_PROJECT },
       reads: { global: [shared(), path.join(h, '.kilo', 'skills')], project: [SHARED_PROJECT, '.kilo/skills'] },
       detect: [path.join(h, '.kilo'), path.join(xdgConfig(), 'kilo'), path.join(h, '.kilocode'), path.join(vscodeStorage, 'kilocode.kilo-code')],
+      marks: ['.kilo', '.kilocode'],
     },
     {
       id: 'amp',
@@ -122,6 +153,7 @@ export function skillAgents(): SkillAgent[] {
         project: [SHARED_PROJECT, '.claude/skills'],
       },
       detect: [path.join(xdgConfig(), 'amp')],
+      marks: [],
     },
     {
       id: 'augment',
@@ -129,6 +161,7 @@ export function skillAgents(): SkillAgent[] {
       install: { global: shared(), project: SHARED_PROJECT },
       reads: { global: [shared(), path.join(h, '.augment', 'skills'), path.join(claudeDir(), 'skills')], project: [SHARED_PROJECT, '.augment/skills', '.claude/skills'] },
       detect: [path.join(h, '.augment')],
+      marks: ['.augment'],
     },
     {
       id: 'goose',
@@ -136,6 +169,7 @@ export function skillAgents(): SkillAgent[] {
       install: { global: shared(), project: SHARED_PROJECT },
       reads: { global: [shared(), path.join(claudeDir(), 'skills')], project: [SHARED_PROJECT, '.goose/skills', '.claude/skills'] },
       detect: [path.join(appData(), 'Block', 'goose'), path.join(xdgConfig(), 'goose')],
+      marks: ['.goosehints', '.goose'],
     },
     {
       id: 'junie',
@@ -143,6 +177,7 @@ export function skillAgents(): SkillAgent[] {
       install: { global: path.join(h, '.junie', 'skills'), project: SHARED_PROJECT },
       reads: { global: [path.join(h, '.junie', 'skills')], project: [SHARED_PROJECT, '.junie/skills'] },
       detect: [path.join(h, '.junie')],
+      marks: ['.junie'],
     },
   ];
 }
@@ -154,6 +189,21 @@ export function findSkillAgent(id: string): SkillAgent | undefined {
 
 export function isAgentDetected(agent: SkillAgent): boolean {
   return agent.detect.some((dir) => existsSync(dir));
+}
+
+/** The project (its root folder) has the agent's instructions or settings in it. */
+export function isAgentUsedIn(agent: SkillAgent, projectRoot: string): boolean {
+  return agent.marks.some((mark) => existsSync(path.join(projectRoot, ...mark.split('/'))));
+}
+
+/** Whether CapMac version `a` is newer than `b`. Versions that aren't x.y.z (a "dev" build) are never newer. */
+export function isNewerVersion(a: string, b: string): boolean {
+  const parse = (v: string) => /^(\d+)\.(\d+)\.(\d+)/.exec(v)?.slice(1).map(Number);
+  const x = parse(a);
+  const y = parse(b);
+  if (!x || !y) return false;
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i]! > y[i]!;
+  return false;
 }
 
 /** Skills go at the root of the repository (agents search from there), else in the folder itself. */
@@ -238,6 +288,36 @@ function readersOf(skillDir: string, scope: SkillScope, root?: string): string[]
     .map((agent) => agent.name);
 }
 
+/** The skill folder holds exactly these files' text (others may be there too). */
+async function sameFiles(dir: string, files: Record<string, string>): Promise<boolean> {
+  const same = await Promise.all(Object.entries(files).map(async ([rel, text]) => (await fs.readFile(path.join(dir, rel), 'utf8').catch(() => null)) === text));
+  return same.every(Boolean);
+}
+
+/**
+ * What adding the skill for these agents would find, folder by folder, before
+ * anything is written: so a front end can write the missing copies and ask
+ * before it replaces one that is there (installSkill with those agents).
+ */
+export async function skillPlan(options: { agents: string[]; scope: SkillScope; projectDir?: string; version: string }): Promise<SkillPlanEntry[]> {
+  const root = options.scope === 'project' ? skillProjectRoot(options.projectDir ?? process.cwd()) : undefined;
+  const files = skillFiles(options.version);
+  const byDir = new Map<string, string[]>();
+  for (const agent of selectAgents(options.agents)) {
+    const dir = path.join(resolveFolder(agent.install[options.scope], options.scope, root), SKILL_NAME);
+    byDir.set(dir, [...(byDir.get(dir) ?? []), agent.id]);
+  }
+  return Promise.all(
+    [...byDir].map(async ([dir, agents]) => {
+      const found = await inspect(dir);
+      let state: SkillPlanState = found.state === 'installed' ? 'current' : found.state === 'foreign' ? 'foreign' : 'missing';
+      if (state === 'current' && found.version !== options.version) state = isNewerVersion(found.version!, options.version) ? 'newer' : 'older';
+      else if (state === 'current' && !(await sameFiles(dir, files))) state = 'changed';
+      return { dir, agents, readers: readersOf(dir, options.scope, root), state, version: found.version };
+    }),
+  );
+}
+
 /**
  * Writes the skill for these agents. A folder already holding someone else's
  * `capmac` skill is left alone unless `force`.
@@ -253,12 +333,9 @@ export async function installSkill(options: { agents: string[]; scope: SkillScop
       changes.push({ dir, agents, result: 'skipped-foreign' });
       continue;
     }
-    if (before.state === 'installed' && before.version === options.version) {
-      const same = await Promise.all(Object.entries(files).map(async ([rel, text]) => (await fs.readFile(path.join(dir, rel), 'utf8').catch(() => null)) === text));
-      if (same.every(Boolean)) {
-        changes.push({ dir, agents, result: 'unchanged' });
-        continue;
-      }
+    if (before.state === 'installed' && before.version === options.version && (await sameFiles(dir, files))) {
+      changes.push({ dir, agents, result: 'unchanged' });
+      continue;
     }
     // Ours (or forced): start clean so files from an older version do not linger.
     if (before.state !== 'missing') await fs.rm(dir, { recursive: true, force: true });
@@ -283,6 +360,10 @@ export async function removeSkill(options: { agents: string[]; scope: SkillScope
     else if (before.state === 'foreign') changes.push({ dir, agents, result: 'skipped-foreign' });
     else {
       await fs.rm(dir, { recursive: true, force: true });
+      // The skills folder, and the agent's folder above it (.claude, .agents), when nothing else is in them.
+      for (const folder of [path.dirname(dir), path.dirname(path.dirname(dir))]) {
+        if (!(await fs.rmdir(folder).then(() => true, () => false))) break;
+      }
       changes.push({ dir, agents, result: 'removed' });
     }
   }

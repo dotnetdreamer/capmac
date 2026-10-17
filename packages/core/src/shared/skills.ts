@@ -25,6 +25,25 @@ export interface AgentSkillStatus {
   seenInProject: boolean;
 }
 
+/**
+ * What adding the skill would find in one folder, before anything is written:
+ * nothing · CapMac's copy of this version as it wrote it (current), edited
+ * since (changed), or from another version (older, newer) · a "capmac" skill
+ * someone else wrote (foreign).
+ */
+export type SkillPlanState = 'missing' | 'current' | 'changed' | 'older' | 'newer' | 'foreign';
+
+export interface SkillPlanEntry {
+  dir: string;
+  /** The chosen agents that capmac installs the skill here for (ids). */
+  agents: string[];
+  /** Every agent that reads this folder (names). */
+  readers: string[];
+  state: SkillPlanState;
+  /** The version of CapMac's copy that is there. */
+  version?: string;
+}
+
 export interface SkillChange {
   dir: string;
   /** Agents that read this folder (so they get, or lose, the skill). */

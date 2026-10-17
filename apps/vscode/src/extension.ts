@@ -15,6 +15,7 @@ import { s } from './i18n.js';
 import { registerTools } from './lm/tools.js';
 import { ScreenPanel } from './screen/panel.js';
 import { Sessions } from './session.js';
+import { registerSkill } from './skill.js';
 import { Model } from './state/model.js';
 import { provideCapmacCommand } from './terminal.js';
 import { AppsTree } from './ui/appsTree.js';
@@ -91,6 +92,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<Capmac
   registerCommands(context, m, sessions, screen, output);
   registerTools(context, m, sessions);
   void provideCapmacCommand(context, output);
+  // The skill that teaches other AI agents (Claude Code, Codex, Gemini CLI…) the capmac command.
+  registerSkill(context, m, output);
 
   // The engine crashed for good: say so, with a way out.
   context.subscriptions.push(m.onDidChange((change) => {

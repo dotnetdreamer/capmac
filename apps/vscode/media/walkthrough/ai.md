@@ -12,4 +12,4 @@ CapMac gives AI agents in VS Code (like Copilot's agent mode) five tools:
 
 Try: *“Run my app, open the settings screen and tell me if anything looks broken.”*
 
-Agents in the terminal (Claude Code, Codex and others) use the `capmac` command, which CapMac adds to VS Code's terminals.
+Claude Code, Codex, Gemini CLI and other coding agents use the `capmac` command, which CapMac adds to VS Code's terminals and to the agents VS Code starts. CapMac's skill teaches it to them: CapMac adds the skill to your project for the agents it finds, and **CapMac: Add the CapMac Skill for AI Agents…** adds it again, in this project or for all your projects.

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
 const extensionDir = fileURLToPath(new URL('..', import.meta.url));
-const suites = ['integration', 'workspace'];
+const suites = ['integration', 'workspace', 'skill'];
 const entryPoints = suites.flatMap((suite) => {
   const dir = path.join(extensionDir, 'test', suite);
   return readdirSync(dir).filter((f) => f.endsWith('.test.ts')).map((f) => path.join(dir, f));

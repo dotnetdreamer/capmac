@@ -353,6 +353,62 @@ export const s = {
     timedOut: 'Still building after 15 minutes. Check capmac_status later',
   },
 
+  /** CapMac's skill for AI agents: Claude Code, Codex, Gemini CLI and the others core knows. */
+  skill: {
+    title: 'Add the CapMac skill for AI agents',
+    wherePlaceholder: 'Where should the skill go?',
+    thisProject: (name: string) => `This project (${name})`,
+    projectDetail: 'Saved in the project. Commit it so your team’s agents get it too',
+    agentsTitle: 'Which AI agents should know how to use CapMac?',
+    agentsPlaceholder: 'The agents CapMac found are ticked',
+    reason: {
+      editor: 'your editor',
+      extension: (editor: string) => `in ${editor}`,
+      project: 'used in this project',
+      pc: 'found on this PC',
+    },
+    existsOne: (dir: string) => `The CapMac skill is already in ${dir}`,
+    foreignOne: (dir: string) => `${dir} already has a different skill named “capmac”`,
+    existsMany: (n: number) => `The skill is already in ${count(n, 'place')}`,
+    /** What is in one folder, when there is only one. */
+    foundOne: {
+      older: (version?: string) => `It’s from CapMac ${version}`,
+      newer: (version?: string) => `It’s from a newer CapMac (${version})`,
+      changed: () => 'It was changed since CapMac added it',
+      foreign: () => '',
+    },
+    /** What is in each folder, when there are several. */
+    found: {
+      older: (dir: string, version?: string) => `${dir}, from CapMac ${version}`,
+      newer: (dir: string, version?: string) => `${dir}, from a newer CapMac (${version})`,
+      changed: (dir: string) => `${dir}, changed since CapMac added it`,
+      foreign: (dir: string) => `${dir}, a different skill named “capmac”`,
+    },
+    replaceOne: 'Replace it with this version?',
+    replaceTheirs: 'Replace it with CapMac’s skill?',
+    replaceMany: 'Replace them with this version?',
+    replace: 'Replace',
+    keepOne: 'Keep it',
+    keepMany: 'Keep them',
+    upToDate: (who: string) => `The CapMac skill is up to date for ${who}`,
+    show: 'Show',
+    undo: 'Undo',
+    addedProject: (projects: string, who: string, several: boolean) => `CapMac added its skill to ${projects}. ${who} can now run and check your app${several ? 's' : ''}`,
+    addedProfile: (who: string) => `CapMac added its skill to your user profile. ${who} can now run and check your apps in all your projects`,
+    removed: 'CapMac skill removed',
+    olderProject: (project: string) => `The CapMac skill in ${project} is from an older CapMac. Update it?`,
+    olderProfile: 'The CapMac skill in your user profile is from an older CapMac. Update it?',
+    foreignProject: (project: string) => `${project} already has a different skill named “capmac”. Replace it with CapMac’s?`,
+    foreignProfile: 'Your user profile already has a different skill named “capmac”. Replace it with CapMac’s?',
+    update: 'Update',
+    updated: 'CapMac skill updated',
+    replaced: 'Replaced with CapMac’s skill',
+    failed: 'Couldn’t add the CapMac skill',
+    /** "Claude Code", "Claude Code and Codex", "Claude Code, Codex and Cursor", "A, B, C and 3 more". */
+    list: (names: string[]) =>
+      names.length > 4 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : (names[0] ?? ''),
+  },
+
   codeLens: {
     run: (where: string) => `▶ Run on ${where}`,
     live: '⚡ Live',

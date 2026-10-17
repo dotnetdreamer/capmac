@@ -13,4 +13,5 @@ The first version of CapMac for VS Code.
 - Pairing, health checks with fixes, simulators, remote access and the keychain, from VS Code.
 - Building on this PC with no Mac: setup, iPhones over USB and Wi-Fi, IPA builds.
 - Tools for AI agents: status, run, stop, screenshot and logs.
-- The `capmac` command in VS Code's terminals.
+- CapMac's skill for coding agents (Claude Code, Codex, Gemini CLI, Cursor, Antigravity and others), added by itself to each project with an app for the agents CapMac finds, never over a skill that is already there without asking. **Add the CapMac Skill for AI Agents…** adds it again, in the project or for all projects.
+- The `capmac` command in VS Code's terminals and in the agents other extensions start (the Claude Code and Codex panels).

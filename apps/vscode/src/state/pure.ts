@@ -1,6 +1,7 @@
 /** Small decisions with no VS Code in them (unit-tested on their own). */
 import path from 'node:path';
 import { JsDiagnosticParser } from '@capmac/core/shared/js-diagnostics';
+import type { SkillPlanEntry } from '@capmac/core/shared/skills';
 import type { AppLogEntry, Diagnostic, Target, TargetsResult, WslStatus } from '../../../desktop/src/shared/contract.js';
 
 /** Whether this build's engine opens React Native DevTools (`sessions.devtools`, scripts/build.mjs reads contract.ts). */
@@ -27,6 +28,62 @@ export function automaticTarget(targets: TargetsResult | null | undefined): Targ
 /** This PC can build the app: tools and SDK in place, and signing when inside an app (Studio's pcReady). */
 export function pcReady(status: WslStatus | null | undefined): boolean {
   return Boolean(status && status.tools && status.sdk && (status.signing || !status.inApp));
+}
+
+/** Why CapMac takes an AI agent to be used: it is this editor, its extension is in it, the project has its files, this PC its settings. */
+export type AgentReason = 'editor' | 'extension' | 'project' | 'pc';
+
+/** Editors that are an agent themselves, by their name or URL scheme (core's agent ids). */
+const AGENT_EDITORS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/cursor/i, 'cursor'],
+  [/windsurf|devin/i, 'windsurf'],
+  [/antigravity/i, 'antigravity'],
+];
+
+/** The agents' own extensions (lowercase ids), as core's agent ids. */
+const AGENT_EXTENSIONS: Readonly<Record<string, string>> = {
+  'anthropic.claude-code': 'claude-code',
+  'openai.chatgpt': 'codex',
+  'github.copilot-chat': 'copilot',
+  'google.geminicodeassist': 'gemini',
+  'google.gemini-cli-vscode-ide-companion': 'gemini',
+  'saoudrizwan.claude-dev': 'cline',
+  'kilocode.kilo-code': 'kilo',
+  'augment.vscode-augment': 'augment',
+  'sourcegraph.amp': 'amp',
+  'sst-dev.opencode': 'opencode',
+};
+
+/** The agents this editor shows: itself (Cursor, Windsurf, Antigravity) and the agents' extensions it has. */
+export function editorAgents(appName: string, uriScheme: string, extensionIds: readonly string[]): Map<string, AgentReason[]> {
+  const found = new Map<string, AgentReason[]>();
+  const add = (id: string, reason: AgentReason) => {
+    const reasons = found.get(id) ?? [];
+    if (!reasons.includes(reason)) reasons.push(reason);
+    found.set(id, reasons);
+  };
+  for (const [pattern, id] of AGENT_EDITORS) if (pattern.test(`${appName} ${uriScheme}`)) add(id, 'editor');
+  for (const extension of extensionIds) {
+    const id = AGENT_EXTENSIONS[extension.toLowerCase()];
+    if (id) add(id, 'extension');
+  }
+  return found;
+}
+
+/**
+ * What adding the CapMac skill by itself does in one place (a project, or the
+ * user profile). `wanted`: the folders of the agents CapMac found that don't
+ * see a CapMac skill yet; `every`: every agent's folder there. The first time,
+ * it writes the missing copies and asks before it replaces someone else's
+ * "capmac" skill; with each new CapMac version, it offers to update its older
+ * copies. A copy the user removed, or changed, is left as it is.
+ */
+export function skillSteps(first: boolean, wanted: readonly SkillPlanEntry[], every: readonly SkillPlanEntry[]): { write: SkillPlanEntry[]; replace: SkillPlanEntry[]; update: SkillPlanEntry[] } {
+  return {
+    write: first ? wanted.filter((e) => e.state === 'missing') : [],
+    replace: first ? wanted.filter((e) => e.state === 'foreign') : [],
+    update: every.filter((e) => e.state === 'older'),
+  };
 }
 
 /** "ik@my-mac.local:2222" → its parts. */

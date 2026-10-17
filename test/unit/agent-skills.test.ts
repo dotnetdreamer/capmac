@@ -1,9 +1,19 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { screenshotTarget } from '../../packages/cli/src/commands/screenshot.js';
-import { findSkillAgent, installSkill, removeSkill, skillAgents, skillProjectRoot, skillStatus } from '../../packages/core/src/engine/agent-skills.js';
+import {
+  findSkillAgent,
+  installSkill,
+  isAgentUsedIn,
+  isNewerVersion,
+  removeSkill,
+  skillAgents,
+  skillPlan,
+  skillProjectRoot,
+  skillStatus,
+} from '../../packages/core/src/engine/agent-skills.js';
 import {
   capmacCommandDir,
   capmacCommandStatus,
@@ -142,9 +152,60 @@ describe('installing the skill', () => {
     expect(existsSync(path.join(home, '.claude', 'skills', 'capmac'))).toBe(true);
   });
 
+  it('takes away the folders it made, and only when nothing else is in them', async () => {
+    mkdirSync(path.join(project, '.claude'));
+    writeFileSync(path.join(project, '.claude', 'settings.json'), '{}');
+    await installSkill({ agents: ['claude-code', 'codex'], scope: 'project', projectDir: project, version: '1.0.0' });
+    await removeSkill({ agents: ['claude-code', 'codex'], scope: 'project', projectDir: project });
+    expect(existsSync(path.join(project, '.agents'))).toBe(false);
+    expect(existsSync(path.join(project, '.claude', 'skills'))).toBe(false);
+    expect(existsSync(path.join(project, '.claude', 'settings.json'))).toBe(true);
+  });
+
   it('rejects unknown agents', async () => {
     await expect(installSkill({ agents: ['notepad'], scope: 'global', version: '1.0.0' })).rejects.toThrow(/does not know the agent/);
     expect(skillAgents().length).toBeGreaterThanOrEqual(13);
+  });
+
+  it('says what it would find before it writes: missing, current, changed, older, newer or someone else’s', async () => {
+    const plan = (version = '1.1.0') => skillPlan({ agents: ['claude-code', 'codex', 'gemini'], scope: 'project', projectDir: path.join(project, 'apps', 'mobile'), version });
+    expect((await plan()).map((e) => [path.relative(project, e.dir), e.state, e.agents])).toEqual([
+      [path.join('.claude', 'skills', 'capmac'), 'missing', ['claude-code']],
+      [path.join('.agents', 'skills', 'capmac'), 'missing', ['codex', 'gemini']],
+    ]);
+    expect((await plan())[1]!.readers).toEqual(expect.arrayContaining(['Codex', 'Gemini CLI', 'Antigravity', 'GitHub Copilot']));
+    await installSkill({ agents: ['claude-code', 'codex'], scope: 'project', projectDir: project, version: '1.1.0' });
+    expect((await plan()).map((e) => e.state)).toEqual(['current', 'current']);
+    expect((await plan('1.2.0')).map((e) => [e.state, e.version])).toEqual([['older', '1.1.0'], ['older', '1.1.0']]);
+    expect((await plan('1.0.9')).map((e) => e.state)).toEqual(['newer', 'newer']);
+    appendFileSync(path.join(project, '.claude', 'skills', 'capmac', 'SKILL.md'), '\nAsk before pushing.\n');
+    writeFileSync(path.join(project, '.agents', 'skills', 'capmac', 'SKILL.md'), '---\nname: capmac\ndescription: our own\n---\n');
+    expect((await plan()).map((e) => e.state)).toEqual(['changed', 'foreign']);
+    // Planning writes nothing.
+    expect(readFileSync(path.join(project, '.claude', 'skills', 'capmac', 'SKILL.md'), 'utf8')).toContain('Ask before pushing.');
+  });
+
+  it('compares versions as numbers, and a dev build is never the newer one', () => {
+    expect(isNewerVersion('0.10.0', '0.9.9')).toBe(true);
+    expect(isNewerVersion('1.0.0', '1.0.0')).toBe(false);
+    expect(isNewerVersion('0.9.9', '0.10.0')).toBe(false);
+    expect(isNewerVersion('dev', '0.1.1')).toBe(false);
+    expect(isNewerVersion('0.1.1', 'dev')).toBe(false);
+  });
+
+  it('tells which agents a project uses from their files', () => {
+    writeFileSync(path.join(project, 'CLAUDE.md'), '# Notes for Claude');
+    writeFileSync(path.join(project, 'GEMINI.md'), '');
+    mkdirSync(path.join(project, '.github', 'instructions'), { recursive: true });
+    expect(skillAgents().filter((a) => isAgentUsedIn(a, project)).map((a) => a.id)).toEqual(['claude-code', 'copilot', 'gemini']);
+  });
+
+  it('installs for Antigravity in its own folders, and in the shared folder in a project', async () => {
+    const changes = await installSkill({ agents: ['antigravity', 'antigravity-cli'], scope: 'global', version: '1.0.0' });
+    expect(changes.map((c) => path.relative(home, c.dir))).toEqual([path.join('.gemini', 'config', 'skills', 'capmac'), path.join('.gemini', 'antigravity-cli', 'skills', 'capmac')]);
+    const inProject = await installSkill({ agents: ['antigravity'], scope: 'project', projectDir: project, version: '1.0.0' });
+    expect(path.relative(project, inProject[0]!.dir)).toBe(path.join('.agents', 'skills', 'capmac'));
+    expect(findSkillAgent('antigravity')?.id).toBe('antigravity');
   });
 });
 

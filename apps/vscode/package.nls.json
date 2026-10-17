@@ -61,6 +61,7 @@
   "cmd.openIpa": "Show the IPA in Its Folder",
   "cmd.openDevServer": "Open the Dev Server",
   "cmd.toggleStream": "Screen Stream: Smooth or Compatible…",
+  "cmd.addSkill": "Add the CapMac Skill for AI Agents…",
   "cmd.getStarted": "Get Started",
 
   "debug.mode": "live: keep the app running and reload it when you save. run: build and open it once",
@@ -96,7 +97,11 @@
   "cfg.osLogs": "Show the iPhone's system logs (NSLog and os_log) next to your app's console",
   "cfg.verbose": "Show every line the build tools print (for troubleshooting)",
   "cfg.codeLens": "Show Run and Live above capacitor.config, pubspec.yaml and capmac.json",
-  "cfg.terminal.capmacCommand": "Add the `capmac` command to VS Code's terminals, when it isn't installed already",
+  "cfg.terminal.capmacCommand": "Add the `capmac` command to VS Code's terminals and to the AI agents VS Code starts (like the Claude Code and Codex panels), when it isn't installed already",
+  "cfg.agents.addSkill": "Add CapMac's skill by itself, so AI agents (Claude Code, Codex, Gemini CLI and others) know how to run and check your app. CapMac asks before it replaces a skill that is already there. **CapMac: Add the CapMac Skill for AI Agents…** adds it again",
+  "cfg.agents.addSkill.project": "In each project with an app, the first time CapMac opens it. Commit it so your team's agents get it too",
+  "cfg.agents.addSkill.global": "Once, for all your projects, in each agent's folder in your user profile",
+  "cfg.agents.addSkill.off": "Only when you add it yourself",
 
   "walk.title": "Get started with CapMac",
   "walk.description": "Run your app on an iPhone simulator, an iPhone, the Mac or Windows, right from VS Code",
@@ -109,7 +114,7 @@
   "walk.screen.title": "See it and use it, in VS Code",
   "walk.screen.description": "The simulator's screen, or the Mac app's window, in a tab beside your code: click, scroll and type on it.\n[Show the Screen](command:capmac.showScreen)",
   "walk.ai.title": "Let your AI agent run the app",
-  "walk.ai.description": "In Copilot's agent mode, CapMac's tools let the agent run your app, read its console and look at its screen. Ask: “run my app and check the login screen”",
+  "walk.ai.description": "In Copilot's agent mode, CapMac's tools let the agent run your app, read its console and look at its screen. Ask: “run my app and check the login screen”\nClaude Code, Codex, Gemini CLI and other agents learn the `capmac` command from CapMac's skill. CapMac adds it to your project for the agents it finds.\n[Add the CapMac skill](command:capmac.addSkill)",
 
   "lm.status.name": "CapMac status",
   "lm.status.user": "The apps CapMac found, where the app runs and how the last run went",

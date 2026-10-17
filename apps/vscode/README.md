@@ -114,7 +114,11 @@ CapMac gives agents in VS Code five tools:
 
 Try: *"Run my app, open the settings screen and tell me if anything looks broken."*
 
-The `capmac` command is also in VS Code's terminals (unless you installed it already), for agents that work in a terminal and for your own scripts.
+Agents that work with commands (Claude Code, Codex, Gemini CLI, Cursor, Antigravity and others) learn the `capmac` command from CapMac's skill. The first time CapMac finds an app in a project, it adds the skill there for the agents it finds: the ones in your editor, the ones the project's files name (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`…) and the ones set up on this PC. It goes in `.claude/skills/capmac` for Claude Code and in `.agents/skills/capmac` for most others. Commit it so your team's agents get it too.
+
+CapMac never replaces a skill that is already there without asking, and adds it once per project: one you remove stays removed. **CapMac: Add the CapMac Skill for AI Agents…** adds it again, in this project or for all your projects, for the agents you pick. The `capmac.agents.addSkill` setting says what CapMac does by itself: `project` (the default), `global` (once, for all your projects) or `off`.
+
+The `capmac` command is in VS Code's terminals and in the agents other extensions start, like the Claude Code and Codex panels (unless you installed it already). Your own scripts can use it too.
 
 ## Building without a Mac
 
@@ -136,7 +140,8 @@ When something is missing (Visual Studio's C++ tools for a Windows app, Flutter 
 | `capmac.osLogs` | The iPhone's system logs next to your app's console |
 | `capmac.verbose` | Every line the build tools print |
 | `capmac.codeLens` | Run and Live above `capacitor.config`, `pubspec.yaml`, `metro.config`, `app.json` and `capmac.json` |
-| `capmac.terminal.capmacCommand` | The `capmac` command in VS Code's terminals |
+| `capmac.terminal.capmacCommand` | The `capmac` command in VS Code's terminals and in the agents VS Code starts |
+| `capmac.agents.addSkill` | Add CapMac's skill for AI agents by itself: in each `project` with an app (the default), once for all your projects (`global`), or `off` |
 
 The screen stream (smooth video, or compatible pictures), your paired Macs and each project's choices (its app, where it builds) are shared with the `capmac` command and CapMac Studio.
 

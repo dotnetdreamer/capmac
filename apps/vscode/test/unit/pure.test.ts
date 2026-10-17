@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { SkillPlanEntry } from '@capmac/core/shared/skills';
 import type { Target, WslStatus } from '../../../desktop/src/shared/contract.js';
-import { automaticTarget, isWithin, keyOf, parseAddress, pcReady, sourceOf, WebBuildDiagnostics } from '../../src/state/pure.js';
+import { automaticTarget, editorAgents, isWithin, keyOf, parseAddress, pcReady, skillSteps, sourceOf, WebBuildDiagnostics } from '../../src/state/pure.js';
 
 const sim = (name: string, state = 'Shutdown', available = true): Target => ({ kind: 'simulator', udid: `${name}-0000`, name, os: 'iOS 26.5', osVersion: '26.5', state, available });
 
@@ -71,5 +72,30 @@ describe('pure helpers', () => {
     expect(build.push('error during build:')).toEqual([]);
     expect(build.push('[PARSE_ERROR] Unexpected token')).toEqual([]);
     expect(build.push('    ╭─[ C:\\Users\\ik\\My App\\src\\main.js:48:11 ]')).toEqual([{ severity: 'error', message: 'Unexpected token', file: 'C:\\Users\\ik\\My App\\src\\main.js', line: 48, column: 11, own: true }]);
+  });
+
+  it('finds the AI agents of this editor: the editor itself, and their extensions in it', () => {
+    const inVsCode = editorAgents('Visual Studio Code', 'vscode', ['Anthropic.claude-code', 'ms-python.python', 'openai.chatgpt', 'GitHub.copilot-chat']);
+    expect([...inVsCode]).toEqual([
+      ['claude-code', ['extension']],
+      ['codex', ['extension']],
+      ['copilot', ['extension']],
+    ]);
+    expect([...editorAgents('Cursor', 'cursor', [])]).toEqual([['cursor', ['editor']]]);
+    expect([...editorAgents('Antigravity IDE', 'antigravity-ide', ['Google.gemini-cli-vscode-ide-companion'])]).toEqual([
+      ['antigravity', ['editor']],
+      ['gemini', ['extension']],
+    ]);
+    expect(editorAgents('Windsurf', 'windsurf', []).has('windsurf')).toBe(true);
+    expect(editorAgents('VSCodium', 'vscodium', []).size).toBe(0);
+  });
+
+  it('adds the skill once, asks before it replaces another, and offers to update its own older copies', () => {
+    const entry = (state: SkillPlanEntry['state'], dir: string = state): SkillPlanEntry => ({ dir, agents: [dir], readers: [], state });
+    const wanted = [entry('missing'), entry('foreign'), entry('current'), entry('changed')];
+    const every = [entry('older'), entry('changed'), entry('newer'), entry('missing', 'removed')];
+    expect(skillSteps(true, wanted, every)).toEqual({ write: [wanted[0]], replace: [wanted[1]], update: [every[0]] });
+    // After the first time: nothing is added again (a removed copy stays removed), older copies still get an update.
+    expect(skillSteps(false, [], every)).toEqual({ write: [], replace: [], update: [every[0]] });
   });
 });
