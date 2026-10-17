@@ -98,7 +98,24 @@ export async function infoCommand(options: { files?: boolean; live?: boolean }):
     : [];
   const flutter = project.flutter;
   const apple = (app: { bundleId: string | null; plugins: string } | null, folder: string) => (app ? `${folder}/Runner.xcodeproj · ${app.bundleId ?? pc.dim('no bundle id')} · plugins: ${app.plugins}` : pc.dim('not added'));
-  const rows: Array<[string, string]> = project.kind === 'flutter' && flutter
+  const rn = project.reactNative;
+  const rnApple = (app: { xcodeproj: string | null; bundleId: string | null; scheme: string } | null, folder: string) => (app ? `${folder}/${app.xcodeproj ?? pc.dim('(expo prebuild makes it)')} · ${app.bundleId ?? pc.dim('no bundle id')} · scheme ${app.scheme}` : pc.dim('not added'));
+  const rows: Array<[string, string]> = project.kind === 'react-native' && rn
+    ? [
+        ['App', `${project.appName} (${project.appId})`],
+        ...appsRows,
+        [rn.expo ? 'Expo project' : 'React Native project', project.capDir],
+        ['Synced folder', project.syncRoot + (project.projectRel ? pc.dim(`  (app in ${project.projectRel}/)`) : '')],
+        ['React Native', [rn.versions.reactNative, rn.versions.expo ? `Expo ${rn.versions.expo}` : null].filter(Boolean).join(' · ') || pc.dim('unknown')],
+        ['iOS app', rnApple(rn.ios, 'ios')],
+        ['Mac app', rn.macos ? `${rnApple(rn.macos, 'macos')}${rn.versions.macos ? pc.dim(`  (react-native-macos ${rn.versions.macos})`) : ''}` : pc.dim('not added')],
+        ['Windows app', rn.windows ? `windows/${rn.windows.solution}${rn.versions.windows ? pc.dim(`  (react-native-windows ${rn.versions.windows})`) : ''}` : pc.dim('not added')],
+        ['Metro', `on this PC, port ${rn.options.port ?? 8081}${rn.options.metroArgs?.length ? pc.dim(`  (${rn.options.metroArgs.join(' ')})`) : ''}`],
+        ...(rn.platforms.ios ? ([['Team ID', project.config.ios?.team ?? project.teamId ?? pc.dim('not set (only needed for devices)')]] as Array<[string, string]>) : []),
+        ['Mac', project.config.host ?? pc.dim('default')],
+        ['Project id on the Mac', project.projectId],
+      ]
+    : project.kind === 'flutter' && flutter
     ? [
         ['App', `${project.appName} (${project.appId})`],
         ...appsRows,

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { silentContext, type EngineContext } from '../../packages/core/src/engine/context.js';
+import type { EngineEvent } from '../../packages/core/src/engine/events.js';
 import { CancelledError } from '../../packages/core/src/engine/errors.js';
 import type { ProjectInfo } from '../../packages/core/src/engine/project.js';
 import type { WslBuildPlan } from '../../packages/core/src/engine/wsl/compiler.js';
@@ -18,7 +19,7 @@ const boundary = vi.hoisted(() => ({
   loadProject: vi.fn(), buildWeb: vi.fn(), prepare: vi.fn(), frameworks: vi.fn(), compile: vi.fn(),
   preparePods: vi.fn(), compileNative: vi.fn(),
   findPods: vi.fn(), inspectPods: vi.fn(), inspectResources: vi.fn(),
-  toolchain: vi.fn(), selectDevice: vi.fn(), listDevices: vi.fn(), install: vi.fn(), launch: vi.fn(), logs: vi.fn(), stopApp: vi.fn(),
+  toolchain: vi.fn(), selectDevice: vi.fn(), listDevices: vi.fn(), install: vi.fn(), launch: vi.fn(), logs: vi.fn(), stopApp: vi.fn(), developerMode: vi.fn(),
   startServer: vi.fn(), serverStop: vi.fn(), startRelay: vi.fn(), relayStop: vi.fn(), chooseHost: vi.fn(),
   watch: vi.fn(), watcherClose: vi.fn(), macLink: vi.fn(), macSession: vi.fn(),
   wslCommands: [] as string[][],
@@ -52,6 +53,8 @@ vi.mock('../../packages/core/src/engine/wsl/capacitor.js', () => ({
 vi.mock('../../packages/core/src/engine/wsl/device.js', async (importOriginal) => ({
   // The real mapping to a target: the phone picked is announced like the Mac's targets.
   wslDeviceTarget: (await importOriginal<typeof import('../../packages/core/src/engine/wsl/device.js')>()).wslDeviceTarget,
+  DEVELOPER_MODE_STEPS: (await importOriginal<typeof import('../../packages/core/src/engine/wsl/device.js')>()).DEVELOPER_MODE_STEPS,
+  waitForDeveloperMode: boundary.developerMode,
   inspectWslDeviceTools: async () => ({ ready: true, pythonVersion: '3.13.2', pymobiledevice3Version: '11.32.0', issues: [] }),
   selectWslDevice: boundary.selectDevice, listWslDevices: boundary.listDevices,
   installWslApp: boundary.install, launchWslApp: boundary.launch,
@@ -248,6 +251,21 @@ describe('local WSL build and deployment', () => {
     expect(boundary.install).toHaveBeenCalledWith(expect.stringContaining('App.ipa'), device, expect.objectContaining({ signal: controller.signal }));
     expect(boundary.launch).toHaveBeenCalledWith('dev.test.local', device, expect.anything());
     expect(boundary.logs).not.toHaveBeenCalled();
+  });
+
+  it('builds and installs on an iPhone with Developer Mode off, says so first, and waits for it before opening the app', async () => {
+    boundary.selectDevice.mockImplementation(async () => { boundary.sequence.push('device'); return { ...device, developerMode: 'disabled' }; });
+    boundary.developerMode.mockImplementation(async () => { boundary.sequence.push('developer mode'); });
+    const events: EngineEvent[] = [];
+    await runWsl({ ...inputs(), target: device.udid, logs: false }, { ...ctx, emit: (event) => events.push(event) }, signal());
+    expect(boundary.sequence).toEqual(['device', 'web', 'prepare', 'sign', 'install', 'developer mode', 'launch']);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'log', level: 'warn', message: expect.stringContaining('Developer Mode is off on Local iPhone'), hint: expect.stringContaining('tap Privacy & Security, then Developer Mode') }));
+    expect(events.flatMap((event) => (event.type === 'target' ? [event.target.developerMode] : []))).toEqual(['disabled', 'enabled']);
+    // On, it isn't asked for again.
+    boundary.sequence = [];
+    boundary.selectDevice.mockImplementation(async () => { boundary.sequence.push('device'); return device; });
+    await runWsl({ ...inputs(), target: device.udid, logs: false }, ctx, signal());
+    expect(boundary.sequence).not.toContain('developer mode');
   });
 
   it('a clean build drops the prepared native project and the compilers’ module cache first; a normal one keeps them', async () => {

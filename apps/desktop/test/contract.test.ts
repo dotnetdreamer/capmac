@@ -39,6 +39,12 @@ describe('IPC validation', () => {
     expect(start.safeParse({ projectPath: 'C:\\apps\\ludo', mode: 'run', app: 'android' }).success).toBe(false);
     expect(start.safeParse({ projectPath: 'C:\\apps\\ludo', mode: 'run', options: { flutterMode: 'jit' } }).success).toBe(false);
     expect(engineMethods['projects.createSample'].safeParse({ kind: 'flutter' }).success).toBe(true);
+    // A React Native app's release build, its sample, and React Native DevTools.
+    expect(start.safeParse({ projectPath: 'C:\\apps\\hello', mode: 'run', app: 'windows', options: { configuration: 'Release' } }).success).toBe(true);
+    expect(engineMethods['projects.createSample'].safeParse({ kind: 'react-native' }).success).toBe(true);
+    expect(engineMethods['projects.createSample'].safeParse({ kind: 'react' }).success).toBe(false);
+    expect(engineMethods['sessions.devtools'].safeParse({ sessionId: 's1' }).success).toBe(true);
+    expect(engineMethods['sessions.devtools'].safeParse({ sessionId: 's1', url: 'https://example.com' }).success).toBe(false);
   });
 
   it('keeps simulator input in range', () => {

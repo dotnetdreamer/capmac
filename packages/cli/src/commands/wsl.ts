@@ -7,7 +7,7 @@ import {
   setupWsl,
   type WslOptions,
 } from '@capmac/core/engine/wsl/index';
-import { listWslDevices } from '@capmac/core/engine/wsl/device';
+import { DEVELOPER_MODE_STEPS, listWslDevices } from '@capmac/core/engine/wsl/device';
 import { requireAppleDeviceServer } from '@capmac/core/engine/wsl/apple-devices';
 import { loadWslOptions } from '@capmac/core/engine/wsl/settings';
 import { cancelOnSigint } from '../cli-context.js';
@@ -73,8 +73,13 @@ export async function wslTargetsCommand(options: WslCommandOptions): Promise<voi
   }
   for (const device of devices) {
     const via = device.connection === 'network' ? 'Wi-Fi' : 'USB';
-    log.line(`${pc.bold(device.name)}${pc.dim(`${device.productVersion ? ` · iOS ${device.productVersion}` : ''} · ${via}`)}`);
+    // What stops it from running your app, and how to fix it.
+    const blocker = device.paired === false
+      ? { label: 'Not trusted', fix: 'Unlock the iPhone and tap Trust.' }
+      : device.developerMode === 'disabled' ? { label: 'Developer Mode off', fix: DEVELOPER_MODE_STEPS } : undefined;
+    log.line(`${pc.bold(device.name)}${pc.dim(`${device.productVersion ? ` · iOS ${device.productVersion}` : ''} · ${via}`)}${blocker ? pc.yellow(` · ${blocker.label}`) : ''}`);
     log.dim(`  ${device.udid}`);
+    if (blocker) log.line(`  ${pc.cyan('→')} ${blocker.fix}`);
   }
   log.line();
   log.dim('Choose a device with `capmac wsl run --target <udid>`.');

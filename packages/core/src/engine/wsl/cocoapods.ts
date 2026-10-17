@@ -77,7 +77,7 @@ for directory in [start]+list(start.parents):
 // Every file that CocoaPods or a Podfile/prepare_command can edit is copied.
 // Development pods and node_modules are never symlinked to the user's tree.
 // The mirror retains its Pods sandbox and downloads across repeated builds.
-const RESOLVE_PODS = String.raw`import json,os,pathlib,plistlib,shutil,subprocess,sys
+export const RESOLVE_PODS = String.raw`import json,os,pathlib,plistlib,shutil,subprocess,sys
 r=json.loads(sys.stdin.read())
 source=pathlib.Path(r['source']).resolve(strict=True)
 workspace=pathlib.Path(r['workspace']).resolve()
@@ -161,7 +161,11 @@ if gemfile is not None and not r['explicitPodPath']:
  subprocess.run([r['rubyPath'],'-S','bundle','check'],cwd=pod_dir,env=environment,check=True)
  command=[r['rubyPath'],'-S','bundle','exec']+command
  export_command=[r['rubyPath'],'-S','bundle','exec']+export_command
-subprocess.run(command,cwd=pod_dir,env=environment,check=True)
+# skipInstall: the caller restored the last install's files; exit 75 if CocoaPods' sandbox doesn't match them.
+if r.get('skipInstall'):
+ manifest=pod_dir/'Pods'/'Manifest.lock'; lock=pod_dir/'Podfile.lock'
+ if not manifest.is_file() or not lock.is_file() or manifest.read_bytes()!=lock.read_bytes(): sys.exit(75)
+else: subprocess.run(command,cwd=pod_dir,env=environment,check=True)
 request={'projectRoot':str(workspace),'podDirectory':str(pod_dir),'configuration':r['configuration'],
  'sdkPath':str(sdk),'scheme':r.get('scheme'),'output':r['output'],'liveUrl':r.get('liveUrl'),
  'webDirectory':str(workspace/r['webRelative']),'xcodeVersion':version,'xcodeBuild':build}
@@ -223,14 +227,18 @@ export async function syncMirroredCapacitor(project: ProjectInfo, workspace: str
   });
 }
 
-/** Reuse the isolated, incremental native workspace for either dependency manager. */
-export async function mirrorWslWorkspace(project: ProjectInfo, directory: string, executor: WslExecutor, signal: AbortSignal): Promise<{ workspace: string; workspaceWsl: string }> {
+/**
+ * Reuse the isolated, incremental native workspace for either dependency manager.
+ * `skipTop`: the project's own folders no iOS build reads (a React Native app's windows/ and android/).
+ */
+export async function mirrorWslWorkspace(project: ProjectInfo, directory: string, executor: WslExecutor, signal: AbortSignal, skipTop: string[] = []): Promise<{ workspace: string; workspaceWsl: string }> {
   await fs.mkdir(directory, { recursive: true });
   const fingerprint = createHash('sha256').update(path.resolve(project.syncRoot)).digest('hex').slice(0, 12);
   const workspace = path.join(directory, `workspace-${fingerprint}`);
   const [source, workspaceWsl] = await Promise.all([executor.path(project.syncRoot, signal), executor.path(workspace, signal)]);
   const ios = path.relative(project.syncRoot, path.resolve(project.capDir, project.iosDir)).split(path.sep).join('/');
-  if (process.platform === 'win32') await mirrorWindowsWorkspace(project.syncRoot, workspace, source, ios, signal);
+  const skipped = skipTop.map((name) => [project.projectRel, name].filter(Boolean).join('/'));
+  if (process.platform === 'win32') await mirrorWindowsWorkspace(project.syncRoot, workspace, source, ios, signal, skipped);
   else await executor.run(['python3', '-c', RESOLVE_PODS], { signal, timeoutMs: 10 * 60_000,
     stdin: JSON.stringify({ phase: 'mirror', source, workspace: workspaceWsl, podRelative: ios }) });
   return { workspace, workspaceWsl };
@@ -238,7 +246,7 @@ export async function mirrorWslWorkspace(project: ProjectInfo, directory: string
 
 // Windows filesystem access avoids the per-file DrvFS round trip when both
 // source and isolated copy live on NTFS. Native hooks still run only in WSL.
-async function mirrorWindowsWorkspace(source: string, workspace: string, owner: string, ios: string, signal: AbortSignal): Promise<void> {
+async function mirrorWindowsWorkspace(source: string, workspace: string, owner: string, ios: string, signal: AbortSignal, skipped: string[] = []): Promise<void> {
   source = await fs.realpath(source); workspace = path.resolve(workspace);
   const relative = path.relative(source, workspace);
   if (!relative || (!relative.startsWith('..') && !path.isAbsolute(relative) && !relative.split(path.sep).includes('.capmac'))) throw new UserError('The isolated workspace must be outside the source or inside its .capmac directory.');
@@ -253,7 +261,7 @@ async function mirrorWindowsWorkspace(source: string, workspace: string, owner: 
   const excluded = new Set(['.git', '.capmac', '.cache', 'DerivedData', '.gradle', '.kotlin', '.cxx', '.build', '__pycache__', '.pilot', '.playwright-mcp', '.replay-evidence', '.ota-out', '.webos-out', '.tmp']);
   const ignored = (name: string, parent: string): boolean => {
     const parts = parent.split('/');
-    return excluded.has(name) || name === 'build' && parts.includes('android') && !parts.includes('node_modules') ||
+    return excluded.has(name) || skipped.includes([parent, name].filter(Boolean).join('/')) || name === 'build' && parts.includes('android') && !parts.includes('node_modules') ||
       parts.includes('electron') && !parts.includes('node_modules') && ['node_modules', 'app', 'build', 'dist', 'release'].includes(name) ||
       parts.includes('node_modules') && ['.vite', '.remotion'].includes(name) ||
       name === 'Pods' && (parent === ios || parent.startsWith(ios + '/'));

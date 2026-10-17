@@ -82,9 +82,9 @@ export async function wslSetupState(cwd: string): Promise<WslSetupState> {
 
 const gigabytes = (bytes: number) => (bytes / 1_000_000_000).toFixed(1);
 
-/** An app with an iPhone app to sign here: a Capacitor app, or a Flutter app with its iOS app. */
+/** An app with an iPhone app to sign here: a Capacitor app, or a Flutter or React Native app with its iOS app. */
 function hasIosApp(project: ProjectInfo | undefined): project is ProjectInfo {
-  return project?.kind === 'capacitor' || (project?.kind === 'flutter' && Boolean(project.flutter?.platforms.ios));
+  return project?.kind === 'capacitor' || (project?.kind === 'flutter' && Boolean(project.flutter?.platforms.ios)) || (project?.kind === 'react-native' && Boolean(project.reactNative?.platforms.ios));
 }
 
 export async function guidedWslSetup(input: WslOptions, cwd: string, ctx: EngineContext, signal: AbortSignal): Promise<void> {

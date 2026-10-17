@@ -68,11 +68,12 @@ async function deploySimulator(params: DeployParams, io: AgentIO, env: NodeJS.Pr
   });
 
   const launchEnv = appEnv(env, 'SIMCTL_CHILD_', params.osLogs);
+  const appArgs = params.launchArgs ?? [];
   if (!params.attach) {
-    let r = await run('xcrun', ['simctl', 'launch', '--terminate-running-process', target.udid, bundleId], { env: launchEnv, signal: io.signal, timeoutMs: 120_000 });
+    let r = await run('xcrun', ['simctl', 'launch', '--terminate-running-process', target.udid, bundleId, ...appArgs], { env: launchEnv, signal: io.signal, timeoutMs: 120_000 });
     if (r.code !== 0 && /FBSOpenApplicationServiceErrorDomain/.test(r.tail.join('\n'))) {
       await sleep(2000, io.signal);
-      r = await run('xcrun', ['simctl', 'launch', '--terminate-running-process', target.udid, bundleId], { env: launchEnv, signal: io.signal, timeoutMs: 120_000 });
+      r = await run('xcrun', ['simctl', 'launch', '--terminate-running-process', target.udid, bundleId, ...appArgs], { env: launchEnv, signal: io.signal, timeoutMs: 120_000 });
     }
     if (r.code !== 0) throw new AgentError('Launching the app failed', 'DEPLOY_FAILED', undefined, r.tail.slice(-10));
     io.send({ t: 'ready', data: { pid: Number(r.stdout.split(':').pop()) || null } });
@@ -91,7 +92,7 @@ async function deploySimulator(params: DeployParams, io: AgentIO, env: NodeJS.Pr
       io.send({ t: 'ready', data: {} });
     };
     const quietTimer = setTimeout(announce, 4000);
-    const result = await run('xcrun', ['simctl', 'launch', '--console-pty', '--terminate-running-process', target.udid, bundleId], {
+    const result = await run('xcrun', ['simctl', 'launch', '--console-pty', '--terminate-running-process', target.udid, bundleId, ...appArgs], {
       env: launchEnv,
       signal: io.signal,
       capture: false,
@@ -147,8 +148,9 @@ async function deployDevice(params: DeployParams, io: AgentIO, env: NodeJS.Proce
   const childEnv = JSON.stringify({ NSUnbufferedIO: 'YES', ...(params.osLogs ? { OS_ACTIVITY_DT_MODE: 'enable' } : {}) });
   const launchArgs = ['devicectl', 'device', 'process', 'launch', '--device', target.udid, '--terminate-existing', '--environment-variables', childEnv];
   const lockedHint = (text: string) => (/locked/i.test(text) ? 'Unlock the iPhone and try again.' : undefined);
+  const appArgs = params.launchArgs ?? [];
   if (!params.attach) {
-    const r = await run('xcrun', [...launchArgs, bundleId], { env, signal: io.signal, timeoutMs: 120_000 });
+    const r = await run('xcrun', [...launchArgs, bundleId, ...appArgs], { env, signal: io.signal, timeoutMs: 120_000 });
     if (r.code !== 0) throw new AgentError('Launching the app failed', 'DEPLOY_FAILED', lockedHint(r.tail.join('\n')), r.tail.slice(-10));
     io.send({ t: 'ready', data: {} });
     return { reason: 'detached', exitCode: null };
@@ -157,7 +159,7 @@ async function deployDevice(params: DeployParams, io: AgentIO, env: NodeJS.Proce
   // devicectl only streams the app's output when it has a terminal, so give it one with script(1).
   const script = await which('script', env);
   const command = script ? script : 'xcrun';
-  const args = script ? ['-q', '-t', '0', '/dev/null', 'xcrun', ...launchArgs, '--console', bundleId] : [...launchArgs, '--console', bundleId];
+  const args = script ? ['-q', '-t', '0', '/dev/null', 'xcrun', ...launchArgs, '--console', bundleId, ...appArgs] : [...launchArgs, '--console', bundleId, ...appArgs];
   let started = false;
   const attach = await run(command, args, {
     env,
@@ -181,7 +183,7 @@ async function deployDevice(params: DeployParams, io: AgentIO, env: NodeJS.Proce
   if (attach.code !== 0 && /--console|not implemented|unknown option|unrecognized/i.test(text)) {
     // Xcode 15 cannot attach a console: launch without one.
     io.log('warn', 'This Xcode cannot stream device console output (needs Xcode 16+). The app was launched without logs.');
-    const r = await run('xcrun', [...launchArgs, bundleId], { env, signal: io.signal, timeoutMs: 120_000 });
+    const r = await run('xcrun', [...launchArgs, bundleId, ...appArgs], { env, signal: io.signal, timeoutMs: 120_000 });
     if (r.code !== 0) throw new AgentError('Launching the app failed', 'DEPLOY_FAILED', lockedHint(r.tail.join('\n')), r.tail.slice(-10));
     io.send({ t: 'ready', data: {} });
     return { reason: 'detached', exitCode: null };

@@ -43,6 +43,11 @@ export function phaseOf(op: string, stepId: string): Phase {
       return 'boot';
     case 'flutter-build:build':
       return 'build';
+    case 'rn-prepare:install':
+    case 'rn-prepare:pods':
+      return 'deps';
+    case 'rn-build:build':
+      return 'build';
     case 'flutter-sdk:flutter-clone':
     case 'flutter-sdk:flutter-tool':
     case 'flutter-sdk:flutter-precache':

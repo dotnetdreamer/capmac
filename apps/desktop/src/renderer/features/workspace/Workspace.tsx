@@ -51,7 +51,7 @@ const storage = typeof localStorage === 'undefined' ? undefined : localStorage;
 const asked = new Set<string>();
 
 /** Offers `npm install` (or the project's package manager) when node_modules is missing on this PC. */
-function DepsBanner({ path, packageManager, onInstalled }: { path: string; packageManager: string; onInstalled: () => void }) {
+function DepsBanner({ path, packageManager, onInstalled, reactNative = false }: { path: string; packageManager: string; onInstalled: () => void; reactNative?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
@@ -59,7 +59,7 @@ function DepsBanner({ path, packageManager, onInstalled }: { path: string; packa
     setBusy(true);
     try {
       await call('projects.installDeps', { path });
-      toast({ tone: 'success', title: t.workspace.deps.installed, body: t.workspace.deps.installedBody });
+      toast({ tone: 'success', title: t.workspace.deps.installed, body: reactNative ? t.workspace.deps.installedBodyReactNative : t.workspace.deps.installedBody });
       onInstalled();
     } catch (err) {
       const e = errorInfo(err);
@@ -80,7 +80,7 @@ function DepsBanner({ path, packageManager, onInstalled }: { path: string; packa
           </Button>
         }
       >
-        {t.workspace.deps.body}
+        {reactNative ? t.workspace.deps.bodyReactNative : t.workspace.deps.body}
       </InfoBar>
     </div>
   );
@@ -97,13 +97,16 @@ export function Workspace({ path }: { path: string }) {
   const mac = resolveMac(macs, prefs?.mac ?? entry.summary?.host);
   const electron = entry.summary?.electron ?? null;
   const flutter = entry.summary?.kind === 'flutter';
+  const reactNative = entry.summary?.kind === 'react-native';
+  // An app per platform folder: its Mac app runs on the Mac's desktop, its Windows app on this PC.
+  const multi = flutter || reactNative;
   // The app Run and Live use: the Electron app and a Flutter app's Mac app run on the Mac's desktop, the iOS app in simulators and on devices.
   const app = appOf(entry.summary, prefs ?? {}) ?? 'ios';
-  const onlyMac = Boolean((electron && app === 'electron') || (flutter && app === 'macos'));
+  const onlyMac = Boolean((electron && app === 'electron') || (multi && app === 'macos'));
   // A Flutter app's Windows app runs on this PC, in its own window: no Mac and no other target.
-  const pcDesktop = flutter && app === 'windows';
+  const pcDesktop = multi && app === 'windows';
   // Without a Mac yet, still the Mac's desktop: the pane then says how to pair one.
-  const macDesktop = useMemo(() => (onlyMac ? macDesktopTarget(mac?.label ?? (flutter ? t.targets.macGroupFlutter : t.targets.macGroup), mac?.macos ?? null) : null), [mac, onlyMac, flutter]);
+  const macDesktop = useMemo(() => (onlyMac ? macDesktopTarget(mac?.label ?? (multi ? t.targets.macGroupFlutter : t.targets.macGroup), mac?.macos ?? null) : null), [mac, onlyMac, flutter]);
   const pcDesktopTarget = useMemo(() => (pcDesktop ? thisPcTarget() : null), [pcDesktop]);
   // On this PC (no Mac): the iPhones plugged in here, and this PC's setup.
   const pcMode = entry.summary?.backend === 'wsl' && app === 'ios';
@@ -131,6 +134,13 @@ export function Workspace({ path }: { path: string }) {
       if (summary) void window.capmac.invoke('app:project-opened', { path: summary.path, name: summary.appName, appId: summary.appId });
     });
   }, [inspect, path]);
+
+  // A React Native run installs the packages on this PC itself (Metro needs them): once Metro is up, read the project again.
+  const metroUp = reactNative && run?.phases.devserver?.status === 'done';
+  const needsPackages = entry.summary ? !entry.summary.hasNodeModules : false;
+  useEffect(() => {
+    if (metroUp && needsPackages) void inspect(path, true);
+  }, [metroUp, needsPackages, inspect, path]);
 
   // A project with more than one app, opened before one was picked: ask which, once.
   const summaryNow = entry.summary;
@@ -254,15 +264,15 @@ export function Workspace({ path }: { path: string }) {
   return (
     <div className="workspace">
       <Toolbar path={path} summary={summary} icon={entry.icon} run={run} macs={macs} mac={mac} targets={targets} target={target} autoTarget={auto} targetsLoading={pcMode ? !pcEntry.devices : !pcDesktop && Boolean(mac) && !targets && !targetsEntry?.error} macDesktop={macDesktop} onlyMac={onlyMac} pcDesktop={pcDesktop} app={app} pc={pcMode} pcState={pcState} />
-      <SessionBar path={path} run={run} mac={mac} electron={electronKind} flutter={flutter} />
+      <SessionBar path={path} run={run} mac={mac} electron={electronKind} flutter={flutter} reactNative={reactNative} />
       {app === 'ios' && !summary.hasIos && (
         <div className="session-banner">
           <InfoBar tone="caution" title={t.workspace.noIosTitle}>
-            <Rich text={flutter ? t.workspace.noIosBodyFlutter : t.workspace.noIosBody} />
+            <Rich text={flutter ? t.workspace.noIosBodyFlutter : reactNative ? t.workspace.noIosBodyReactNative : t.workspace.noIosBody} />
           </InfoBar>
         </div>
       )}
-      {(summary.hasIos || summary.electron?.flavor === 'capacitor') && !summary.hasNodeModules && summary.devCommand && <DepsBanner path={path} packageManager={summary.packageManager} onInstalled={() => void inspect(path, true)} />}
+      {(summary.hasIos || summary.electron?.flavor === 'capacitor' || reactNative) && !summary.hasNodeModules && summary.devCommand && <DepsBanner path={path} packageManager={summary.packageManager} reactNative={reactNative} onInstalled={() => void inspect(path, true)} />}
       {pcMode && <PcBanner path={path} entry={pcEntry} />}
       {!pcMode && !pcDesktop && macs.length === 0 && (
         <div className="session-banner">
@@ -274,7 +284,7 @@ export function Workspace({ path }: { path: string }) {
                 <Button size="sm" variant="accent" onClick={() => useApp.getState().navigate({ name: 'onboarding' })}>
                   {t.common.pairMac}
                 </Button>
-                {app === 'ios' && (summary.kind === 'capacitor' || summary.kind === 'flutter') && (
+                {app === 'ios' && (summary.kind === 'capacitor' || multi) && (
                   <Button size="sm" icon="desktop" onClick={() => void setBackend(path, 'wsl')}>
                     {t.pc.noMacBanner}
                   </Button>
@@ -307,7 +317,7 @@ export function Workspace({ path }: { path: string }) {
             }
           >
             <ErrorBoundary label={t.crash.parts.simulator} compact>
-              {onMacTarget ? <AppWindowPane mac={mac} path={path} run={run} frame={deviceFrame} /> : pcDesktop ? <WindowsAppPane run={run} name={summary.appName} /> : pcMode ? <PcDevicePane target={target} run={run} entry={pcEntry} /> : <SimulatorPane mac={mac} target={target} />}
+              {onMacTarget ? <AppWindowPane mac={mac} path={path} run={run} frame={deviceFrame} /> : pcDesktop ? <WindowsAppPane run={run} name={summary.appName} reactNative={reactNative} /> : pcMode ? <PcDevicePane target={target} run={run} entry={pcEntry} /> : <SimulatorPane mac={mac} target={target} />}
             </ErrorBoundary>
           </Pane>
         </Panel>
@@ -317,7 +327,7 @@ export function Workspace({ path }: { path: string }) {
             <Panel id="timeline" panelRef={timelinePanel} collapsible collapsedSize={0} minSize={124} defaultSize={168} className="ws-panel">
               <Pane title={t.workspace.timeline} labelledBy="pane-timeline">
                 <ErrorBoundary label={t.crash.parts.timeline} compact>
-                  <Timeline run={run} electron={electronKind} macSelected={onMacTarget} pcSelected={pcMode} flutter={flutter} pcDesktopSelected={pcDesktop} />
+                  <Timeline run={run} electron={electronKind} macSelected={onMacTarget} pcSelected={pcMode} flutter={flutter} reactNative={reactNative} pcDesktopSelected={pcDesktop} />
                 </ErrorBoundary>
               </Pane>
             </Panel>

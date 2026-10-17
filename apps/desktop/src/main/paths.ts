@@ -52,6 +52,11 @@ export function flutterSampleDir(): string | null {
   return firstExisting(app.isPackaged ? [resources('sample-flutter')] : [path.join(appRoot(), '..', '..', 'examples', 'hello-flutter'), outDir('sample-flutter')]);
 }
 
+/** The React Native sample ("Try the React Native sample"), found the same way. */
+export function reactNativeSampleDir(): string | null {
+  return firstExisting(app.isPackaged ? [resources('sample-react-native')] : [path.join(appRoot(), '..', '..', 'examples', 'hello-react-native'), outDir('sample-react-native')]);
+}
+
 /** node-datachannel (WebRTC for remote access), shipped next to app.asar; in development it comes from node_modules. */
 export function remoteModulesDir(): string | null {
   if (!app.isPackaged) return null;

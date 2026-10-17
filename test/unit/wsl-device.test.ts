@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CancelledError } from '../../packages/core/src/engine/errors.js';
 import {
   ensureWslWifiPairing, inspectWslDeviceTools, installWslApp, LAUNCH_APP, launchWslApp, listWslDevices, selectWslDevice,
-  stopWslApp, streamWslDeviceLogs, WIFI_COMMAND, WIFI_IPHONES,
+  stopWslApp, streamWslDeviceLogs, USB_IPHONES, waitForDeveloperMode, WIFI_COMMAND, WIFI_IPHONES, wslDeviceTarget,
 } from '../../packages/core/src/engine/wsl/device.js';
 
 interface Reply { stdout?: string[]; stderr?: string; code?: number | null; hold?: boolean; error?: Error }
@@ -70,6 +70,15 @@ describe('host iPhone tooling', () => {
     expect(commands()).toHaveLength(0);
   });
 
+  it('uses the Python CapMac set up for another project when this one names none', async () => {
+    vi.stubEnv('CAPMAC_PYTHON', '');
+    const own = path.join(home, 'CapMac', 'device-tools', '11.32.0-python-3.13.16', 'python.exe');
+    await mkdir(path.dirname(own), { recursive: true });
+    await writeFile(own, '');
+    await expect(inspectWslDeviceTools()).resolves.toMatchObject({ ready: true, python: own });
+    expect(boundary.spawn.mock.calls[0]?.slice(0, 2)).toEqual([own, ['-I', '-c', expect.stringContaining('importlib.metadata')]]);
+  });
+
   it('explains an absent module and an unsupported older version', async () => {
     boundary.probe = { stdout: ['{"python":"3.13.2","pymobiledevice3":null}'] };
     expect(await inspectWslDeviceTools(options)).toMatchObject({ ready: false, issues: [expect.stringContaining('Install pymobiledevice3 11.32.0')] });
@@ -95,7 +104,44 @@ describe('USB device discovery', () => {
   it('parses pymobiledevice3 JSON and filters unsupported device classes', async () => {
     boundary.replies.push({ stdout: [JSON.stringify([...info, { ...info[0], DeviceClass: 'AppleTV' }])] });
     await expect(listWslDevices(options)).resolves.toEqual([{ ...device, productType: 'iPhone17,3', connection: 'usb' }]);
-    expect(commands()[0]?.args).toEqual(['-m', 'pymobiledevice3', '--no-color', 'usbmux', 'list', '--usb']);
+    expect(commands()[0]?.args.slice(0, 2)).toEqual(['-c', USB_IPHONES]);
+  });
+
+  it('tells which iPhones have Developer Mode off or don’t trust this PC, and shows the switch in Settings once', async () => {
+    const off = { ...info[0], UniqueDeviceID: '00008110-001A2B3C4D5E005E', DeviceName: 'Dev iPhone', Paired: true, DeveloperModeStatus: false, Revealed: true };
+    const untrusted = { ...info[0], UniqueDeviceID: '00008110-001A2B3C4D5E004E', DeviceName: 'Spare iPhone', Paired: false };
+    boundary.replies.push({ stdout: [JSON.stringify([off, untrusted])] });
+    const devices = await listWslDevices(options);
+    expect(devices).toEqual([
+      { udid: off.UniqueDeviceID, name: 'Dev iPhone', productVersion: '18.5', productType: 'iPhone17,3', connection: 'usb', developerMode: 'disabled' },
+      { udid: untrusted.UniqueDeviceID, name: 'Spare iPhone', productVersion: '18.5', productType: 'iPhone17,3', connection: 'usb', paired: false },
+    ]);
+    expect(devices.map(wslDeviceTarget)).toMatchObject([{ developerMode: 'disabled', available: false }, { paired: false, available: false }]);
+    // Turned on: ready to run. The switch was shown on it already, so this listing doesn't show it again.
+    boundary.replies.push({ stdout: [JSON.stringify([{ ...off, DeveloperModeStatus: true, Revealed: undefined }])] });
+    const [on] = await listWslDevices(options);
+    expect(on).toMatchObject({ developerMode: 'enabled' });
+    expect(wslDeviceTarget(on!)).toMatchObject({ developerMode: 'enabled', available: true });
+    expect(commands().at(-1)?.args).toEqual(['-c', USB_IPHONES, off.UniqueDeviceID]);
+  });
+
+  it('waits for Developer Mode while the iPhone restarts, and Stop ends the wait', async () => {
+    const off = { ...info[0], DeveloperModeStatus: false };
+    boundary.replies.push(
+      { stdout: [JSON.stringify([off])] },
+      // Restarting: the iPhone can't answer, then it is gone for a while.
+      { code: 1, stderr: 'ConnectionFailedError: the device restarted' },
+      { stdout: ['[]'] },
+      { stdout: [JSON.stringify([{ ...off, DeveloperModeStatus: true }])] },
+    );
+    await waitForDeveloperMode(device, options, 1);
+    expect(commands()).toHaveLength(4);
+    const stop = new AbortController();
+    boundary.replies.push({ stdout: [JSON.stringify([off])] });
+    const waiting = waitForDeveloperMode(device, { ...options, signal: stop.signal }, 60_000);
+    await vi.waitFor(() => expect(commands()).toHaveLength(5));
+    stop.abort();
+    await expect(waiting).rejects.toBeInstanceOf(CancelledError);
   });
 
   it('requires an explicit choice for multiple iPhones and never silently switches devices', async () => {

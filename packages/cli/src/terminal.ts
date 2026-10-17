@@ -19,8 +19,8 @@ export interface TerminalOptions {
   mode?: 'run' | 'dev' | 'other';
   /** `run` streams app logs (vs `--no-logs`). */
   attach?: boolean;
-  /** An iOS app (the default), an Electron app on the Mac's desktop, or a Flutter app (any of its apps): decides labels and wording. */
-  platform?: 'ios' | 'electron' | 'flutter';
+  /** An iOS app (the default), an Electron app on the Mac's desktop, or a Flutter or React Native app (any of its apps): decides labels and wording. */
+  platform?: 'ios' | 'electron' | 'flutter' | 'react-native';
 }
 
 const URL = /\bhttps?:\/\/[^\s'"`)]+/g;
@@ -53,8 +53,8 @@ export class TerminalReporter {
   handle = (event: EngineEvent): void => {
     switch (event.type) {
       case 'step':
-        // Launching is announced by the "is running" line instead.
-        if (event.phase !== 'launch') this.steps.set(event.id, { step: step(event.title), phase: event.phase });
+        // Launching is announced by the "is running" line instead (a React Native app's also bundles its JavaScript then: shown).
+        if (event.phase !== 'launch' || this.options.platform === 'react-native') this.steps.set(event.id, { step: step(event.title), phase: event.phase });
         break;
       case 'step-progress':
         this.steps.get(event.id)?.step.update(event.text);
@@ -91,7 +91,7 @@ export class TerminalReporter {
         if (isVerbose()) log.dim(`  ${event.text}`);
         break;
       case 'devserver-output':
-        log.raw(`${pc.dim(this.options.platform === 'electron' ? 'dev │' : 'web │')} ${event.text}`);
+        log.raw(`${pc.dim(this.options.platform === 'electron' ? 'dev │' : this.options.platform === 'react-native' ? 'metro │' : 'web │')} ${event.text}`);
         break;
       case 'diagnostic':
         this.diagnostic(event.diagnostic);
@@ -118,8 +118,8 @@ export class TerminalReporter {
         this.dialogsChanged(event);
         break;
       case 'hmr':
-        // Flutter's hot reloads, one line each (a web app's HMR stays quiet).
-        if (this.options.platform === 'flutter' && event.state === 'update' && event.detail) log.line(`  ${pc.green('↻')} ${event.detail}`);
+        // Flutter's hot reloads and React Native's Fast Refresh, one line each (a web app's HMR stays quiet).
+        if ((this.options.platform === 'flutter' || this.options.platform === 'react-native') && event.state === 'update' && event.detail) log.line(`  ${pc.green('↻')} ${event.detail}`);
         break;
       case 'build-reused':
         log.dim('  Native code unchanged: reused the previous build.');
@@ -153,6 +153,8 @@ export class TerminalReporter {
     if (event.state === 'running') {
       if (this.options.mode === 'dev' && this.options.platform === 'flutter') {
         log.success(`${name} is running on ${event.target} ${pc.dim('· save your Dart code and CapMac hot-reloads it')}`);
+      } else if (this.options.mode === 'dev' && this.options.platform === 'react-native') {
+        log.success(`${name} is running on ${event.target} ${pc.dim('· save your code and it shows at once (Fast Refresh)')}`);
       } else if (this.options.mode === 'dev' && this.options.platform === 'electron') {
         log.success(`${name} is running on ${event.target} ${pc.dim('· edit your code and CapMac reloads it')}`);
       } else if (this.options.mode === 'dev') {
@@ -304,7 +306,7 @@ export class TerminalReporter {
         break;
       default:
         // A Flutter app's native lines come from the engine and the plugins, on whichever platform it runs.
-        log.raw(`${pc.dim(this.options.platform === 'flutter' ? 'app ' : 'ios ')} ${entry.level === 'error' ? pc.red(entry.text) : entry.text}`);
+        log.raw(`${pc.dim(this.options.platform === 'flutter' || this.options.platform === 'react-native' ? 'app ' : 'ios ')} ${entry.level === 'error' ? pc.red(entry.text) : entry.text}`);
     }
   }
 }

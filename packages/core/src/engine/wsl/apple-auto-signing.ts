@@ -9,8 +9,8 @@ import os from 'node:os';
 import path from 'node:path';
 import type * as ExpoApple from '@expo/apple-utils';
 import plist from 'plist';
-import { throwIfAborted, type EngineContext } from '../context.js';
-import { CancelledError, UserError } from '../errors.js';
+import { log, throwIfAborted, type EngineContext } from '../context.js';
+import { CancelledError, isCancelled, UserError } from '../errors.js';
 import type { ProjectInfo } from '../project.js';
 import type { AppleAccountSession, AppleRequestContext } from './apple-account.js';
 import { appleProfileCovers, inspectAppleProfileContent, prepareAppleSigningDirectory } from './apple-signing.js';
@@ -258,13 +258,52 @@ export async function setUpAutomaticSigning(session: AppleAccountSession, target
   if (!confirmed) throw new UserError('Signing setup was skipped.', 'Run capmac wsl setup again when you are ready, or pass your own files with --certificate and --profile.');
   throwIfAborted(signal);
 
-  // 1. App IDs and plain capabilities.
+  // 1. App IDs and plain capabilities. Apple adds new App IDs only on its website for some accounts
+  // too (421 to CapMac's own client): signed in there, CapMac adds them there, then reads them back.
+  const web = options.web ?? appleWeb;
+  const bundleName = (identifier: string) => `CapMac ${identifier}`.replace(/[^A-Za-z0-9 ]/g, ' ');
+  const madeOnWebsite = new Set<string>();
+  const missingBundles = targets.filter((target) => !inventory.bundles.has(target.bundleIdentifier));
+  if (missingBundles.length && session.via === 'website' && options.executor) {
+    // When the website can't be opened or won't add one, CapMac's own client below tries, as before.
+    const site = await web.open(session.team, ctx, signal).catch((error: unknown) => {
+      if (isCancelled(error) || error instanceof AppleWebStopped || signal?.aborted) throw error;
+      log(ctx, 'debug', `Apple’s website didn’t open for the App IDs: ${(error as Error).message}`);
+      return undefined;
+    });
+    if (site) {
+      try {
+        for (const target of missingBundles) {
+          try {
+            await site.bundleId({ name: bundleName(target.bundleIdentifier), identifier: target.bundleIdentifier });
+            madeOnWebsite.add(target.bundleIdentifier);
+          } catch (error) {
+            if (isCancelled(error) || error instanceof AppleWebStopped || signal?.aborted) throw error;
+            log(ctx, 'debug', `Apple’s website didn’t add the App ID ${target.bundleIdentifier}: ${(error as Error).message}`);
+          }
+        }
+      } finally {
+        await site.close();
+      }
+    }
+  }
   await session.connect(async (expo, context) => {
     for (const target of targets) {
       let bundle = inventory.bundles.get(target.bundleIdentifier);
+      if (!bundle && madeOnWebsite.has(target.bundleIdentifier)) {
+        bundle = await step(`read the App ID ${target.bundleIdentifier}`, async () => {
+          // Apple can take a moment to list what its website just made.
+          for (let attempt = 0; ; attempt++) {
+            const made = await expo.BundleId.findAsync(context, { identifier: target.bundleIdentifier });
+            if (made) return made;
+            if (attempt >= 5) throw new UserError(`Apple added the App ID ${target.bundleIdentifier} but doesn’t list it yet.`, 'Run setup again in a minute.');
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
+        });
+        inventory.bundles.set(target.bundleIdentifier, bundle);
+      }
       if (!bundle) {
-        const name = `CapMac ${target.bundleIdentifier}`.replace(/[^A-Za-z0-9 ]/g, ' ');
-        bundle = await step(`add the App ID ${target.bundleIdentifier}`, () => expo.BundleId.createAsync(context, { name, identifier: target.bundleIdentifier, platform: expo.BundleIdPlatform.IOS }));
+        bundle = await step(`add the App ID ${target.bundleIdentifier}`, () => expo.BundleId.createAsync(context, { name: bundleName(target.bundleIdentifier), identifier: target.bundleIdentifier, platform: expo.BundleIdPlatform.IOS }));
         inventory.bundles.set(target.bundleIdentifier, bundle);
       }
       const have = inventory.capabilities.get(target.bundleIdentifier) ?? new Set<string>();
@@ -283,7 +322,6 @@ export async function setUpAutomaticSigning(session: AppleAccountSession, target
 
   // 3. Certificate, devices and profiles. Apple makes devices and profiles only on its website
   // for some accounts (421 to CapMac's own client): signed in there, CapMac makes them there.
-  const web = options.web ?? appleWeb;
   const certificate = inventory.certificate ?? await createDevelopmentCertificate(session, directory, signal, options.executor ? { executor: options.executor, ctx, web } : undefined);
   const website = session.via === 'website' && options.executor ? await web.open(session.team, ctx, signal) : undefined;
   const again = website ? 'Run setup again. CapMac keeps what it already made.' : undefined;

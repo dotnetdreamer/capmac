@@ -122,11 +122,11 @@ export const en = {
 
   home: {
     title: 'Projects',
-    subtitle: (mac: string) => `Your Capacitor, Flutter and Electron apps, built and run on ${mac}`,
-    subtitleNoMac: 'Pair a Mac to build and run your Capacitor, Flutter and Electron apps',
+    subtitle: (mac: string) => `Your Capacitor, Flutter, React Native and Electron apps, built and run on ${mac}`,
+    subtitleNoMac: 'Pair a Mac to build and run your Capacitor, Flutter, React Native and Electron apps',
     addProject: 'Add project',
-    emptyTitle: 'Add your Capacitor, Flutter or Electron app',
-    emptyBody: 'Choose the folder that has your capacitor.config file, your Flutter app’s pubspec.yaml or your Electron app’s package.json, or drop it here',
+    emptyTitle: 'Add your Capacitor, Flutter, React Native or Electron app',
+    emptyBody: 'Choose the folder that has your capacitor.config file, your Flutter app’s pubspec.yaml or your React Native or Electron app’s package.json, or drop it here',
     chooseFolder: 'Choose a folder…',
     trySample: 'Try the sample app',
     trySampleElectron: 'Try the Electron sample',
@@ -135,17 +135,21 @@ export const en = {
     sampleElectron: 'Mac app (Electron)',
     sampleFlutter: 'iPhone, Mac and Windows app (Flutter)',
     trySampleFlutter: 'Try the Flutter sample',
+    sampleReactNative: 'iPhone, Mac and Windows app (React Native)',
+    trySampleReactNative: 'Try the React Native sample',
     sampleFailed: 'Couldn’t create the sample app',
-    addCard: 'Add a Capacitor, Flutter or Electron app',
+    addCard: 'Add a Capacitor, Flutter, React Native or Electron app',
     addCardHint: 'or drop its folder here',
     building: 'Building…',
     running: 'Running',
     buildFailed: 'Build failed',
     openProject: (name: string) => `Open ${name}`,
-    missing: 'This folder is gone or isn’t a Capacitor, Flutter or Electron app anymore',
+    missing: 'This folder is gone or isn’t a Capacitor, Flutter, React Native or Electron app anymore',
     noIos: 'iOS not added',
     electron: 'Electron',
     flutter: 'Flutter',
+    reactNative: 'React Native',
+    expo: 'Expo',
     flutterApp: { ios: 'iOS', macos: 'Mac', windows: 'Windows' } as Record<string, string>,
     macApp: 'Mac app',
     lastRun: (live: boolean, ago: string, target?: string) => `${live ? 'Live' : 'Ran'} ${ago}${target ? ` on ${target}` : ''}`,
@@ -338,15 +342,17 @@ export const en = {
 
   /** Toasts and errors from actions anywhere in the app. */
   actions: {
-    notCapacitor: 'That folder isn’t a Capacitor, Flutter or Electron app',
-    notCapacitorBody: 'There’s no capacitor.config file, Flutter pubspec.yaml, or package.json that uses Electron, in it, above it or in the folders inside it',
+    notCapacitor: 'That folder isn’t a Capacitor, Flutter, React Native or Electron app',
+    notCapacitorBody: 'There’s no capacitor.config file, Flutter pubspec.yaml, or package.json that uses React Native or Electron, in it, above it or in the folders inside it',
     cantRunYet: (found: string[]) =>
       found.length === 1
-        ? `It’s ${/^[aeiox]/i.test(found[0]!) ? 'an' : 'a'} ${found[0]} app. CapMac runs Capacitor, Ionic, Flutter and Electron apps for now`
-        : `CapMac found ${found.slice(0, -1).join(', ')} and ${found.at(-1)} apps here. It runs Capacitor, Ionic, Flutter and Electron apps for now`,
+        ? `It’s ${/^[aeiox]/i.test(found[0]!) ? 'an' : 'a'} ${found[0]} app. CapMac runs Capacitor, Ionic, Flutter, React Native and Electron apps for now`
+        : `CapMac found ${found.slice(0, -1).join(', ')} and ${found.at(-1)} apps here. It runs Capacitor, Ionic, Flutter, React Native and Electron apps for now`,
     pairFirst: 'Pair a Mac first',
     pairFirstBody: 'CapMac Studio needs a Mac to build and run your app',
     reloadFailed: 'Couldn’t reload the app',
+    devToolsFailed: 'DevTools didn’t open',
+    devToolsFailedBody: 'Is the app open and connected to Metro?',
     noMacSelected: 'No Mac is selected for this project',
     noMacSelectedHint: 'Pick a Mac in the toolbar',
     rebuildFailed: 'Couldn’t rebuild',
@@ -364,6 +370,7 @@ export const en = {
     noIosTitle: 'This app doesn’t have iOS added yet',
     noIosBody: 'Run `npx cap add ios` in your project folder, then come back',
     noIosBodyFlutter: 'Run `flutter create --platforms ios .` in your project folder, then come back',
+    noIosBodyReactNative: 'Copy the ios folder of a new React Native app (`npx @react-native-community/cli init`) into your project, then come back',
     pairBanner: 'Pair a Mac to build this app',
     simulator: 'Simulator',
     device: 'Device',
@@ -372,6 +379,8 @@ export const en = {
     windowsAppTitle: 'Your Windows app runs on this PC',
     windowsAppBody: 'It opens in its own window, like any app on this PC. Its output shows in the console, and in Live every save hot-reloads it',
     windowsAppIdle: 'Press Run or Live to build it with Flutter on this PC and open it',
+    windowsAppIdleReactNative: 'Press Run or Live to build it with Visual Studio on this PC and open it',
+    windowsAppBodyReactNative: 'It opens in its own window, like any app on this PC. Its console shows here, and in Live every save shows in it at once',
     windowsAppRunning: (name: string) => `${name} is open in its own window`,
     showWindowFrame: 'Show window frame',
     hideWindowFrame: 'Hide window frame',
@@ -384,10 +393,12 @@ export const en = {
     deps: {
       title: 'Packages aren’t installed on this PC',
       body: 'Live reload needs them. Run works without them',
+      bodyReactNative: 'Metro needs them to serve the app’s JavaScript. Run and Live offer to install them too',
       install: (pm: string) => `Run ${pm} install`,
       installing: 'Installing…',
       installed: 'Packages installed',
       installedBody: 'Live reload is ready',
+      installedBodyReactNative: 'Metro is ready to serve the app’s JavaScript',
       failed: 'Couldn’t install packages',
     },
   },
@@ -395,6 +406,7 @@ export const en = {
   /** Build steps, short, for the timeline. */
   phases: {
     web: 'Web build',
+    devserver: 'Dev server',
     sync: 'Copy to Mac',
     deps: 'Packages',
     electron: 'Electron',
@@ -419,9 +431,20 @@ export const en = {
     deps: 'Flutter and packages',
   },
 
+  /** The steps that read differently for a React Native app. */
+  phasesReactNative: {
+    devserver: 'Metro',
+    deps: 'Packages and pods',
+  },
+  /** A React Native app's Windows app: its packages, and no CocoaPods. */
+  phasesReactNativeWindows: {
+    deps: 'Packages',
+  },
+
   /** What is happening right now, in the toolbar ("Building…"). */
   phaseNow: {
     web: 'Building web files',
+    devserver: 'Starting the dev server',
     sync: 'Copying to the Mac',
     deps: 'Installing packages',
     electron: 'Getting Electron for the Mac',
@@ -460,6 +483,7 @@ export const en = {
     runRelease: 'Run in release mode',
     windowsHere: 'Builds on this PC',
     windowsHereSub: 'Flutter, no Mac needed',
+    windowsHereSubReactNative: 'React Native, no Mac needed',
     buildLog: 'Show full build log',
     openFolder: 'Open project folder',
     openEditor: 'Open in your editor',
@@ -490,6 +514,13 @@ export const en = {
     flutterSaves: 'Saves hot-reload the app',
     flutterReloaded: (time: string) => `Hot-reloaded at ${time}`,
     flutterOnPc: 'This PC',
+    reactNativeSaves: 'Saves show in the app at once',
+    reactNativeRefreshed: (time: string) => `Refreshed at ${time}`,
+    reloadJs: 'Reload',
+    reloadJsTip: 'Load the app’s JavaScript again from Metro (r)',
+    restartAppTip: 'Close the app and open it again, without rebuilding it',
+    devTools: 'DevTools',
+    devToolsTip: 'Open React Native DevTools for the app (j)',
     macSync: (mac: string) => `Your edits go to ${mac} when you save`,
     macUpdated: (time: string) => `Updated at ${time}`,
     building: (target?: string) => `Building and opening${target ? ` on ${target}` : ''}…`,
@@ -654,7 +685,7 @@ export const en = {
     added: 'In your projects',
     thisFolder: 'This folder',
     notYet: 'CapMac can’t run these yet',
-    notYetHint: 'It runs Capacitor, Ionic, Flutter and Electron apps today',
+    notYetHint: 'It runs Capacitor, Ionic, Flutter, React Native and Electron apps today',
     notYetApp: (framework: string, platforms: string) => `${framework} app${platforms ? ` for ${platforms}` : ''}`,
     platforms: { ios: 'iPhone and iPad', mac: 'Mac', windows: 'Windows', both: 'iPhone, iPad and Mac' },
     more: 'There may be more apps deeper in this folder. Pick a folder closer to the one you want to see them',
@@ -933,7 +964,7 @@ export const en = {
     shutDown: 'Shut down',
     copyUdid: 'Copy UDID',
     udidCopied: 'UDID copied',
-    devModeHint: 'Turn on Developer Mode on the iPhone in Settings › Privacy & Security',
+    devModeHint: 'Turn it on in Settings, under Privacy & Security',
     trustHint: 'Plug it into the Mac, unlock it and tap Trust',
     connectHint: 'Plug it into the Mac, or keep it unlocked on the same Wi-Fi',
     connectedWifi: 'Connected over Wi-Fi',
@@ -1134,7 +1165,7 @@ export const en = {
     devices: 'Go to Devices',
     macs: 'Go to Macs',
     settings: 'Open Settings',
-    addProject: 'Add a Capacitor, Flutter or Electron app…',
+    addProject: 'Add a Capacitor, Flutter, React Native or Electron app…',
     switchProject: 'Switch project…',
     sidebar: 'Show or hide the sidebar',
     pair: 'Pair a Mac…',
@@ -1221,7 +1252,7 @@ export const en = {
     stillRunning: 'CapMac Studio is still running',
     stillRunningBody: 'Your app keeps running. Use the CapMac icon in the taskbar corner to stop it or quit',
     needsAnswer: 'CapMac Studio needs your answer',
-    pickFolder: 'Add a Capacitor, Flutter or Electron app',
+    pickFolder: 'Add a Capacitor, Flutter, React Native or Electron app',
     saveScreenshot: 'Save screenshot',
     pngImage: 'PNG image',
     saveLog: 'Save log',
@@ -1254,6 +1285,8 @@ export const en = {
     flutterIpaIosOnly: 'This Flutter app has no iOS app to build an IPA of',
     flutterNoUpload: 'Uploading a Flutter app to App Store Connect from CapMac isn’t there yet',
     flutterNoUploadHint: 'Build the IPA, then upload it with Transporter on the Mac',
+    reactNativeIpaOnPc: 'An IPA of a React Native app is made on this PC',
+    reactNativeIpaOnPcHint: 'Pick This PC (no Mac) for the iOS app in the toolbar, then build the IPA',
   },
 
   /** Building on this PC, with no Mac (WSL and the iPhone plugged into this PC). */
@@ -1311,6 +1344,14 @@ export const en = {
     device: 'iPhone',
     devicePane: 'Your app runs on your iPhone, not in a window here',
     devicePaneHint: 'Its logs show in the console below',
+    /** An iPhone with Developer Mode off: iOS opens the apps CapMac installs only with it on. */
+    devMode: {
+      title: 'Turn on Developer Mode',
+      steps: ['Open Settings on your iPhone', 'Tap Privacy & Security, then Developer Mode', 'Turn it on and tap Restart', 'After it restarts, unlock it and tap Turn On'],
+    },
+    /** An iPhone that doesn't trust this PC yet. */
+    trust: { title: 'Trust this PC', body: 'Unlock your iPhone and tap Trust when it asks' },
+    trustHint: 'Unlock it and tap Trust',
     noPhone: 'Plug in your iPhone with a USB cable, unlock it and tap Trust. After its first run, it also connects over Wi-Fi',
     noAppleDevices: 'Install Apple Devices to reach your iPhone. Setup offers it',
     group: 'iPhones on this PC',

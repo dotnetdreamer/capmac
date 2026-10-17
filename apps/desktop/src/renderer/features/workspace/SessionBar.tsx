@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { ErrorInfo, MacSummary } from '../../../shared/contract';
 import { t, tidy } from '../../../shared/i18n';
 import { emitWorkspace } from '../../app/commands';
-import { rebuild, relaunch, reloadApp, startSession } from '../../state/actions';
+import { openDevTools, rebuild, relaunch, reloadApp, startSession } from '../../state/actions';
 import { isActive, isBusy, type RunState } from '../../state/runs';
 import { clockTime, formatDuration, timeAgo } from '../../lib/format';
 import { Button } from '../../ui/Button';
@@ -158,6 +158,50 @@ function FlutterLiveCard({ path, run, mac }: { path: string; run: RunState; mac:
   );
 }
 
+/** Live mode for a React Native app: Metro brings every save into it (on a simulator or device, on the Mac's desktop, or on this PC). */
+function ReactNativeLiveCard({ path, run, mac }: { path: string; run: RunState; mac: MacSummary | null }) {
+  const live = run.live!;
+  const busy = isBusy(run);
+  const running = run.app?.state === 'running';
+  const where = run.onPc ? t.session.flutterOnPc : run.onMac ? mac?.label ?? t.session.mac : run.target?.name ?? mac?.label ?? t.session.mac;
+  return (
+    <div className="session-bar session-bar--live" role="status" aria-label={t.session.liveLabel}>
+      <span className="session-bar__mode">
+        <Icon name="flash" size={14} filled />
+        {t.common.live}
+      </span>
+      <span className="session-bar__chip">
+        <Icon name={run.onPc ? 'desktop' : run.onMac ? 'mac' : 'phone'} size={14} />
+        {where}
+      </span>
+      <span className="session-bar__sep" />
+      <span className="session-bar__hmr">
+        <StatusDot tone={running ? 'live' : 'idle'} pulse={running} />
+        {live.hmrUpdatedAt ? t.session.reactNativeRefreshed(clockTime(live.hmrUpdatedAt)) : t.session.reactNativeSaves}
+      </span>
+      <span className="session-bar__spacer" />
+      <Tooltip content={t.session.reloadJsTip}>
+        <Button size="sm" variant="subtle" icon="refresh" onClick={() => void reloadApp(path)} disabled={busy || !running}>
+          {t.session.reloadJs}
+        </Button>
+      </Tooltip>
+      <Tooltip content={t.session.devToolsTip}>
+        <Button size="sm" variant="subtle" icon="code" onClick={() => void openDevTools(path)} disabled={busy || !running}>
+          {t.session.devTools}
+        </Button>
+      </Tooltip>
+      <Tooltip content={t.session.restartAppTip}>
+        <Button size="sm" variant="subtle" icon="power" onClick={() => void relaunch(path)} disabled={busy}>
+          {t.session.restartApp}
+        </Button>
+      </Tooltip>
+      <Button size="sm" variant="subtle" icon="sync" onClick={() => void rebuild(path)} disabled={busy}>
+        {t.session.rebuild}
+      </Button>
+    </div>
+  );
+}
+
 function RunCard({ run }: { run: RunState }) {
   const busy = isBusy(run);
   const now = useTick(1000, run.app?.state === 'running');
@@ -238,9 +282,9 @@ function FailureCard({ path, run }: { path: string; run: RunState }) {
 
 /**
  * `electron`: the project's Electron app is Capacitor's (live reload goes through a dev server on this PC) or its own;
- * `flutter`: it is a Flutter app (live reload is Flutter's hot reload).
+ * `flutter`: it is a Flutter app (live reload is Flutter's hot reload); `reactNative`: a React Native app (Metro's Fast Refresh).
  */
-export function SessionBar({ path, run, mac, electron = null, flutter = false }: { path: string; run: RunState | undefined; mac: MacSummary | null; electron?: 'capacitor' | 'plain' | null; flutter?: boolean }) {
+export function SessionBar({ path, run, mac, electron = null, flutter = false, reactNative = false }: { path: string; run: RunState | undefined; mac: MacSummary | null; electron?: 'capacitor' | 'plain' | null; flutter?: boolean; reactNative?: boolean }) {
   const active = isActive(run);
   if (mac && active && (mac.state === 'lost' || mac.state === 'reconnecting')) {
     return (
@@ -254,6 +298,7 @@ export function SessionBar({ path, run, mac, electron = null, flutter = false }:
   if (!run) return null;
   if (run.status === 'failed' && run.error && !run.error.cancelled) return <FailureCard path={path} run={run} />;
   if (active && run.mode === 'live' && run.live && flutter && run.backend !== 'wsl') return <FlutterLiveCard path={path} run={run} mac={mac} />;
+  if (active && run.mode === 'live' && run.live && reactNative && run.backend !== 'wsl') return <ReactNativeLiveCard path={path} run={run} mac={mac} />;
   if (active && run.mode === 'live' && run.live && run.onMac && electron !== 'capacitor') return <MacLiveCard path={path} run={run} mac={mac} />;
   if (active && run.mode === 'live' && run.live) return <LiveCard path={path} run={run} mac={mac} />;
   if (active && run.mode === 'run') return <RunCard run={run} />;

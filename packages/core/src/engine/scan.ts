@@ -22,6 +22,8 @@ export interface ScanOptions {
   excludeElectron?: boolean;
   /** A Flutter app: its ios/ and macos/ folders go whole (less Flutter's generated files), and nothing for Android, the web, Linux or Windows. */
   flutter?: boolean;
+  /** A React Native app: its ios/ and macos/ folders go whole (less what CocoaPods and Xcode make), and nothing for Android or Windows. */
+  reactNative?: boolean;
   include?: string[];
   exclude?: string[];
   /**
@@ -76,6 +78,14 @@ const FLUTTER_APPLE_EXCLUDES = [
   'Flutter/App.framework/', 'Flutter/Flutter.framework/', 'Flutter/flutter_assets/', 'Flutter/app.flx', 'Flutter/app.zip',
   'DerivedData/', 'build/', '.build/', '.swiftpm/', 'xcuserdata/', '*.xcuserstate', 'Runner/GeneratedPluginRegistrant.*', 'ServiceDefinitions.json',
 ];
+/** A React Native app's folders the Mac never builds from, and what its tools make on this PC. */
+const REACT_NATIVE_PROJECT_EXCLUDES = ['android/', 'windows/', 'vendor/', '.expo/', '.expo-shared/', 'coverage/', '*.jsbundle', '.metro-health-check*'];
+/**
+ * In ios/ and macos/: what CocoaPods and Xcode make, with this PC's (or another
+ * Mac's) paths in it. Podfile.lock goes with `rn-prepare` instead: CocoaPods
+ * rewrites it on the Mac, and a sync must not bring the old one back.
+ */
+const REACT_NATIVE_APPLE_EXCLUDES = ['Pods/', 'build/', 'DerivedData/', '.build/', '.swiftpm/', 'xcuserdata/', '*.xcuserstate', '.xcode.env.local', 'main.jsbundle', 'Podfile.lock'];
 const SCRIPT_EXT = /\.(sh|bash|zsh|command)$/i;
 const SMALL = 4 * 1024 * 1024;
 /** Videos, raw audio, design sources and disk images: no install or native build reads them. */
@@ -149,12 +159,12 @@ export async function scanProject(options: ScanOptions): Promise<ScanResult> {
   const webRel = webDir ? join(projectRel, webDir) : null;
   const withWeb = options.includeWebDir && webRel !== null;
   const iosRel = join(projectRel, options.iosDir.replace(/^\.\/+|\/+$/g, ''));
-  // The native folders that go whole (less what tools generate): Capacitor's ios/, a Flutter app's ios/ and macos/.
-  const nativeRels = options.flutter ? ['ios', 'macos'].map((dir) => join(projectRel, dir)) : [iosRel];
+  // The native folders that go whole (less what tools generate): Capacitor's ios/, a Flutter or React Native app's ios/ and macos/.
+  const nativeRels = options.flutter || options.reactNative ? ['ios', 'macos'].map((dir) => join(projectRel, dir)) : [iosRel];
 
   const globalIgnore = ignore().add(GLOBAL_EXCLUDES);
-  const projectIgnore = ignore().add(options.flutter ? FLUTTER_PROJECT_EXCLUDES : options.excludeElectron === false ? PROJECT_EXCLUDES_WITH_ELECTRON : PROJECT_EXCLUDES);
-  const iosIgnore = ignore().add(options.flutter ? FLUTTER_APPLE_EXCLUDES : IOS_EXCLUDES);
+  const projectIgnore = ignore().add(options.flutter ? FLUTTER_PROJECT_EXCLUDES : options.reactNative ? REACT_NATIVE_PROJECT_EXCLUDES : options.excludeElectron === false ? PROJECT_EXCLUDES_WITH_ELECTRON : PROJECT_EXCLUDES);
+  const iosIgnore = ignore().add(options.flutter ? FLUTTER_APPLE_EXCLUDES : options.reactNative ? REACT_NATIVE_APPLE_EXCLUDES : IOS_EXCLUDES);
   const userExclude = ignore().add(options.exclude ?? []);
   const userInclude = ignore().add(options.include ?? []);
   const hasUserInclude = (options.include?.length ?? 0) > 0;

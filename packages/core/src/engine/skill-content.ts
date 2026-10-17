@@ -1,7 +1,7 @@
 /**
  * The capmac skill: what an AI coding agent (Claude Code, Codex, Copilot, …)
- * needs to know to build, run and check a Capacitor app's iOS side, a Flutter app, or an
- * Electron app on the Mac, with the capmac CLI. Agent Skills format (agentskills.io): SKILL.md stays short; the
+ * needs to know to build, run and check a Capacitor app's iOS side, a Flutter or React Native
+ * app, or an Electron app on the Mac, with the capmac CLI. Agent Skills format (agentskills.io): SKILL.md stays short; the
  * full command list is in references/, read only when needed.
  */
 
@@ -11,9 +11,9 @@ export const SKILL_NAME = 'capmac';
 export const SKILL_MARKER = 'capmac-skill-version:';
 
 const DESCRIPTION =
-  'Build, run and check the iOS side of a Capacitor or Ionic app, a Flutter app (iOS, Mac and Windows), or an Electron app, from Windows, on a Mac paired with the CapMac CLI. ' +
-  'Use when asked to run or test an app on an iOS simulator or iPhone, a Flutter or Electron app on a Mac, read its console logs, take a screenshot of it, ' +
-  'fix Xcode, Swift or Dart build errors, export an .ipa, or when `npx cap run ios` or `ionic capacitor run ios` comes up on Windows.';
+  'Build, run and check the iOS side of a Capacitor or Ionic app, a Flutter or React Native app (iOS, Mac and Windows), or an Electron app, from Windows, on a Mac paired with the CapMac CLI. ' +
+  'Use when asked to run or test an app on an iOS simulator or iPhone, a Flutter, React Native or Electron app on a Mac, read its console logs, take a screenshot of it, ' +
+  'fix Xcode, Swift, Dart or JavaScript build errors, export an .ipa, or when `npx cap run ios` or `ionic capacitor run ios` comes up on Windows.';
 
 function skillMd(version: string): string {
   return `---
@@ -22,9 +22,9 @@ description: ${DESCRIPTION}
 ---
 <!-- ${SKILL_MARKER} ${version} -->
 
-# CapMac: iOS for Capacitor and Flutter apps, and Mac apps, from Windows
+# CapMac: iOS for Capacitor, Flutter and React Native apps, and Mac apps, from Windows
 
-CapMac drives a Mac over SSH. It syncs the project, builds it with Xcode on the Mac, runs the app on a simulator or iPhone, and brings build errors, console logs and screenshots back to this PC. It runs Flutter apps and Electron apps the same way (see below). Run every command from the app's folder (the one with \`capacitor.config.*\`, a Flutter app's \`pubspec.yaml\`, or an Electron app's \`package.json\`). Edit files on this PC only: the Mac's copy is overwritten on every sync.
+CapMac drives a Mac over SSH. It syncs the project, builds it with Xcode on the Mac, runs the app on a simulator or iPhone, and brings build errors, console logs and screenshots back to this PC. It runs Flutter, React Native and Electron apps the same way (see below). Run every command from the app's folder (the one with \`capacitor.config.*\`, a Flutter app's \`pubspec.yaml\`, or a React Native or Electron app's \`package.json\`). Edit files on this PC only: the Mac's copy is overwritten on every sync.
 
 ## First, check the setup
 
@@ -60,6 +60,10 @@ In an Electron app's folder (plain Electron, electron-vite or Electron Forge), t
 ## Flutter apps
 
 In a Flutter app's folder, \`capmac run --for 20\` runs its iOS app in a simulator on the Mac (Flutter builds it there with \`flutter run\`; CapMac installs Flutter on the Mac the first time). \`--app mac\` runs its Mac app on the Mac's desktop (\`capmac screenshot --app mac\` takes a PNG of its window), and \`--app windows\` its Windows app on this PC, with no Mac. \`--mode profile\` or \`--mode release\` builds as people get it; \`--flavor\`, \`--main <file>\` and \`--dart-define KEY=VALUE\` are Flutter's own options. \`capmac dev\` hot-reloads the app on every save of Dart code (a hot restart when the change needs one); a change to \`pubspec.yaml\` or native code rebuilds it. Console lines start with \`dart\` (the app's \`print\`) or \`app\` (the engine and plugins). Dart compile errors use this PC's paths, \`C:\\path\\to\\lib\\main.dart:12:5: Error: …\`.
+
+## React Native apps
+
+In a React Native (or Expo) app's folder, \`capmac run --for 20\` runs its iOS app in a simulator on the Mac: Metro starts on this PC, the Mac installs the packages, runs \`pod install\` and builds the app only when something native changed, and the app loads its JavaScript from Metro on this PC. \`--app mac\` runs its Mac app (react-native-macos) on the Mac's desktop (\`capmac screenshot --app mac\` takes a PNG of its window), and \`--app windows\` its Windows app (react-native-windows) on this PC, with no Mac. \`--release\` builds the JavaScript into the app instead (no Metro). \`capmac dev\` keeps Metro running: every save shows in the app at once (Fast Refresh, no build); \`r\` reloads the JavaScript, \`j\` opens React Native DevTools, and a change to \`package.json\`, a Podfile or native code rebuilds the app. Console lines start with \`js\` (the app's \`console.log\`, handed over by Metro) or \`app\` (native logs); JavaScript errors give this PC's file and line. An Expo app without an \`ios\` folder gets one from \`expo prebuild\` on the first run.
 
 ## Building without a Mac
 
@@ -115,8 +119,8 @@ Options shared by \`run\`, \`dev\` and \`build\`:
 
 | Option | Meaning |
 |---|---|
-| \`-a, --app <ios\\|electron\\|mac\\|windows>\` | Which of the project's apps (see \`capmac apps\`); \`mac\` and \`windows\` are a Flutter app's; default: the one picked with \`capmac apps use\` or in CapMac Studio. |
-| \`-t, --target <name\\|udid>\` | Simulator or device (see \`capmac targets\`); \`mac\` for the Mac's desktop, \`pc\` for this PC (a Flutter app's Windows app). |
+| \`-a, --app <ios\\|electron\\|mac\\|windows>\` | Which of the project's apps (see \`capmac apps\`); \`mac\` and \`windows\` are a Flutter or React Native app's; default: the one picked with \`capmac apps use\` or in CapMac Studio. |
+| \`-t, --target <name\\|udid>\` | Simulator or device (see \`capmac targets\`); \`mac\` for the Mac's desktop, \`pc\` for this PC (a Flutter or React Native app's Windows app). |
 | \`--mode <debug\\|profile\\|release>\`, \`--flavor <name>\`, \`--main <file>\`, \`--dart-define K=V\` | A Flutter app's build options. |
 | \`-e, --electron\` | The Electron app, on the Mac's desktop (needed only in a Capacitor project that has iOS too). |
 | \`-d, --device\` | A connected iPhone/iPad instead of a simulator. |

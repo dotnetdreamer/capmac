@@ -18,7 +18,10 @@ const ELECTRON_SOURCES: ConsoleSource[] = ['js', 'main', 'electron', 'web', 'cap
 const BOTH_SOURCES: ConsoleSource[] = ['js', 'cap', 'native', 'bridge', 'main', 'electron', 'web', 'capmac'];
 /** A Flutter app: Dart's print() and debugPrint() (the 'js' lines), the engine's and plugins' native logs, CapMac's. */
 const FLUTTER_SOURCES: ConsoleSource[] = ['js', 'native', 'capmac'];
-const sourceTag = (source: ConsoleSource, dart: boolean) => (dart && source === 'js' ? t.console.dartTag : dart && source === 'native' ? t.console.flutterNativeTag : SOURCE_TAGS[source]);
+/** A React Native app: its console (from Metro), its native logs (iOS, the Mac or Windows), Metro's own, CapMac's. */
+const REACT_NATIVE_SOURCES: ConsoleSource[] = ['js', 'native', 'web', 'capmac'];
+/** `appNative`: the app's native lines come from iOS, the Mac or Windows (a Flutter or React Native app): APP, not iOS. */
+const sourceTag = (source: ConsoleSource, dart: boolean, appNative = dart) => (dart && source === 'js' ? t.console.dartTag : appNative && source === 'native' ? t.console.flutterNativeTag : SOURCE_TAGS[source]);
 const sourceLabel = (source: ConsoleSource, dart: boolean) => (dart && source === 'js' ? t.console.dart : SOURCE_LABELS[source]);
 const LEVELS: Array<{ level: ConsoleLevel; label: string }> = (['error', 'warn', 'info', 'log', 'debug'] as const).map((level) => ({ level, label: t.console.levels[level] }));
 const FILTER_KEY = 'capmac.consoleFilter';
@@ -49,17 +52,17 @@ function useHighlighter(query: string) {
   }, [query]);
 }
 
-function lineText(line: ConsoleLine, dart = false): string {
-  return `${clockTime(line.ts, true)} ${sourceTag(line.source, dart).padEnd(3)} ${line.level === 'error' ? 'ERROR ' : line.level === 'warn' ? 'WARN ' : ''}${line.text}`;
+function lineText(line: ConsoleLine, dart = false, appNative = dart): string {
+  return `${clockTime(line.ts, true)} ${sourceTag(line.source, dart, appNative).padEnd(3)} ${line.level === 'error' ? 'ERROR ' : line.level === 'warn' ? 'WARN ' : ''}${line.text}`;
 }
 
-const Row = memo(function Row({ line, timestamps, highlight, current, dart }: { line: ConsoleLine; timestamps: boolean; highlight: (text: string) => ReactNode; current: boolean; dart: boolean }) {
+const Row = memo(function Row({ line, timestamps, highlight, current, dart, appNative }: { line: ConsoleLine; timestamps: boolean; highlight: (text: string) => ReactNode; current: boolean; dart: boolean; appNative: boolean }) {
   const json = line.source === 'js' || line.source === 'cap' || line.source === 'main' ? jsonPayload(line) : null;
   return (
     <div className={`cl-row cl-row--${line.level} cl-row--${line.source}${current ? ' is-current' : ''}`}>
       {timestamps && <span className="cl-time tabular">{clockTime(line.ts, true)}</span>}
       <span className={`cl-src cl-src--${line.source}`} title={sourceLabel(line.source, dart)}>
-        {sourceTag(line.source, dart)}
+        {sourceTag(line.source, dart, appNative)}
       </span>
       <span className="cl-level">
         {line.level === 'error' ? <Icon name="errorCircle" size={12} filled label={t.console.error} /> : line.level === 'warn' ? <Icon name="warning" size={12} filled label={t.console.warning} /> : null}
@@ -74,7 +77,8 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
   // The sources this project's app can log from: iOS, Electron, or both.
   const summary = useProject(path).summary;
   const dart = summary?.kind === 'flutter';
-  const sources = dart ? FLUTTER_SOURCES : !summary?.electron ? IOS_SOURCES : summary.kind === 'electron' || !summary.hasIos ? ELECTRON_SOURCES : BOTH_SOURCES;
+  const appNative = dart || summary?.kind === 'react-native';
+  const sources = dart ? FLUTTER_SOURCES : summary?.kind === 'react-native' ? REACT_NATIVE_SOURCES : !summary?.electron ? IOS_SOURCES : summary.kind === 'electron' || !summary.hasIos ? ELECTRON_SOURCES : BOTH_SOURCES;
   const version = useSyncExternalStore(buffer.subscribe, buffer.getVersion);
   const settings = useApp((s) => s.settings);
   const updateSettings = useApp((s) => s.updateSettings);
@@ -188,12 +192,12 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
 
   const visibleLines = () => view.ids.slice(0, count).map((id) => buffer.byId(id)).filter((l): l is ConsoleLine => Boolean(l));
   const copyAll = () => {
-    const text = visibleLines().map((line) => lineText(line, dart)).join('\n');
+    const text = visibleLines().map((line) => lineText(line, dart, appNative)).join('\n');
     void navigator.clipboard.writeText(text).then(() => toast({ tone: 'success', title: t.console.copied(count) }));
   };
   const exportLog = async () => {
     const name = `${path.split(/[\\/]/).pop()}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.log`;
-    const saved = await window.capmac.invoke('app:save-text', { text: visibleLines().map((line) => lineText(line, dart)).join('\r\n'), name });
+    const saved = await window.capmac.invoke('app:save-text', { text: visibleLines().map((line) => lineText(line, dart, appNative)).join('\r\n'), name });
     if (saved) toast({ tone: 'success', title: t.console.saved, body: saved, action: { label: t.common.showInFolder, run: () => void window.capmac.invoke('app:show-in-folder', { path: saved }) } });
   };
 
@@ -299,7 +303,7 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
               if (!line) return null;
               return (
                 <div key={item.key} data-index={item.index} ref={virtualizer.measureElement} className="console__item" style={{ transform: `translateY(${item.start}px)` }}>
-                  <Row line={line} timestamps={timestamps} highlight={highlight} current={line.id === currentLine} dart={dart} />
+                  <Row line={line} timestamps={timestamps} highlight={highlight} current={line.id === currentLine} dart={dart} appNative={appNative} />
                 </div>
               );
             })}

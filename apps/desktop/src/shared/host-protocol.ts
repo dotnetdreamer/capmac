@@ -15,6 +15,8 @@ export interface HostInit {
   electronSampleDir: string | null;
   /** The bundled Flutter sample ("Try the Flutter sample"). */
   flutterSampleDir: string | null;
+  /** The bundled React Native sample ("Try the React Native sample"). */
+  reactNativeSampleDir: string | null;
   /** Where "Run the sample app" puts its copy (Documents\capmac Studio). */
   samplesHome: string;
   /** node-datachannel for remote access (resources/remote when packaged; null: from node_modules). */

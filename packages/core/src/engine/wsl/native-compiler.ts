@@ -311,7 +311,8 @@ export async function buildNativeWithToolchain(plan: WslNativeBuildPlan, executo
       TOOLCHAIN_DIR: tools.swiftResourcePath ? toolchainDirectory : path.posix.dirname(path.posix.dirname(tools.swiftcPath)),
       LOCAL_LIBRARY_DIR: '/Library', SYSTEM_LIBRARY_DIR: '/System/Library', LOCAL_APPS_DIR: '/Applications',
       DSTROOT: `${build}/install`, INSTALL_ROOT: `${build}/install`, SDK_DIR: tools.sdkPath,
-      ARCHS: 'arm64', CURRENT_ARCH: 'arm64', NATIVE_ARCH_ACTUAL: 'arm64', CONFIGURATION_BUILD_DIR: rawString(target.settings.CONFIGURATION_BUILD_DIR) || products, BUILT_PRODUCTS_DIR: products,
+      // As in Xcode, BUILT_PRODUCTS_DIR is the target's CONFIGURATION_BUILD_DIR (CocoaPods gives each pod its own; scripts copy into it).
+      ARCHS: 'arm64', CURRENT_ARCH: 'arm64', NATIVE_ARCH_ACTUAL: 'arm64', CONFIGURATION_BUILD_DIR: rawString(target.settings.CONFIGURATION_BUILD_DIR) || products, BUILT_PRODUCTS_DIR: rawString(target.settings.CONFIGURATION_BUILD_DIR) || products,
       BUILD_DIR: `${build}/products`, BUILD_ROOT: `${build}/products`, TARGET_BUILD_DIR: products,
       PODS_CONFIGURATION_BUILD_DIR: products, PODS_BUILD_DIR: `${build}/products`, PODS_XCFRAMEWORKS_BUILD_DIR: rawString(target.settings.PODS_XCFRAMEWORKS_BUILD_DIR) || `${products}/XCFrameworkIntermediates`,
       TARGET_TEMP_DIR: directory, TEMP_DIR: directory, DERIVED_FILE_DIR: generated, DERIVED_FILES_DIR: generated, DERIVED_SOURCES_DIR: generated,
@@ -331,6 +332,7 @@ export async function buildNativeWithToolchain(plan: WslNativeBuildPlan, executo
     for (const [key, value] of Object.entries(settings)) settings[key] = expandNativeSetting(value, settings, target.name);
     settings.CONFIGURATION_BUILD_DIR = path.posix.normalize(settings.CONFIGURATION_BUILD_DIR!);
     settings.TARGET_BUILD_DIR = settings.CONFIGURATION_BUILD_DIR!;
+    settings.BUILT_PRODUCTS_DIR = settings.CONFIGURATION_BUILD_DIR!;
     const product = `${settings.CONFIGURATION_BUILD_DIR}/${target.productName || safeName(target.name)}`;
     if (!/^\d+\.\d+(?:\.\d+)?$/.test(settings.IPHONEOS_DEPLOYMENT_TARGET!)) throw new UserError(`Target ${target.name}: invalid iOS deployment target.`);
     if (!(settings.CONFIGURATION_BUILD_DIR === build || settings.CONFIGURATION_BUILD_DIR!.startsWith(build + '/'))) throw new UserError(`Target ${target.name}: CONFIGURATION_BUILD_DIR must stay within CapMac's generated build directory.`);
@@ -525,10 +527,12 @@ export async function buildNativeWithToolchain(plan: WslNativeBuildPlan, executo
         await run(['python3', '-c', 'import pathlib,sys; p=pathlib.Path(sys.argv[1]); p.write_text(p.read_text()+sys.argv[2])', settings.CAPMAC_MODULE_MAP, `\nmodule ${target.moduleName}.Swift { header "${path.posix.basename(objcHeader)}" requires objc }\n`]);
       } else if (target.productType === 'framework') {
         await write(`${output.product}/Modules/module.modulemap`, `framework module ${target.moduleName} {\n header "${path.posix.basename(objcHeader)}"\n export *\n requires objc\n}\n`);
-      } else if (!settings.CAPMAC_MODULE_MAP) {
+      } else if (!settings.CAPMAC_MODULE_MAP && !target.scripts.some((phase) => phase.name === 'Copy generated compatibility header')) {
         // As SwiftPM does, Objective-C code can `@import` a Swift library (GoogleSignIn imports
         // GTMAppAuth) through a module over its generated header. Only C-family dependents load
         // it; Swift dependents read the .swiftmodule. The folder name keeps implicit lookup away.
+        // (A CocoaPods static Swift pod makes its own in that script phase, which its dependents
+        // load through OTHER_CFLAGS: a second one would define the module twice.)
         const map = `${build}/modules/${target.moduleName}-Swift/module.modulemap`;
         await run(['mkdir', '-p', '--', path.posix.dirname(map)]);
         await write(map, `module ${target.moduleName} {\n header ${JSON.stringify(objcHeader)}\n requires objc\n}\n`);

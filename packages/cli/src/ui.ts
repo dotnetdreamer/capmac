@@ -191,10 +191,20 @@ function restoreKeyMode(): void {
   }
 }
 
+/**
+ * Readline puts a terminal in raw mode itself (it echoes and edits the line): only without a
+ * terminal to write to does stdin need line mode. Switching a terminal to line mode first, while
+ * single-key shortcuts were reading, left Windows' console with a read that never finished: the
+ * command stayed open after it ended.
+ */
+function lineModeForReadline(): void {
+  if (process.stdin.isTTY && !process.stdout.isTTY) process.stdin.setRawMode(false);
+}
+
 export function ask(question: string, defaultValue?: string): Promise<string> {
   clearStatus();
   prompting += 1;
-  if (process.stdin.isTTY) process.stdin.setRawMode(false);
+  lineModeForReadline();
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const suffix = defaultValue ? pc.dim(` (${defaultValue})`) : '';
   return new Promise((resolve) => {
@@ -212,7 +222,7 @@ export function askUnless(question: string, signal: AbortSignal): Promise<string
   if (signal.aborted) return Promise.resolve(null);
   clearStatus();
   prompting += 1;
-  if (process.stdin.isTTY) process.stdin.setRawMode(false);
+  lineModeForReadline();
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   return new Promise<string | null>((resolve) => {
     let done = false;

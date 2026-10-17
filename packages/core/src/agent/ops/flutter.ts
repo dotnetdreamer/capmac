@@ -5,23 +5,17 @@
  * builds it with `flutter build`. The engine on the PC reads the daemon
  * messages this relays and sends requests (hot reload, stop) back.
  */
-import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
-import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { buildArgs, daemonRequestLine, FLUTTER_ERROR_CODES, parseDaemonLine, type FlutterBuildParams, type FlutterBuildResult, type FlutterMacLaunchParams, type FlutterRunParams, type FlutterRunResult, type FlutterSdkInfo, type FlutterSdkParams, type FlutterSdkResult } from '../../shared/flutter.js';
 import { capmacHome, toolEnv } from '../env.js';
 import { step, type AgentIO } from '../io.js';
 import { AgentError, exists, isExecutable, run, tryCapture, which } from '../proc.js';
-import { parseAppLine } from '../../shared/electron.js';
-import { tcpEndpointFile } from '../electron-socket.js';
-import { ensureAppHook } from '../helper/build.js';
-import { APP_HOOK_SOURCE } from '../helper/source.js';
 import { projectPaths } from '../state.js';
 import { readAppInfo } from './build.js';
 import { bootSimulator } from './deploy.js';
-import { socketPath } from './electron.js';
+import { launchMacAppWithHook } from './mac-app.js';
 import { signingTeamsFor } from './teams.js';
 
 const RELEASES_URL = 'https://storage.googleapis.com/flutter_infra_release/releases/releases_macos.json';
@@ -388,81 +382,18 @@ export async function opFlutterBuild(params: FlutterBuildParams, io: AgentIO): P
 /** The Dart VM service a debug build prints when it starts (hot reload attaches to it). */
 const VM_SERVICE = /The Dart VM service is listening on (https?:\/\/\S+)/;
 
-/** A free TCP port on 127.0.0.1 (the app's module listens on it). */
-function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      server.close(() => (typeof address === 'object' && address ? resolve(address.port) : reject(new Error('no port'))));
-    });
-  });
-}
-
 /**
- * Launches a built Mac app (a Flutter app's) with CapMac's module in it, as
- * a child of the agent: the app stays behind whatever the Mac shows, its
- * window comes to the PC through the `electron-screen` op (the module speaks
- * that protocol, on a local TCP port, see electron-socket.ts), and its output
- * comes here. A debug build's Dart VM service is reported (`flutter-vm`) so
- * `flutter attach` can hot-reload it. Runs until the app quits or the PC stops it.
+ * Launches a built Flutter Mac app with CapMac's module in it (see
+ * mac-app.ts). A debug build's Dart VM service is reported (`flutter-vm`) so
+ * `flutter attach` can hot-reload it.
  */
 export async function opFlutterMacLaunch(params: FlutterMacLaunchParams, io: AgentIO): Promise<FlutterRunResult> {
-  const env = await flutterEnv();
-  const info = await readAppInfo(path.join(params.appPath, 'Contents')).catch(() => null);
-  const executable = path.join(params.appPath, 'Contents', 'MacOS', info?.executable ?? path.basename(params.appPath, '.app'));
-  if (!(await isExecutable(executable))) throw new AgentError(`The Mac app was not found at ${params.appPath}.`, FLUTTER_ERROR_CODES.runFailed, 'Build it again.');
-  const dylib = await ensureAppHook(APP_HOOK_SOURCE, env, { signal: io.signal, onBuild: () => io.send({ t: 'progress', text: 'Building CapMac’s module for Mac apps (first time only)' }) });
-  const socket = socketPath(params.projectId);
-  await fs.mkdir(path.dirname(socket), { recursive: true, mode: 0o700 });
-  const endpoint = tcpEndpointFile(socket);
-  const port = await freePort();
-  const token = randomBytes(16).toString('hex');
-  await fs.writeFile(endpoint, JSON.stringify({ port, token, app: params.appPath }), { mode: 0o600 });
-  let ready = false;
-  let windows = 0;
-  const announce = (data: unknown) => {
-    if (ready) return;
-    ready = true;
-    io.send({ t: 'ready', data });
-  };
-  // A window-less app (or a module that did not load) still counts as launched after a while.
-  const fallback = setTimeout(() => announce({ windows: 0 }), 20_000);
-  try {
-    const result = await run(executable, [], {
-      cwd: path.dirname(executable),
-      env: { ...env, DYLD_INSERT_LIBRARIES: dylib, CAPMAC_APP_HOOK: `${port}:${token}` },
-      signal: io.signal,
-      capture: false,
-      keepStdinOpen: true,
-      quitChildFirst: true,
-      tailLines: 40,
-      onLine: (line, stream) => {
-        const parsed = parseAppLine(line);
-        if (parsed.kind === 'hook') {
-          const event = parsed.event;
-          if (event.e === 'window') {
-            windows += 1;
-            announce({ window: event.window });
-          } else if (event.e === 'note') {
-            io.log('info', event.message);
-          }
-          io.send({ t: 'electron', event });
-          return;
-        }
-        const vm = VM_SERVICE.exec(line);
-        if (vm && params.debug) io.send({ t: 'flutter-vm', uri: vm[1]! });
-        if (line.trim()) io.send({ t: 'app', stream, text: line });
-      },
-    });
-    if (result.cancelled || io.signal.aborted) return { reason: 'cancelled', exitCode: null };
-    if (!ready && result.code !== 0) {
-      throw new AgentError('The Mac app quit as it started.', FLUTTER_ERROR_CODES.runFailed, windows ? undefined : 'Run it on the Mac once to see why, or check its logs above.', result.tail.slice(-20));
-    }
-    return { reason: 'exited', exitCode: result.code };
-  } finally {
-    clearTimeout(fallback);
-    await fs.rm(endpoint, { force: true }).catch(() => undefined);
-  }
+  return launchMacAppWithHook({ projectId: params.projectId, appPath: params.appPath }, io, {
+    env: await flutterEnv(),
+    failureCode: FLUTTER_ERROR_CODES.runFailed,
+    onLine: (line) => {
+      const vm = VM_SERVICE.exec(line);
+      if (vm && params.debug) io.send({ t: 'flutter-vm', uri: vm[1]! });
+    },
+  });
 }

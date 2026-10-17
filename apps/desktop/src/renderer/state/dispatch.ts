@@ -12,6 +12,9 @@ const LOG_LEVEL: Record<string, ConsoleLevel> = { note: 'debug', info: 'info', s
 
 /** Dev servers print plain text: spot their errors and warnings. */
 function devServerLevel(text: string): ConsoleLevel {
+  // A level the line starts with wins (Metro's " WARN  Failed to download …" is a warning).
+  const tagged = /^\s*(ERROR|WARN(?:ING)?|INFO|LOG|DEBUG)\b/.exec(text)?.[1];
+  if (tagged) return tagged === 'ERROR' ? 'error' : tagged.startsWith('WARN') ? 'warn' : 'log';
   if (/\b(error|failed|cannot|could not|exception)\b|✘|\bERR!/i.test(text)) return 'error';
   if (/\bwarn(ing)?\b|\(!\)|⚠/i.test(text)) return 'warn';
   return 'log';

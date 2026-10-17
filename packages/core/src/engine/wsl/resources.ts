@@ -142,6 +142,86 @@ export async function generateWslResourceSources(executor: WslExecutor, resource
   return generated;
 }
 
+/**
+ * Asset catalogs as Xcode reads them: an app icon set may list sizes with no
+ * image (React Native's and Xcode's templates do until icons are added), which
+ * Xcode skips and the Linux actool refuses. Such catalogs compile from a copy
+ * without those entries; an icon set left empty goes, and with it the app icon
+ * (the app gets none, as from Xcode). Prints {"sources": [...], "appIcon": bool}.
+ */
+const CLEAN_CATALOGS = String.raw`import json,os,shutil,sys
+build,icon=sys.argv[1],sys.argv[2]; sources=[]; keep_icon=True
+def icon_sets(top): return [root for root,dirs,files in os.walk(top) if root.endswith('.appiconset') and 'Contents.json' in files]
+def read(root):
+ with open(os.path.join(root,'Contents.json')) as handle: return json.load(handle)
+for index,src in enumerate(sys.argv[3:]):
+ if not any('filename' not in image for root in icon_sets(src) for image in read(root).get('images',[])):
+  sources.append(src); continue
+ out=os.path.join(build,'catalogs',str(index),os.path.basename(src)); shutil.rmtree(out,ignore_errors=True); shutil.copytree(src,out,symlinks=True)
+ for root in icon_sets(out):
+  data=read(root); data['images']=[image for image in data.get('images',[]) if 'filename' in image]
+  if data['images']:
+   with open(os.path.join(root,'Contents.json'),'w') as handle: json.dump(data,handle,indent=2)
+  else:
+   shutil.rmtree(root)
+   if os.path.basename(root)[:-len('.appiconset')]==icon: keep_icon=False
+ sources.append(out)
+print(json.dumps({'sources':sources,'appIcon':keep_icon}))
+`;
+
+/**
+ * Two label attributes in React Native's (and older Xcode's) launch screens
+ * that the Linux ibtool doesn't read: minimumFontSize only applies while the
+ * label shrinks its text, which that compiler always writes as off, and
+ * clipsSubviews only shows when a label draws outside its frame. Such files
+ * compile from a copy without them. Prints the file to compile, then the
+ * attributes left out (if any).
+ */
+const CLEAN_INTERFACE = String.raw`import os,re,sys
+src,dst=sys.argv[1],sys.argv[2]
+with open(src,encoding='utf-8') as handle: text=handle.read()
+dropped=set()
+def label(match):
+ tag=match.group(0)
+ for name in ('clipsSubviews','minimumFontSize'):
+  tag,count=re.subn(r'\s'+name+r'="[^"]*"','',tag)
+  if count: dropped.add(name)
+ return tag
+cleaned=re.sub(r'<label\b(?:[^>"]|"[^"]*")*>',label,text)
+if not dropped: print(src); sys.exit(0)
+os.makedirs(os.path.dirname(dst),exist_ok=True)
+with open(dst,'w',encoding='utf-8',newline='') as handle: handle.write(cleaned)
+print(dst); print(' '.join(sorted(dropped)))
+`;
+
+/**
+ * The launch screen, when the Linux ibtool can't build its storyboard (React
+ * Native's template uses a bold system font it doesn't encode yet): without a
+ * launch screen iOS runs the app letterboxed, so the app's Info.plist gets a
+ * plain one instead (UILaunchScreen, iOS 14+) in place of the storyboard.
+ * Exits 3 when the storyboard isn't the app's launch screen.
+ */
+const PLAIN_LAUNCH_SCREEN = String.raw`import plistlib,sys
+path,name=sys.argv[1],sys.argv[2]
+with open(path,'rb') as handle: raw=handle.read()
+info=plistlib.loads(raw)
+if info.get('UILaunchStoryboardName')!=name: sys.exit(3)
+del info['UILaunchStoryboardName']
+info.setdefault('UILaunchScreen',{})
+with open(path,'wb') as handle: handle.write(plistlib.dumps(info,fmt=plistlib.FMT_BINARY if raw.startswith(b'bplist') else plistlib.FMT_XML))
+`;
+
+/** CLEAN_CATALOGS' answer; without one, the catalogs compile as they are. */
+function cleanedCatalogs(stdout: string, sources: string[]): { sources: string[]; appIcon: boolean } {
+  try {
+    const parsed = JSON.parse(stdout) as { sources?: unknown; appIcon?: unknown };
+    if (Array.isArray(parsed.sources) && parsed.sources.length === sources.length && parsed.sources.every((item) => typeof item === 'string' && item.startsWith('/')) && typeof parsed.appIcon === 'boolean') {
+      return { sources: parsed.sources as string[], appIcon: parsed.appIcon };
+    }
+  } catch { /* compiled as they are */ }
+  return { sources, appIcon: true };
+}
+
 async function runResourceTool(executor: WslExecutor, argv: string[], hooks: ResourceHooks): Promise<void> {
   const result = await executor.run(argv, { ...hooks, timeoutMs: 600_000, allowFailure: true });
   // The upstream asset compiler reports unsupported asset types as warnings.
@@ -191,12 +271,21 @@ export async function compileWslResources(executor: WslExecutor, resources: read
     const argv = [actool!, '--compile', output, '--platform', 'iphoneos', '--minimum-deployment-target', minimum,
       '--output-partial-info-plist', partial, '--bundle-identifier', context.settings.PRODUCT_BUNDLE_IDENTIFIER ?? '',
       '--target-device', 'iphone', ...(context.settings.TARGETED_DEVICE_FAMILY?.includes('2') ? ['--target-device', 'ipad'] : [])];
-    if (context.settings.ASSETCATALOG_COMPILER_APPICON_NAME) argv.push('--app-icon', context.settings.ASSETCATALOG_COMPILER_APPICON_NAME);
+    const cleaned = cleanedCatalogs((await run(['python3', '-c', CLEAN_CATALOGS, resourceBuild, context.settings.ASSETCATALOG_COMPILER_APPICON_NAME ?? '', ...sources])).stdout, sources);
+    if (context.settings.ASSETCATALOG_COMPILER_APPICON_NAME && cleaned.appIcon) argv.push('--app-icon', context.settings.ASSETCATALOG_COMPILER_APPICON_NAME);
     if (context.settings.ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME) argv.push('--accent-color', context.settings.ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME);
-    await runResourceTool(executor, [...argv, ...sources], hooks);
+    await runResourceTool(executor, [...argv, ...cleaned.sources], hooks);
     await run(['python3', '-c', MERGE_RESOURCE_PLIST, context.infoPlistPath ?? `${context.productDirectory}/Info.plist`, partial]);
   }
-  for (const entry of entries) {
+  // A storyboard or xib to compile: the file itself, or a copy without what CLEAN_INTERFACE leaves out (said in the output).
+  const interfaceSource = async (source: string, index: number): Promise<string> => {
+    const lines = (await run(['python3', '-c', CLEAN_INTERFACE, source, `${resourceBuild}/interface-sources/${index}/${path.posix.basename(source)}`])).stdout.trim().split('\n');
+    const chosen = lines[0]?.trim();
+    if (!chosen?.startsWith('/')) return source;
+    if (lines[1]?.trim()) hooks.onOutput?.(`capmac note: ${path.posix.basename(source)}: compiled without its labels' ${lines[1].trim().split(' ').join(' and ')}, which the Linux storyboard compiler doesn't read (no change for labels that fit their frames)\n`, 'stdout');
+    return chosen;
+  };
+  for (const [index, entry] of entries.entries()) {
     const suffix = path.posix.extname(entry.source).toLowerCase();
     if (suffix === '.xcassets') continue;
     const destination = `${context.productDirectory}/${entry.destination}`;
@@ -204,11 +293,21 @@ export async function compileWslResources(executor: WslExecutor, resources: read
     if (suffix === '.storyboard') {
       const output = `${resourceBuild}/${entry.destination}`;
       await run(['mkdir', '-p', '--', path.posix.dirname(output)]);
-      await runResourceTool(executor, [ibtool!, '--module', moduleName, '--minimum-deployment-target', minimum, entry.source, '--compilation-directory', path.posix.dirname(output)], hooks);
+      try {
+        await runResourceTool(executor, [ibtool!, '--module', moduleName, '--minimum-deployment-target', minimum, await interfaceSource(entry.source, index), '--compilation-directory', path.posix.dirname(output)], hooks);
+      } catch (error) {
+        const name = path.posix.basename(entry.source, path.posix.extname(entry.source));
+        if (!(error instanceof UserError) || !context.infoPlistPath) throw error;
+        const plain = await executor.run(['python3', '-c', PLAIN_LAUNCH_SCREEN, context.infoPlistPath, name], { ...hooks, allowFailure: true });
+        if (plain.code !== 0) throw error;
+        const why = error.details?.find((line) => /error:/.test(line))?.replace(/^.*?error:\s*(ibtool:\s*)?/, '').replace(/\s*\([^()]*\)\s*$/, '');
+        hooks.onOutput?.(`capmac note: ${path.posix.basename(entry.source)} needs what the Linux storyboard compiler can’t build yet${why ? ` (${why})` : ''}: the app gets a plain launch screen instead\n`, 'stdout');
+        continue;
+      }
       const compiled = `${path.posix.dirname(output)}/${path.posix.basename(entry.source, path.posix.extname(entry.source))}.storyboardc`;
       await run(['python3', '-c', COPY_RESOURCE, compiled, context.productDirectory, entry.destination]);
     } else if (suffix === '.xib') {
-      await runResourceTool(executor, [ibtool!, '--module', moduleName, '--minimum-deployment-target', minimum, '--compile', destination, entry.source], hooks);
+      await runResourceTool(executor, [ibtool!, '--module', moduleName, '--minimum-deployment-target', minimum, '--compile', destination, await interfaceSource(entry.source, index)], hooks);
     } else if (suffix === '.xcdatamodel' || suffix === '.xcdatamodeld') {
       await runResourceTool(executor, [momc!, '--sdkroot', context.sdkPath, '--iphoneos-deployment-target', minimum, '--module', moduleName, entry.source, resourceBuild], hooks);
       const compiled = `${resourceBuild}/${path.posix.basename(entry.source).replace(/\.xcdatamodeld$/i, '.momd').replace(/\.xcdatamodel$/i, '.mom')}`;

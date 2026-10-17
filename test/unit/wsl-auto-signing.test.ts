@@ -45,9 +45,11 @@ let session: ReturnType<typeof fakeSession>;
 function fakeExpo() {
   const appBundle = { id: 'APPID', attributes: { identifier: 'dev.example.app' }, getBundleIdCapabilitiesAsync: vi.fn(async () => [{ id: 'APPID_PUSH_NOTIFICATIONS', attributes: { capabilityType: 'PUSH_NOTIFICATIONS' } }, { id: 'APPID_GAME_CENTER', attributes: {} }]), updateBundleIdCapabilityAsync: vi.fn() };
   const widgetBundle = { id: 'WIDGETID', attributes: { identifier: 'dev.example.app.widget' }, getBundleIdCapabilitiesAsync: vi.fn(async () => []), updateBundleIdCapabilityAsync: vi.fn() };
+  // App IDs Apple's website added: Apple's API lists them from then on.
+  const listed = new Set<string>();
   return {
-    appBundle, widgetBundle,
-    BundleId: { findAsync: vi.fn(async (_context, { identifier }) => identifier === 'dev.example.app' ? appBundle : null), createAsync: vi.fn(async () => widgetBundle) },
+    appBundle, widgetBundle, listed,
+    BundleId: { findAsync: vi.fn(async (_context, { identifier }) => identifier === 'dev.example.app' ? appBundle : listed.has(identifier) ? widgetBundle : null), createAsync: vi.fn(async () => widgetBundle) },
     Device: {
       getAllIOSProfileDevicesAsync: vi.fn(async () => [{ id: 'DEV1', attributes: { udid: '00008120-0001', status: 'ENABLED', deviceClass: 'IPHONE' } }, { id: 'TV', attributes: { udid: 'tv', status: 'ENABLED', deviceClass: 'APPLE_TV' } }]),
       createAsync: vi.fn(async () => ({ id: 'DEV2' })),
@@ -194,6 +196,7 @@ describe('the certificate from Apple’s website', () => {
   /** Apple's website in a browser, as signing setup uses it. */
   function website(options: Partial<{ browser: string | null; signedIn: boolean }> = {}) {
     const page = {
+      bundleId: vi.fn(async ({ identifier }: { name: string; identifier: string }) => { expo.listed.add(identifier); return 'WIDGETID'; }),
       device: vi.fn(async ({ udid }: { name: string; udid: string }) => `WEB-${udid}`),
       profile: vi.fn(async ({ bundleId }: { name: string; bundleId: string; certificateId: string; deviceIds: string[] }) => ({ id: `WEBPROFILE-${bundleId}`, content: profileContent(bundleId === 'APPID' ? 'dev.example.app' : 'dev.example.app.widget', grants) })),
       close: vi.fn(async () => undefined),
@@ -289,11 +292,14 @@ describe('the certificate from Apple’s website', () => {
     await expect(readdir(path.join(directory, 'Downloads'))).rejects.toThrow();
   });
 
-  it('signed in on Apple’s website, registers iPhones and makes profiles there, closing the hidden browser after', async () => {
+  it('signed in on Apple’s website, adds App IDs, registers iPhones and makes profiles there, closing the hidden browser after', async () => {
     session.via = 'website';
     const web = website();
     const result = await run(choosing([]), { executor: wsl(), web });
-    expect(web.open).toHaveBeenCalledOnce();
+    // Once for the App ID, once for the iPhones and profiles (the certificate comes in between).
+    expect(web.open).toHaveBeenCalledTimes(2);
+    expect(web.page.bundleId).toHaveBeenCalledWith({ name: 'CapMac dev example app widget', identifier: 'dev.example.app.widget' });
+    expect(expo.BundleId.createAsync).not.toHaveBeenCalled();
     expect(web.page.device).toHaveBeenCalledWith({ name: 'New iPhone', udid: '00008120-0002' });
     expect(web.page.profile.mock.calls.map(([made]) => made)).toEqual([
       expect.objectContaining({ bundleId: 'APPID', certificateId: 'WEBCERT', deviceIds: ['DEV1', 'WEB-00008120-0002'] }),
@@ -302,7 +308,7 @@ describe('the certificate from Apple’s website', () => {
     // Apple's API isn't asked to make what it only makes on the website.
     expect(expo.Device.createAsync).not.toHaveBeenCalled();
     expect(expo.Profile.createAsync).not.toHaveBeenCalled();
-    expect(web.page.close).toHaveBeenCalledOnce();
+    expect(web.page.close).toHaveBeenCalledTimes(2);
     expect(await readFile(result.profile)).toEqual(Buffer.from(profileContent('dev.example.app', grants), 'base64'));
   });
 
