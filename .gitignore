@@ -3,7 +3,9 @@ dist/
 out/
 !/out/
 /out/*
-!/out/capmac-intro-v4.mp4
+!/out/capmac-intro-v5.mp4
+!/out/capmac-intro-v5.jpg
+!/out/capmac-vscode-intro-v1.mp4
 apps/desktop/release/
 coverage/
 test-results/

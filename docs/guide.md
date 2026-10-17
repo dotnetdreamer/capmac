@@ -475,12 +475,13 @@ They're unsigned by default, and updates stay off until you set up an update fee
 Maintainers publish a release with **Actions › Release CapMac Studio**, which can also do a dry run.
 It builds Studio and the VS Code extension and publishes the CLI to npm. See [releasing CapMac](releases.md)
 
-The [intro video](../apps/intro/README.md) is an editable Remotion project
+The [intro videos](../apps/intro/README.md), one for CapMac and one for CapMac for VS Code, are an editable Remotion project
 
 ```powershell
 npm ci --prefix apps/intro
 npm run intro:studio
 npm run intro:render
+npm run intro:render:vscode
 ```
 
-The render is saved to `out/capmac-intro-v4.mp4`
+The renders are saved to `out/capmac-intro-v5.mp4` and `out/capmac-vscode-intro-v1.mp4`

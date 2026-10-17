@@ -7,6 +7,8 @@ export type CameraKey = {
   y: number;
   scale: number;
   roll?: number;
+  /** Reach this key with a gentle drift instead of a decisive move: a slow push should never surge */
+  drift?: boolean;
 };
 
 export type CursorKey = {
@@ -33,7 +35,13 @@ const ease = (progress: number) => {
   return t < 0.5 ? 16 * t ** 5 : 1 - (-2 * t + 2) ** 5 / 2;
 };
 
-const segmentAt = <T extends {at: number}>(frame: number, keys: readonly T[]) => {
+// Smoothstep peaks at 1.5 times the average speed, where the quintic peaks at 5 times
+const drift = (progress: number) => {
+  const t = clamp(progress);
+  return t * t * (3 - 2 * t);
+};
+
+const segmentAt = <T extends {at: number; drift?: boolean}>(frame: number, keys: readonly T[]) => {
   const ordered = [...keys].sort((left, right) => left.at - right.at);
   if (ordered.length === 0) return null;
   if (frame <= ordered[0].at) return {from: ordered[0], to: ordered[0], progress: 0};
@@ -41,7 +49,8 @@ const segmentAt = <T extends {at: number}>(frame: number, keys: readonly T[]) =>
     const to = ordered[index];
     if (frame <= to.at) {
       const from = ordered[index - 1];
-      return {from, to, progress: ease((frame - from.at) / Math.max(1, to.at - from.at))};
+      const linear = (frame - from.at) / Math.max(1, to.at - from.at);
+      return {from, to, progress: to.drift ? drift(linear) : ease(linear)};
     }
   }
   const last = ordered[ordered.length - 1];
@@ -90,7 +99,8 @@ export const Camera: React.FC<{
   style?: React.CSSProperties;
 }> = ({frame, keys, children, blur = true, style}) => {
   const {x, y, scale, roll} = cameraAt(frame, keys);
-  const radius = blur ? blurAt(frame, keys) : 0;
+  // The filter applies before the zoom, so the radius is divided by it to blur by the motion seen on screen
+  const radius = blur ? blurAt(frame, keys) / scale : 0;
   return <AbsoluteFill style={{overflow: 'hidden', ...style}}>
     <div style={{
       position: 'absolute',
@@ -151,5 +161,54 @@ export const RevealText: React.FC<{
   const progress = ease((frame - from) / (30 * 0.35));
   return <div style={{...style, overflow: 'hidden'}}>
     <div style={{opacity: progress, transform: `translateY(${mix(18, 0, progress)}px)`}}>{children}</div>
+  </div>;
+};
+
+/** Each word rises out of its own mask and comes into focus a few frames after the one before */
+export const Words: React.FC<{
+  frame: number;
+  from?: number;
+  text: string;
+  stagger?: number;
+  style?: React.CSSProperties;
+  wordStyle?: (word: string, index: number) => React.CSSProperties | undefined;
+}> = ({frame, from = 0, text, stagger = 3, style, wordStyle}) => <div style={{display: 'flex', flexWrap: 'wrap', columnGap: '0.24em', justifyContent: style?.textAlign === 'center' ? 'center' : undefined, ...style}}>
+  {text.split(' ').map((word, index) => {
+    const progress = ease((frame - from - index * stagger) / (30 * 0.42));
+    return <span key={index} style={{display: 'inline-block', overflow: 'hidden', padding: '0.06em 0.04em 0.14em', margin: '-0.06em -0.04em -0.14em'}}>
+      <span style={{display: 'inline-block', opacity: progress, transform: `translateY(${mix(0.7, 0, progress)}em)`, filter: progress < 1 ? `blur(${mix(9, 0, progress).toFixed(2)}px)` : undefined, ...wordStyle?.(word, index)}}>{word}</span>
+    </span>;
+  })}
+</div>;
+
+/** A window that rises out of depth: tilted back and low, settling flat and in place */
+export const Lift: React.FC<{
+  frame: number;
+  from: number;
+  duration?: number;
+  distance?: number;
+  tilt?: number;
+  children: React.ReactNode;
+  style?: React.CSSProperties;
+}> = ({frame, from, duration = 34, distance = 300, tilt = 24, children, style}) => {
+  const progress = ease((frame - from) / duration);
+  // Once settled it drops the 3D context, which would keep Chrome drawing it at low resolution under a zooming camera
+  if (progress >= 1) return <div style={style}>{children}</div>;
+  return <div style={{perspective: 2200, perspectiveOrigin: '50% 30%', ...style}}>
+    <div style={{
+      transformOrigin: '50% 100%',
+      transform: `translateY(${mix(distance, 0, progress)}px) rotateX(${mix(tilt, 0, progress)}deg) scale(${mix(0.9, 1, progress)})`,
+      opacity: clamp(progress * 2.2),
+    }}>{children}</div>
+  </div>;
+};
+
+/** A soft band of light that crosses a surface once, as glass catches it */
+export const Sheen: React.FC<{frame: number; at: number; duration?: number; radius?: number; strength?: number}> = ({frame, at, duration = 26, radius = 0, strength = 0.32}) => {
+  const progress = (frame - at) / duration;
+  if (progress <= 0 || progress >= 1) return null;
+  const x = mix(-60, 160, ease(progress));
+  return <div style={{position: 'absolute', inset: 0, borderRadius: radius, overflow: 'hidden', pointerEvents: 'none', mixBlendMode: 'screen'}}>
+    <div style={{position: 'absolute', inset: '-20%', background: `linear-gradient(105deg, transparent ${x - 22}%, rgba(255,255,255,${strength}) ${x}%, transparent ${x + 22}%)`}}/>
   </div>;
 };

@@ -30,7 +30,9 @@
     "vscode:test": "npm run test:integration -w capmac-vscode",
     "intro:studio": "npm --prefix apps/intro run studio",
     "intro:render": "npm --prefix apps/intro run render",
+    "intro:render:vscode": "npm --prefix apps/intro run render:vscode",
     "intro:poster": "npm --prefix apps/intro run poster",
+    "intro:poster:vscode": "npm --prefix apps/intro run poster:vscode",
     "intro:check": "npm --prefix apps/intro run typecheck"
   },
   "devDependencies": {

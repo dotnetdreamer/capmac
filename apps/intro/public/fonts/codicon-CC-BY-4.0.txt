@@ -1,0 +1,8 @@
+codicon.ttf is the icon font of Visual Studio Code, from @vscode/codicons 0.0.46-24
+
+Copyright (c) Microsoft Corporation
+
+The icons are licensed under the Creative Commons Attribution 4.0 International license (CC BY 4.0)
+https://creativecommons.org/licenses/by/4.0/
+
+Source: https://github.com/microsoft/vscode-codicons

@@ -1,6 +1,7 @@
-"""Render the three original cloud backplates used by the launch film."""
+"""Render the original cloud backplates used by the films."""
 
 from pathlib import Path
+import sys
 import tempfile
 
 import numpy as np
@@ -90,9 +91,15 @@ def main():
         "cool": (39, (17, 28, 43), (57, 80, 102), (168, 177, 172), (15, 23, 34)),
         "warm": (82, (31, 26, 31), (96, 69, 60), (198, 158, 119), (27, 9, -9)),
         "violet": (127, (23, 24, 43), (67, 64, 100), (170, 159, 184), (10, 3, 21)),
+        # Building with no Mac, in the launch film
+        "mint": (211, (13, 29, 31), (44, 86, 82), (150, 186, 172), (4, 17, 13)),
+        # CapMac for VS Code
+        "blue": (305, (12, 18, 38), (33, 56, 104), (126, 146, 184), (6, 12, 32)),
     }
+    # Name plates to render only those, so existing ones stay byte for byte
+    wanted = sys.argv[1:] or list(palettes)
     images = []
-    for name, parameters in palettes.items():
+    for name, parameters in ((name, palettes[name]) for name in wanted):
         image = render(*parameters)
         destination = OUT / f"{name}.jpg"
         image.save(destination, quality=95, subsampling=0, optimize=True)
@@ -101,7 +108,7 @@ def main():
         ImageDraw.Draw(thumb).text((24, 22), name.upper(), fill=(230, 230, 230))
         images.append(thumb)
 
-    contact = Image.new("RGB", (960, 1620))
+    contact = Image.new("RGB", (960, 540 * len(images)))
     for index, image in enumerate(images):
         contact.paste(image, (0, index * 540))
     contact_path = Path(tempfile.gettempdir()) / "capmac-atmosphere-contact.jpg"
