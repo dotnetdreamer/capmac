@@ -1,16 +1,19 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { EngineContext, EngineEvent } from '../../packages/core/src/engine/index.js';
 import { absorbChanges, hookEntitlements, keepPodEdits, podEnv } from '../../packages/core/src/agent/ops/react-native.js';
 import { emptyState } from '../../packages/core/src/agent/state.js';
 import { appsOf, findApps } from '../../packages/core/src/engine/apps.js';
 import { backendIn } from '../../packages/core/src/engine/backend.js';
 import { remember } from '../../packages/core/src/engine/memory.js';
-import { appFor, findProjectDir, loadProject, runsOnMac, runsOnPc } from '../../packages/core/src/engine/project.js';
+import { appFor, findProjectDir, loadProject, runsOnMac, runsOnPc, type ProjectInfo } from '../../packages/core/src/engine/project.js';
 import { ReactNativeLogClassifier, rctLogEntry } from '../../packages/core/src/engine/react-native/logs.js';
 import { configurationOf, isDebugConfiguration, reactNativeMacApp } from '../../packages/core/src/engine/react-native/mac.js';
-import { consoleLevel, METRO_BANNER, METRO_NOISE, METRO_REPORTER_SOURCE, metroErrorMessage, parseMetroLine } from '../../packages/core/src/engine/react-native/metro.js';
+import { borrowMetro, consoleLevel, METRO_BANNER, METRO_NOISE, METRO_REPORTER_SOURCE, metroErrorMessage, parseMetroLine, startMetro, type MetroMessages, type MetroOptions, type MetroServer } from '../../packages/core/src/engine/react-native/metro.js';
 import { runWindowsPhase } from '../../packages/core/src/engine/react-native/pc.js';
 import { appTargets, describeReactNativeProject, isReactNativeProjectDir } from '../../packages/core/src/engine/react-native/project.js';
 import { scanProject } from '../../packages/core/src/engine/scan.js';
@@ -354,6 +357,10 @@ describe('Metro', () => {
     for (const line of ['                        ▒▒▓▓▓▓▒▒', '                Welcome to Metro v0.83.8', 'Starting dev server on http://127.0.0.1:8081', ' BUNDLE  ./index.js', ' INFO  💡 JavaScript logs have moved! They can now be viewed in React Native DevTools.', 'transform[stderr]: (node:49232) Warning: x']) {
       expect(METRO_NOISE.test(line), line).toBe(true);
     }
+    // A reload that met one of the app's connections as React Native swapped it for a new one.
+    for (const line of ["error Failed to send broadcast to client: 'client#1' due to:", ' Error: WebSocket is not open: readyState 2 (CLOSING)']) {
+      expect(METRO_NOISE.test(line), line).toBe(true);
+    }
     expect(METRO_NOISE.test(' WARN  Failed to download the latest version of React Native DevTools.')).toBe(false);
     expect(METRO_NOISE.test('error: Error: Unable to resolve module ./Missing from App.tsx')).toBe(false);
   });
@@ -381,6 +388,212 @@ describe('Metro', () => {
     expect(metroErrorMessage({ message: 'SyntaxError: C:\\app\\App.tsx: Unexpected token (12:5)\n> 12 | x', file: 'C:\\app\\App.tsx' })).toBe('SyntaxError: Unexpected token');
     // Metro often reports the file relative to the project, while its message has the whole path (here with spaces).
     expect(metroErrorMessage({ message: 'SyntaxError: C:\\Users\\me\\capmac Studio\\Hello React Native\\App.tsx: Unexpected token (159:34)', file: 'App.tsx' })).toBe('SyntaxError: Unexpected token');
+  });
+});
+
+describe('a Metro another run started', () => {
+  /** A stand-in for that Metro: it answers /status as Metro does, for this project, until it closes or answers as another server. */
+  async function otherMetro(projectDir: string) {
+    let asOther = false;
+    const server = http.createServer((_req, res) => {
+      if (asOther) return void res.writeHead(404).end('Not found');
+      res.writeHead(200, { 'X-React-Native-Project-Root': projectDir }).end('packager-status:running');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    return {
+      port: (server.address() as AddressInfo).port,
+      answerAsOther: () => (asOther = true),
+      close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+    };
+  }
+  /**
+   * The Metro the run starts in its place. `onReload` stands for the app: return true when the
+   * reload reaches it (it then fetches its JavaScript), false when the reload is lost.
+   */
+  function ownMetro(port: number, onReload: (count: number) => boolean = () => false) {
+    let exit!: (code: number | null) => void;
+    const exited = new Promise<number | null>((resolve) => (exit = resolve));
+    let onBundle: MetroOptions['onBundle'];
+    let reloads = 0;
+    const server: MetroServer = {
+      port,
+      url: `http://localhost:${port}`,
+      external: false,
+      exited,
+      reload: vi.fn(async () => {
+        if (onReload(++reloads)) setTimeout(() => onBundle?.('start'), 5);
+        return true;
+      }),
+      openDevTools: vi.fn(async () => true),
+      stop: vi.fn(async () => undefined),
+    };
+    const start = vi.fn(async (_project: ProjectInfo, options: MetroOptions) => {
+      onBundle = options.onBundle;
+      return server;
+    });
+    /** An app asks this Metro for its JavaScript. */
+    const bundle = () => onBundle?.('start');
+    return { server, start, exit, bundle };
+  }
+  function context() {
+    const events: EngineEvent[] = [];
+    const ctx = { emit: (event: EngineEvent) => events.push(event), prompter: { interactive: false }, verbose: false } as unknown as EngineContext;
+    return { events, ctx };
+  }
+  const until = async (what: () => boolean, ms = 3000) => {
+    for (const end = Date.now() + ms; !what(); ) {
+      if (Date.now() > end) throw new Error('timed out');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  };
+  const logs = (events: EngineEvent[]) => events.filter((e) => e.type === 'log').map((e) => (e as { message: string }).message);
+  // Node.js without WebSocket: CapMac asks for reloads as Metro's r does (one test below has the socket).
+  beforeEach(() => vi.stubGlobal('WebSocket', undefined));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('uses it while it runs, and starts its own on the same port when it stops', async () => {
+    const other = await otherMetro(dir);
+    const { events, ctx } = context();
+    const own = ownMetro(other.port);
+    const metro = borrowMetro({ capDir: dir } as ProjectInfo, other.port, {}, ctx, { start: own.start, checkMs: 30 });
+    expect(metro.external).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(own.start).not.toHaveBeenCalled();
+
+    await other.close();
+    await until(() => own.start.mock.calls.length > 0 && !metro.external);
+    expect(own.start).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ port: other.port, takeover: true }), ctx);
+    expect(logs(events)).toEqual(expect.arrayContaining([expect.stringContaining('stopped: CapMac starts its own there'), `Metro runs again on port ${other.port}`]));
+    // From now on it is the run's own Metro.
+    const reloads = vi.mocked(own.server.reload).mock.calls.length;
+    await metro.reload();
+    expect(own.server.reload).toHaveBeenCalledTimes(reloads + 1);
+    await metro.stop();
+    expect(own.server.stop).toHaveBeenCalled();
+  });
+
+  it('reloads the app on the new Metro until it fetches its JavaScript (React Native loses some reloads as it reconnects)', async () => {
+    const other = await otherMetro(dir);
+    const { events, ctx } = context();
+    // The first two reloads are lost; the third reaches the app.
+    const own = ownMetro(other.port, (count) => count === 3);
+    const onBundle = vi.fn();
+    const metro = borrowMetro({ capDir: dir } as ProjectInfo, other.port, { onBundle }, ctx, { start: own.start, checkMs: 30, retryMs: 50 });
+    await other.close();
+    await until(() => logs(events).includes('The app loads its JavaScript from the new Metro: saves show in it again'));
+    expect(own.server.reload).toHaveBeenCalledTimes(3);
+    // The run still hears of the bundle, and CapMac asks no more.
+    expect(onBundle).toHaveBeenCalledWith('start', undefined);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(own.server.reload).toHaveBeenCalledTimes(3);
+    await metro.stop();
+  });
+
+  it('asks over Metro’s message socket once it is open: Metro says “No apps connected” to a post while none is', async () => {
+    const other = await otherMetro(dir);
+    const { ctx } = context();
+    const own = ownMetro(other.port);
+    let state: MetroMessages['state'] = 'connecting';
+    // The second reload reaches the app.
+    const reload = vi.fn(() => void (reload.mock.calls.length === 2 && setTimeout(own.bundle, 5)));
+    const socket: MetroMessages = { get state() { return state; }, reload, close: vi.fn() };
+    const metro = borrowMetro({ capDir: dir } as ProjectInfo, other.port, {}, ctx, { start: own.start, messages: () => socket, checkMs: 30, retryMs: 40 });
+    await other.close();
+    await until(() => !metro.external);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(reload).not.toHaveBeenCalled();
+    state = 'open';
+    await until(() => vi.mocked(socket.close).mock.calls.length > 0);
+    expect(reload).toHaveBeenCalledTimes(2);
+    expect(own.server.reload).not.toHaveBeenCalled();
+    await metro.stop();
+  });
+
+  it('stops asking once an app fetches its JavaScript by itself (one that opens on the new Metro)', async () => {
+    const other = await otherMetro(dir);
+    const { ctx } = context();
+    const own = ownMetro(other.port);
+    const metro = borrowMetro({ capDir: dir } as ProjectInfo, other.port, {}, ctx, { start: own.start, checkMs: 30, retryMs: 50 });
+    await other.close();
+    await until(() => !metro.external);
+    own.bundle();
+    const reloads = vi.mocked(own.server.reload).mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(own.server.reload).toHaveBeenCalledTimes(reloads);
+    await metro.stop();
+  });
+
+  it('gives up quietly when no app comes (one that opens later fetches its JavaScript by itself)', async () => {
+    const other = await otherMetro(dir);
+    const { events, ctx } = context();
+    const own = ownMetro(other.port);
+    const metro = borrowMetro({ capDir: dir } as ProjectInfo, other.port, {}, ctx, { start: own.start, checkMs: 30, retryMs: 40, waitMs: 200 });
+    await other.close();
+    await until(() => !metro.external);
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const reloads = vi.mocked(own.server.reload).mock.calls.length;
+    expect(reloads).toBeGreaterThan(1);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(own.server.reload).toHaveBeenCalledTimes(reloads);
+    expect(events.filter((e) => e.type === 'log' && e.level !== 'info')).toEqual([]);
+    expect(logs(events)).not.toContain('The app loads its JavaScript from the new Metro: saves show in it again');
+    await metro.stop();
+  });
+
+  it('leaves an Expo app to reload by hand (Expo’s output has no bundle reports)', async () => {
+    const other = await otherMetro(dir);
+    const { ctx } = context();
+    const own = ownMetro(other.port);
+    const project = { capDir: dir, reactNative: { expo: true, options: {} } } as unknown as ProjectInfo;
+    const metro = borrowMetro(project, other.port, {}, ctx, { start: own.start, checkMs: 30, retryMs: 40 });
+    await other.close();
+    await until(() => !metro.external);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(own.server.reload).not.toHaveBeenCalled();
+    await metro.stop();
+  });
+
+  it('says so when another server takes the port, rather than moving Metro where the app doesn’t look', async () => {
+    const other = await otherMetro(dir);
+    const { events, ctx } = context();
+    const start = vi.fn(async () => ownMetro(other.port).server);
+    const metro = borrowMetro({ capDir: dir } as ProjectInfo, other.port, {}, ctx, { start, checkMs: 30 });
+    other.answerAsOther();
+    await expect(metro.exited).resolves.toBeNull();
+    expect(start).not.toHaveBeenCalled();
+    expect(events).toContainEqual(expect.objectContaining({ type: 'error', error: expect.objectContaining({ message: expect.stringContaining('another server took the port') }) }));
+    await other.close();
+  });
+
+  it('leaves it running and stops watching when the run ends first', async () => {
+    const other = await otherMetro(dir);
+    const { ctx } = context();
+    const start = vi.fn(async () => ownMetro(other.port).server);
+    const metro = borrowMetro({ capDir: dir } as ProjectInfo, other.port, {}, ctx, { start, checkMs: 30 });
+    await metro.stop();
+    await other.close();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('ends when the Metro it started does (a run on an iPhone from this PC ends then)', async () => {
+    const other = await otherMetro(dir);
+    const { ctx } = context();
+    const own = ownMetro(other.port);
+    const metro = borrowMetro({ capDir: dir } as ProjectInfo, other.port, {}, ctx, { start: async () => own.server, checkMs: 30 });
+    await other.close();
+    await until(() => !metro.external);
+    own.exit(1);
+    await expect(metro.exited).resolves.toBe(1);
+  });
+
+  it('takes over only on the same port', async () => {
+    const other = await otherMetro(dir);
+    other.answerAsOther();
+    const { ctx } = context();
+    const project = { capDir: dir, reactNative: { options: {} } } as unknown as ProjectInfo;
+    await expect(startMetro(project, { port: other.port, takeover: true }, ctx)).rejects.toThrow(`Port ${other.port} is in use by another server on this PC.`);
+    await other.close();
   });
 });
 

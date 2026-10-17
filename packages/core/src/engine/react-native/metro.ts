@@ -87,8 +87,12 @@ export interface MetroError {
   type?: string;
 }
 
-/** Metro's banner, progress bars and tips: not worth a line of their own in the console. */
-export const METRO_NOISE = /^[\s▀-▟]+$|Welcome to (Metro|React Native)|Fast - Scalable - Integrated|Starting dev server on|JavaScript logs have moved|^\s*BUNDLE\s|^\s*Dev server ready|transform\[std(out|err)\]: \((node:\d+|Use `node)/;
+/**
+ * Metro's banner, progress bars and tips, and its errors for a reload that met
+ * an app's connection as it closed (React Native swaps those as it
+ * reconnects): not worth a line of their own in the console.
+ */
+export const METRO_NOISE = /^[\s▀-▟]+$|Welcome to (Metro|React Native)|Fast - Scalable - Integrated|Starting dev server on|JavaScript logs have moved|^\s*BUNDLE\s|^\s*Dev server ready|transform\[std(out|err)\]: \((node:\d+|Use `node)|Failed to send broadcast to client|WebSocket is not open: readyState/;
 /** Of those, its logo, welcome lines and progress bars (CapMac shows its own bundling step): left out even of the full output. */
 export const METRO_BANNER = /^[\s▀-▟]+$|Welcome to (Metro|React Native)|Fast - Scalable - Integrated|^\s*(BUNDLE|MAP)\s|JavaScript logs have moved/;
 
@@ -126,9 +130,13 @@ export interface MetroServer {
   port: number;
   /** http://localhost:<port> on this PC. */
   url: string;
-  /** Metro was already running for this project: CapMac uses it and leaves it running. */
-  external: boolean;
-  /** Resolves when Metro exits (never for an external one). */
+  /** Metro was already running for this project: CapMac uses it and leaves it running (false once CapMac had to start its own). */
+  readonly external: boolean;
+  /**
+   * Resolves when Metro exits. For one already running, never while it runs:
+   * if it stops, CapMac starts its own and this follows that one (or resolves
+   * when it can't).
+   */
   readonly exited: Promise<number | null>;
   /** Tells every app connected to Metro to reload its JavaScript (the r key in Metro). */
   reload(): Promise<boolean>;
@@ -226,6 +234,12 @@ export interface MetroOptions {
   signal?: AbortSignal;
   /** Called with each bundling update ("Bundling 45%"), for the live session's status. */
   onBundle?: (state: 'start' | 'done' | 'failed', detail?: string) => void;
+  /**
+   * Taking over from a Metro that stopped while this run used it: only on the
+   * same port (the app and the Mac's tunnel point at it), and with no step of
+   * its own (the run is past its Metro step).
+   */
+  takeover?: boolean;
 }
 
 /** Metro answers /open-debugger once the browser it opens DevTools in has started: from cold, that takes several seconds. */
@@ -241,6 +255,150 @@ async function post(url: string, timeoutMs = 5000): Promise<boolean> {
   }
 }
 
+/** How often a borrowed Metro is checked, and how many failed checks in a row mean it stopped (one slow answer doesn't). */
+const BORROWED_CHECK_MS = 2000;
+const BORROWED_MISSES = 2;
+/**
+ * After CapMac starts its own Metro: how often it asks the app to reload, and
+ * for how long. A reload reaches the app over a connection React Native
+ * restores every 2 s, and for a few rounds after Metro is back it swaps that
+ * connection for a new one: a reload sent in between is lost.
+ */
+const RELOAD_RETRY_MS = 4000;
+const RELOAD_WAIT_MS = 30_000;
+
+/** Metro's message socket, with CapMac as one of its clients. */
+export interface MetroMessages {
+  readonly state: 'connecting' | 'open' | 'closed';
+  /** What Metro's r sends: every other client (the apps) reloads. */
+  reload(): void;
+  close(): void;
+}
+
+/**
+ * Metro's message socket, where a reload goes to the apps. As one of its
+ * clients, CapMac can ask for one before the app is connected without Metro
+ * saying "No apps connected" (it does when nobody is). Null where Node.js has
+ * no WebSocket (before 22).
+ */
+function metroMessages(port: number): MetroMessages | null {
+  if (typeof WebSocket !== 'function') return null;
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/message`);
+  return {
+    get state() {
+      return socket.readyState === WebSocket.OPEN ? 'open' : socket.readyState === WebSocket.CONNECTING ? 'connecting' : 'closed';
+    },
+    reload: () => socket.send(JSON.stringify({ version: 2, method: 'reload' })),
+    close: () => socket.close(),
+  };
+}
+
+/**
+ * Metro another run started for this app (another CapMac window, the CLI, or
+ * `npx react-native start`): this run uses it and leaves it running when it
+ * ends. If that Metro stops first, this run starts its own on the same port,
+ * so the app keeps its JavaScript; `exited` then follows that one. An app that
+ * was open loses Fast Refresh with the old Metro (React Native asks for a
+ * reload): CapMac reloads it until it fetches its JavaScript from the new one.
+ * `test` stands in for Metro and its timings in tests.
+ */
+export function borrowMetro(project: ProjectInfo, port: number, options: MetroOptions, ctx: EngineContext, test: { start?: typeof startMetro; messages?: (port: number) => MetroMessages | null; checkMs?: number; retryMs?: number; waitMs?: number } = {}): MetroServer {
+  const start = test.start ?? startMetro;
+  let own: MetroServer | null = null;
+  let ended = false;
+  let misses = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let resolveExited!: (code: number | null) => void;
+  const exited = new Promise<number | null>((resolve) => (resolveExited = resolve));
+  /** An app asked CapMac's own Metro for its JavaScript. */
+  let bundled = false;
+  let resolveBundled!: () => void;
+  const bundleAsked = new Promise<void>((resolve) => (resolveBundled = resolve));
+  const end = (code: number | null) => {
+    if (ended) return;
+    ended = true;
+    resolveExited(code);
+  };
+  const schedule = () => {
+    if (ended) return;
+    timer = setTimeout(() => void check(), test.checkMs ?? BORROWED_CHECK_MS);
+    timer.unref?.();
+  };
+  const takeOver = async (status: 'taken' | 'free') => {
+    if (status === 'taken') {
+      ctx.emit({ type: 'error', error: { message: `The Metro this app used on port ${port} stopped, and another server took the port.`, hint: 'The app needs Metro there for its JavaScript: stop that server, then start again.', expected: true } });
+      return end(null);
+    }
+    log(ctx, 'info', `The Metro this app used on port ${port} stopped: CapMac starts its own there`);
+    const onBundle: MetroOptions['onBundle'] = (state, detail) => {
+      if (state === 'start' && !bundled) {
+        bundled = true;
+        resolveBundled();
+      }
+      options.onBundle?.(state, detail);
+    };
+    let started: MetroServer;
+    try {
+      started = await start(project, { port, takeover: true, signal: options.signal, onBundle }, ctx);
+    } catch (err) {
+      if (ended || options.signal?.aborted || err instanceof CancelledError) return;
+      ctx.emit({ type: 'error', error: { message: `Metro stopped, and CapMac could not start it again: ${err instanceof Error ? err.message : String(err)}`, hint: 'The app needs it for its JavaScript: stop and start again.', expected: true } });
+      return end(null);
+    }
+    // The run ended while Metro started: nothing needs it any more.
+    if (ended) return void started.stop();
+    own = started;
+    log(ctx, 'info', `Metro runs again on port ${port}`);
+    void started.exited.then(end);
+    // Expo's output has no bundle reports to tell when the app is back: it is left to reload by hand.
+    if (!project.reactNative?.expo) void reloadApp(started);
+  };
+  /**
+   * Asks the app to reload until it fetches its JavaScript from CapMac's
+   * Metro. With no app open yet, nothing hears it: the app fetches it as it
+   * opens, which ends the asking too.
+   */
+  const reloadApp = async (metro: MetroServer) => {
+    const messages = (test.messages ?? metroMessages)(port);
+    try {
+      for (const until = Date.now() + (test.waitMs ?? RELOAD_WAIT_MS); !ended && !bundled && Date.now() < until; ) {
+        // Through the message socket once it is open; as Metro's r without one.
+        if (messages?.state === 'open') messages.reload();
+        else if (messages?.state !== 'connecting') await metro.reload();
+        await Promise.race([bundleAsked, new Promise((resolve) => setTimeout(resolve, test.retryMs ?? RELOAD_RETRY_MS).unref())]);
+      }
+    } finally {
+      messages?.close();
+    }
+    if (bundled && !ended) log(ctx, 'info', 'The app loads its JavaScript from the new Metro: saves show in it again');
+  };
+  const check = async () => {
+    timer = null;
+    if (ended || options.signal?.aborted) return;
+    const status = await metroStatus(port, project.capDir);
+    if (ended) return;
+    if (status === 'ours') misses = 0;
+    else if (++misses >= BORROWED_MISSES) return void takeOver(status);
+    schedule();
+  };
+  schedule();
+  return {
+    port,
+    url: `http://localhost:${port}`,
+    get external() {
+      return own ? own.external : true;
+    },
+    exited,
+    reload: () => (own ? own.reload() : post(`http://127.0.0.1:${port}/reload`)),
+    openDevTools: () => (own ? own.openDevTools() : post(`http://127.0.0.1:${port}/open-debugger`, DEVTOOLS_WAIT_MS)),
+    stop: async () => {
+      ended = true;
+      if (timer) clearTimeout(timer);
+      await own?.stop();
+    },
+  };
+}
+
 /**
  * Starts Metro for the project on this PC (or finds the one already running
  * for it), and turns its reports into CapMac's: a bundling step, JavaScript
@@ -252,10 +410,10 @@ export async function startMetro(project: ProjectInfo, options: MetroOptions, ct
   const picked = await pickMetroPort(project.capDir, wanted);
   if (picked.running) {
     log(ctx, 'info', `Using the Metro already running for this app on port ${picked.port}`);
-    ctx.emit({ type: 'phase-skipped', phase: 'devserver', reason: `Metro is already running on port ${picked.port}` });
-    const url = `http://localhost:${picked.port}`;
-    return { port: picked.port, url, external: true, exited: new Promise(() => undefined), reload: () => post(`http://127.0.0.1:${picked.port}/reload`), openDevTools: () => post(`http://127.0.0.1:${picked.port}/open-debugger`, DEVTOOLS_WAIT_MS), stop: async () => undefined };
+    if (!options.takeover) ctx.emit({ type: 'phase-skipped', phase: 'devserver', reason: `Metro is already running on port ${picked.port}` });
+    return borrowMetro(project, picked.port, options, ctx);
   }
+  if (options.takeover && picked.port !== wanted) throw new UserError(`Port ${wanted} is in use by another server on this PC.`, 'The app needs Metro there for its JavaScript: stop that server, then start again.');
   if (!hasInstalledDependencies(project)) {
     if (!ctx.prompter.interactive) throw new UserError('The app’s packages are not installed on this PC, so Metro can’t start.', `Run \`${project.packageManager} install\` in the project, then try again.`);
     const yes = await ctx.prompter.confirm({ message: `Install the app’s packages on this PC (${project.packageManager} install)?`, detail: 'Metro, which serves the app’s JavaScript, runs on this PC and needs them.', confirmLabel: 'Install', defaultYes: true, signal: options.signal });
@@ -265,7 +423,7 @@ export async function startMetro(project: ProjectInfo, options: MetroOptions, ct
   if (picked.port !== wanted) log(ctx, 'info', `Port ${wanted} is in use on this PC: Metro uses ${picked.port}`);
   const command = await metroCommand(project, picked.port);
   if (options.resetCache) command.argv.push('--reset-cache');
-  const step = startStep(ctx, `Starting Metro (${command.label})`, 'devserver');
+  const step = options.takeover ? null : startStep(ctx, `Starting Metro (${command.label})`, 'devserver');
   const env: NodeJS.ProcessEnv = { ...process.env, FORCE_COLOR: '0', RCT_METRO_PORT: String(picked.port), BROWSER: 'none' };
   delete env.NO_COLOR;
   delete env.ELECTRON_RUN_AS_NODE;
@@ -387,10 +545,10 @@ export async function startMetro(project: ProjectInfo, options: MetroOptions, ct
       if (Date.now() - started > 120_000) throw new UserError('Metro did not start within 2 minutes.', 'Check the output above, or run `npx react-native start` in the project.', tail.slice(-20));
       await new Promise((resolve) => setTimeout(resolve, 300));
     }
-    step.succeed();
+    step?.succeed();
   } catch (err) {
-    if (err instanceof CancelledError) step.cancel();
-    else step.fail();
+    if (err instanceof CancelledError) step?.cancel();
+    else step?.fail();
     await stop();
     throw err;
   } finally {
