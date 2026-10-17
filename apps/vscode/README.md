@@ -19,6 +19,7 @@ its screen shows up in a tab beside your code, and every save updates it.
 | | |
 | --- | --- |
 | **Your project, found** | CapMac reads the open folder and finds its apps: a Capacitor app's iPhone and Electron apps, a Flutter or React Native app's iPhone, Mac and Windows apps, an Electron app. No project to pick, nothing to configure. |
+| **Several projects at once** | Open a workspace of several folders, or a monorepo: CapMac lists the apps of each one, and works on the app of the file you edit until you pick one in the Apps view. Several apps can run at the same time, each in a debug session of its own. |
 | **Run and live reload** | ▶ **Run** builds and opens the app. ⚡ **Live** keeps it running and updates it when you save: your dev server's live reload for Capacitor, hot reload for Flutter, Fast Refresh for React Native, window reloads for Electron. |
 | **The screen, in a tab** | The simulator's screen, or your Mac app's window, streams into VS Code as smooth video. Click, drag, scroll and type on it, take full-size screenshots, and put it in a window of its own like a real simulator. |
 | **A debug session like any other** | Every run is a VS Code debug session: Stop, Restart and Hot Reload on the debug toolbar, F5 to start, and the app's console (`console.log`, Dart's `print`, native logs) in the Debug Console with links to the line that logged. |

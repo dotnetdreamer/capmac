@@ -12,7 +12,7 @@ import type { AppLogEntry, Envelope, ErrorInfo, HostEvent } from '../../../deskt
 import { EngineError } from '../engine/client.js';
 import { s, studio, tidy } from '../i18n.js';
 import { keyOf, type Model, type RunnableApp, type WorkspaceApp } from '../state/model.js';
-import { HAS_DEVTOOLS, sourceOf } from '../state/pure.js';
+import { HAS_DEVTOOLS, isWithin, sourceOf } from '../state/pure.js';
 import { isNative, phaseLabel, type TimelinePhase } from '../state/runs.js';
 
 export interface CapmacLaunch extends vscode.DebugConfiguration {
@@ -470,8 +470,8 @@ export function findApp(model: Model, config: CapmacLaunch): WorkspaceApp | null
     }
     // A folder above the project (${workspaceFolder} of a monorepo): the current app if it is inside it.
     const current = model.current();
-    if (current && keyOf(current.project.dir).startsWith(key) && (!config.app || current.app.id === config.app)) return current;
-    const inside = model.runnableApps().filter((a) => keyOf(a.project.dir).startsWith(key));
+    if (current && isWithin(current.project.dir, config.projectPath) && (!config.app || current.app.id === config.app)) return current;
+    const inside = model.runnableApps().filter((a) => isWithin(a.project.dir, config.projectPath!));
     return (config.app ? inside.find((a) => a.app.id === config.app) : inside[0]) ?? null;
   }
   const current = model.current();

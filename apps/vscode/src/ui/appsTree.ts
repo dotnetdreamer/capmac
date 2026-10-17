@@ -1,13 +1,14 @@
 /**
  * The Apps view: every app CapMac found in the workspace (a Capacitor app's
- * iOS and Electron apps, a Flutter app's iOS, Mac and Windows apps, and the
- * ones it only recognises yet), grouped by project when there are several.
+ * iOS and Electron apps, a Flutter or React Native app's iOS, Mac and Windows
+ * apps, and the ones it only recognises yet), grouped by project when there
+ * are several.
  */
+import path from 'node:path';
 import * as vscode from 'vscode';
 import type { DetectedProject } from '../../../desktop/src/shared/contract.js';
 import { s, studio, tidy } from '../i18n.js';
 import { keyOf, type Model, type WorkspaceApp } from '../state/model.js';
-import { isActive } from '../state/runs.js';
 import { appIcon, appKind, frameworkName } from './format.js';
 
 type Node = { kind: 'project'; project: DetectedProject; apps: WorkspaceApp[] } | { kind: 'app'; app: WorkspaceApp };
@@ -41,7 +42,7 @@ export class AppsTree implements vscode.TreeDataProvider<Node>, vscode.Disposabl
   getTreeItem(node: Node): vscode.TreeItem {
     if (node.kind === 'project') {
       const item = new vscode.TreeItem(node.project.name, vscode.TreeItemCollapsibleState.Expanded);
-      item.description = node.project.rel && node.project.rel !== '' ? node.project.rel : undefined;
+      item.description = projectPlace(node.project);
       item.iconPath = new vscode.ThemeIcon('folder');
       item.tooltip = node.project.dir;
       item.resourceUri = vscode.Uri.file(node.project.dir);
@@ -51,7 +52,7 @@ export class AppsTree implements vscode.TreeDataProvider<Node>, vscode.Disposabl
     const current = this.model.current();
     const isCurrent = current?.key === app.key;
     const run = this.model.runOf(app);
-    const running = isCurrent && isActive(run ?? undefined);
+    const running = this.model.isRunning(app);
     const item = new vscode.TreeItem(app.app.name);
     item.id = app.key;
     const where = studio.apps.whereShort[app.app.id];
@@ -79,6 +80,18 @@ export class AppsTree implements vscode.TreeDataProvider<Node>, vscode.Disposabl
     this.disposable.dispose();
     this.changed.dispose();
   }
+}
+
+/**
+ * Where a project is, beside its name: its folder in the workspace folder it
+ * was found in, and with several workspace folders, that folder's name too
+ * (two of them may hold apps of one name).
+ */
+function projectPlace(project: DetectedProject): string | undefined {
+  const folder = (vscode.workspace.workspaceFolders?.length ?? 0) > 1 ? vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project.dir)) : undefined;
+  if (!folder) return project.rel || undefined;
+  const rel = path.relative(folder.uri.fsPath, project.dir).split(path.sep).join('/');
+  return rel ? `${folder.name}/${rel}` : folder.name;
 }
 
 /** The app a tree item stands for (commands get the node). */

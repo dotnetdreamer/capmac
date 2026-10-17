@@ -1,9 +1,10 @@
 /**
- * CapMac for VS Code: run Capacitor, Flutter and Electron apps on iPhone
- * simulators and iPhones (through a paired Mac, or plugged into this PC with
- * no Mac), on the Mac's desktop and on Windows, from the workspace that is
- * open. A third front end over CapMac's engine, beside the capmac CLI and
- * CapMac Studio: the engine runs in its own process, exactly as in Studio.
+ * CapMac for VS Code: run Capacitor, Flutter, React Native and Electron apps
+ * on iPhone simulators and iPhones (through a paired Mac, or plugged into
+ * this PC with no Mac), on the Mac's desktop and on Windows, from the
+ * workspace that is open. A third front end over CapMac's engine, beside the
+ * capmac CLI and CapMac Studio: the engine runs in its own process, exactly
+ * as in Studio.
  */
 import * as vscode from 'vscode';
 import { registerCommands } from './commands.js';

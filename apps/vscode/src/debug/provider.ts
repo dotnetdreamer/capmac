@@ -6,7 +6,7 @@
  */
 import * as vscode from 'vscode';
 import { s, studio } from '../i18n.js';
-import type { Model } from '../state/model.js';
+import { keyOf, type Model } from '../state/model.js';
 import { isNative } from '../state/runs.js';
 import type { Sessions } from '../session.js';
 import { findApp, type CapmacLaunch } from './adapter.js';
@@ -55,13 +55,20 @@ export class ConfigProvider implements vscode.DebugConfigurationProvider {
   }
 }
 
-/** The dropdown's entries: Live and Run for each app, where it runs now. */
+/**
+ * The dropdown's entries: Live and Run for each app, where it runs now. VS
+ * Code asks once for each workspace folder, and again for the workspace and
+ * the user's settings: an app comes under the folder it was found in.
+ */
 export class DynamicConfigProvider implements vscode.DebugConfigurationProvider {
   constructor(private readonly model: Model) {}
 
-  provideDebugConfigurations(): vscode.DebugConfiguration[] {
+  provideDebugConfigurations(folder: vscode.WorkspaceFolder | undefined): vscode.DebugConfiguration[] {
+    if (!folder) return [];
+    const found = new Set(this.model.searches.get(keyOf(folder.uri.fsPath))?.projects.map((p) => keyOf(p.dir)));
     const configs: vscode.DebugConfiguration[] = [];
     for (const app of this.model.runnableApps()) {
+      if (!found.has(keyOf(app.project.dir))) continue;
       const dest = this.model.resolveDestination(app);
       const where = dest.kind === 'none' ? '' : ` · ${dest.label}`;
       for (const mode of ['live', 'run'] as const) {

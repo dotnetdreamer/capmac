@@ -1,0 +1,8 @@
+{
+  "folders": [
+    { "path": "../../../../../examples/hello-capacitor" },
+    { "path": "../../../../../examples/hello-flutter" },
+    { "path": "notes" }
+  ],
+  "settings": {}
+}

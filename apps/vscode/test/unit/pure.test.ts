@@ -1,6 +1,7 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Target, WslStatus } from '../../../desktop/src/shared/contract.js';
-import { automaticTarget, keyOf, parseAddress, pcReady, sourceOf, WebBuildDiagnostics } from '../../src/state/pure.js';
+import { automaticTarget, isWithin, keyOf, parseAddress, pcReady, sourceOf, WebBuildDiagnostics } from '../../src/state/pure.js';
 
 const sim = (name: string, state = 'Shutdown', available = true): Target => ({ kind: 'simulator', udid: `${name}-0000`, name, os: 'iOS 26.5', osVersion: '26.5', state, available });
 
@@ -33,6 +34,14 @@ describe('pure helpers', () => {
 
   it('compares project paths without case or trailing slashes', () => {
     expect(keyOf('C:\\Apps\\Hello\\')).toBe(keyOf('c:\\apps\\hello'));
+  });
+
+  it('tells a project in a folder from one beside it whose name starts the same', () => {
+    const shop = path.resolve('work', 'shop');
+    expect(isWithin(shop, shop)).toBe(true);
+    expect(isWithin(path.join(shop, 'apps', 'mobile'), `${shop}${path.sep}`)).toBe(true);
+    expect(isWithin(path.resolve('work', 'shop-admin'), shop)).toBe(false);
+    expect(isWithin(path.resolve('work'), shop)).toBe(false);
   });
 
   it('links console lines to files on this PC, not to URLs', () => {

@@ -34,7 +34,7 @@ The web build runs on this PC, and its errors arrive only as output (`tool-outpu
 
 ## Runs are debug sessions
 
-`src/debug/adapter.ts` is an inline debug adapter (no process): F5/Ctrl+F5, Stop, Restart and the debug toolbar drive the engine session; the Debug Console shows steps, the app's console (with `source`/`line` links for page logs), dev server output, diagnostics and errors, with ANSI colours. Typed `r R b s o q help` work like the CLI's keys. DAP progress events carry the current step. `src/debug/provider.ts` lists every app as a dynamic configuration ("Live: Hello CapMac · iPhone 17 Pro") and checks what a run needs before it starts (a paired Mac, this PC set up), saying what to do without waiting for an answer.
+`src/debug/adapter.ts` is an inline debug adapter (no process): F5/Ctrl+F5, Stop, Restart and the debug toolbar drive the engine session; the Debug Console shows steps, the app's console (with `source`/`line` links for page logs), dev server output, diagnostics and errors, with ANSI colours. Typed `r R b s o q help` work like the CLI's keys. DAP progress events carry the current step. `src/debug/provider.ts` lists every app as a dynamic configuration ("Live: Hello CapMac · iPhone 17 Pro"), under the workspace folder it was found in (VS Code asks once per folder, then again for the workspace and the user's settings, which get none: else each entry showed once per folder and twice more), and checks what a run needs before it starts (a paired Mac, this PC set up), saying what to do without waiting for an answer.
 
 Live actions (`src/session.ts`): `r` is `sessions.reload` for Flutter, React Native, Expo and Electron and `sessions.rebuild` for Capacitor (its web view reloads on save by itself); `R` is `sessions.relaunch` (Flutter: hot restart).
 
@@ -65,7 +65,7 @@ Live actions (`src/session.ts`): `r` is `sessions.reload` for Flutter, React Nat
 ## Testing
 
 - `npm test` (root) includes `apps/vscode/test/unit`: the run reducer, the pure helpers, and the bridge, against a fake host and against **Studio's real host** (bundled on the fly, with an empty `CAPMAC_CONFIG_DIR`).
-- `npm run vscode:test` builds and runs `test/integration` in a real VS Code (`@vscode/test-cli`, downloaded into `apps/vscode/.vscode-test`): activation, the engine, detection, commands, the status report, the language model tools, F5's preflight.
+- `npm run vscode:test` builds and runs `test/integration` in a real VS Code (`@vscode/test-cli`, downloaded into `apps/vscode/.vscode-test`): activation, the engine, detection, commands, the status report, the language model tools, F5's preflight. Then `test/workspace` in a workspace of several folders (`test/workspace/fixture`: the Capacitor and Flutter samples and a folder with no app): each folder's apps, Run and Debug's entries per folder, the current app following the open file until one is picked.
 - By hand (and with CDP): open `apps/vscode` in VS Code and press F5. Driving a VS Code started with `--remote-debugging-port` from playwright-core works well; set `"window.dialogStyle": "custom"` so modal dialogs are in the page (native ones are not).
 
 Verified end to end on a real Mac (2026-10-16): Capacitor run and live reload on an iPhone simulator, the H.264 screen with touch and typing, Problems from an Xcode error, Debug Console commands, screenshots; an Electron app's window; Flutter's iOS app (hot reload, hot restart) and Mac app (hot reload); the Windows app's Visual Studio prompt; the keychain password prompt; pairing discovery; health checks; the installed `.vsix`.
@@ -77,7 +77,9 @@ React Native and Capacitor's two extra run options arrived with their branches' 
 
 Checked on main after the merge: 31 unit tests (Studio's real host finds the React Native sample's three apps) and 10 integration tests; live on a real Mac, Sync and Run without building of the Capacitor sample, and the React Native sample in Live on an iPhone simulator (Metro, the app's `js` and `app` logs, its screen in the tab, Stop, Metro gone after).
 
-Activation: `workspaceContains` takes a pattern as a glob only when it has `*` or `?`, so a root pattern with braces alone (`metro.config.{js,ts}`) never matches; React Native folders activate on `metro.config.*`, Expo ones on `app.config.js|ts` or `eas.json` (else when the CapMac view opens).
+Activation: `workspaceContains` takes a pattern as a glob only when it has `*` or `?`, so a root pattern with braces alone (`metro.config.{js,ts}`) never matches; React Native folders activate on `metro.config.*`, Expo ones on `app.config.js|ts` or `eas.json` (else when the CapMac view opens). The patterns go two folders down (`*/*/capacitor.config.{json,ts,js}`): a monorepo's `apps/mobile` activates too (detection itself looks three levels down).
+
+Workspaces of several folders (checked live 2026-10-17 on IK's M1): three samples side by side, the Capacitor sample beside a web site, notes, a Cordova and a Tauri app (shown as not supported yet), only unsupported folders (the Run view says "these folders"), one folder holding several projects, and a monorepo. The current app follows the open file until one is picked in the Apps view; React Native Live and a Capacitor Run ran at once from two folders, each in its own debug session and Debug Console, and the Apps view marks every app that runs (the model remembers which app each session was started for: the engine's events name only the project).
 
 ## Not done yet
 

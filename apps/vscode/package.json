@@ -48,14 +48,21 @@
     "workspaceContains:capacitor.config.ts",
     "workspaceContains:capacitor.config.js",
     "workspaceContains:*/capacitor.config.{json,ts,js}",
+    "workspaceContains:*/*/capacitor.config.{json,ts,js}",
     "workspaceContains:pubspec.yaml",
     "workspaceContains:*/pubspec.yaml",
+    "workspaceContains:*/*/pubspec.yaml",
     "workspaceContains:capmac.json",
+    "workspaceContains:*/capmac.json",
+    "workspaceContains:*/*/capmac.json",
     "workspaceContains:metro.config.*",
     "workspaceContains:*/metro.config.*",
+    "workspaceContains:*/*/metro.config.*",
     "workspaceContains:app.config.js",
     "workspaceContains:app.config.ts",
     "workspaceContains:eas.json",
+    "workspaceContains:*/eas.json",
+    "workspaceContains:*/*/eas.json",
     "onDebugDynamicConfigurations:capmac",
     "onDebugResolve:capmac",
     "onWebviewPanel:capmac.screen"
@@ -119,7 +126,12 @@
       {
         "view": "capmac.run",
         "contents": "%welcome.noApp%",
-        "when": "capmac.engineReady && workbenchState != empty && !capmac.hasApp"
+        "when": "capmac.engineReady && workbenchState == folder && !capmac.hasApp"
+      },
+      {
+        "view": "capmac.run",
+        "contents": "%welcome.noAppFolders%",
+        "when": "capmac.engineReady && workbenchState == workspace && !capmac.hasApp"
       },
       {
         "view": "capmac.apps",
@@ -1198,7 +1210,7 @@
         "toolReferenceName": "capmacStatus",
         "displayName": "%lm.status.name%",
         "userDescription": "%lm.status.user%",
-        "modelDescription": "Get the CapMac status of this workspace: the apps CapMac found (Capacitor, Flutter, Electron), the app it runs, where it runs (an iOS simulator or iPhone through a paired Mac, the Mac's desktop, this Windows PC, or an iPhone plugged into this PC with no Mac), whether a run is going on, the steps of the current or last run, and its build problems. Call this first, before capmac_run or capmac_screenshot.",
+        "modelDescription": "Get the CapMac status of this workspace: the apps CapMac found (Capacitor, Flutter, React Native, Electron), the app it runs, where it runs (an iOS simulator or iPhone through a paired Mac, the Mac's desktop, this Windows PC, or an iPhone plugged into this PC with no Mac), whether a run is going on, the steps of the current or last run, and its build problems. Call this first, before capmac_run or capmac_screenshot.",
         "canBeReferencedInPrompt": true,
         "icon": "$(device-mobile)",
         "tags": [
@@ -1219,7 +1231,7 @@
         "toolReferenceName": "capmacRun",
         "displayName": "%lm.run.name%",
         "userDescription": "%lm.run.user%",
-        "modelDescription": "Build and start the workspace's app with CapMac, and wait until it runs or fails. mode 'live' keeps it running and reloads it when files are saved (hot reload for Flutter); mode 'run' builds and launches it once. Returns how it went, with build problems when it fails. Use capmac_status first to see the app and where it runs. Do not call this while a run is already going on unless the user asked to restart it.",
+        "modelDescription": "Build and start the workspace's app with CapMac, and wait until it runs or fails. mode 'live' keeps it running and reloads it when files are saved (hot reload for Flutter, Fast Refresh for React Native); mode 'run' builds and launches it once. Returns how it went, with build problems when it fails. Use capmac_status first to see the app and where it runs. Do not call this while a run is already going on unless the user asked to restart it.",
         "canBeReferencedInPrompt": true,
         "icon": "$(play)",
         "tags": [

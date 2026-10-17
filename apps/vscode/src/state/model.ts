@@ -33,7 +33,7 @@ import type {
 import type { HostInit } from '../../../desktop/src/shared/host-protocol.js';
 import { EngineClient, EngineError } from '../engine/client.js';
 import { s, studio, tidy } from '../i18n.js';
-import { automaticTarget, keyOf, pcReady, WebBuildDiagnostics } from './pure.js';
+import { automaticTarget, isWithin, keyOf, pcReady, WebBuildDiagnostics } from './pure.js';
 import { emptyRun, isActive, MAC_TARGET_ID, PC_TARGET_ID, reduceRun, runningPhase, type RunState } from './runs.js';
 
 export { automaticTarget, keyOf, pcReady };
@@ -317,6 +317,7 @@ export class Model implements vscode.Disposable {
           }
           break;
         case 'session-ended':
+          if (scope.sessionId) this.sessionApps.delete(scope.sessionId);
           if (scope.projectPath) {
             // A run may have changed the remembered target, app or backend.
             void this.refreshSummary(scope.projectPath);
@@ -549,9 +550,8 @@ export class Model implements vscode.Disposable {
     // The project around the file that is open.
     const file = vscode.window.activeTextEditor?.document.uri;
     if (file?.scheme === 'file') {
-      const fileKey = keyOf(file.fsPath);
       const around = [...new Set(runnable.map((a) => a.project))]
-        .filter((p) => fileKey === keyOf(p.dir) || fileKey.startsWith(`${keyOf(p.dir)}${path.sep}`))
+        .filter((p) => isWithin(file.fsPath, p.dir))
         .sort((a, b) => b.dir.length - a.dir.length)[0];
       if (around) return best(projectApps(around.dir));
     }
@@ -571,6 +571,18 @@ export class Model implements vscode.Disposable {
 
   runOf(app: WorkspaceApp | null): RunState | null {
     return app ? this.runs.get(keyOf(app.project.dir)) ?? null : null;
+  }
+
+  /**
+   * Whether `app` itself runs now: its project's session was started for it
+   * (a project has one session, for one of its apps). Several projects of a
+   * workspace can run at once, the current app's or not.
+   */
+  isRunning(app: WorkspaceApp): boolean {
+    const run = this.runOf(app);
+    if (!run || !isActive(run)) return false;
+    const started = run.sessionId ? this.sessionApps.get(run.sessionId) : undefined;
+    return started ? started === app.app.id : this.current()?.key === app.key;
   }
 
   /** Makes `app` the one Run and Live use (the CLI and CapMac Studio use it too). */
@@ -704,13 +716,25 @@ export class Model implements vscode.Disposable {
     return next;
   }
 
+  /** Per session, the app it was started for (the engine's events name only the project). */
+  private readonly sessionApps = new Map<string, string>();
+
   startSession(params: MethodParams<'sessions.start'>): Promise<string> {
-    return this.inOrder(params.projectPath, async () => (await this.client.invoke('sessions.start', params)).sessionId);
+    return this.inOrder(params.projectPath, async () => this.started((await this.client.invoke('sessions.start', params)).sessionId, params.app));
   }
 
   /** An IPA build on the Mac (on this PC it is a `build` session). */
   startIpaBuild(params: MethodParams<'builds.ipa'>): Promise<string> {
-    return this.inOrder(params.projectPath, async () => (await this.client.invoke('builds.ipa', params)).sessionId);
+    return this.inOrder(params.projectPath, async () => this.started((await this.client.invoke('builds.ipa', params)).sessionId, 'ios'));
+  }
+
+  private started(sessionId: string, app: string | undefined): string {
+    if (app) {
+      this.sessionApps.set(sessionId, app);
+      // Its run may be on screen already, shown for the current app.
+      this.emit('runs');
+    }
+    return sessionId;
   }
 
   async stopSession(sessionId: string): Promise<void> {

@@ -10,6 +10,13 @@ export const HAS_DEVTOOLS = typeof __CAPMAC_HAS_DEVTOOLS__ === 'boolean' && __CA
 /** A path as a map key: Windows paths compare without case and trailing slashes. */
 export const keyOf = (p: string): string => path.resolve(p).replace(/[\\/]+$/, '').toLowerCase();
 
+/** Whether `dir` is `folder` or in it (a folder "app" doesn't hold its neighbour "app-admin"). */
+export function isWithin(dir: string, folder: string): boolean {
+  const inner = keyOf(dir);
+  const outer = keyOf(folder);
+  return inner === outer || inner.startsWith(outer.endsWith(path.sep) ? outer : `${outer}${path.sep}`);
+}
+
 /** The simulator CapMac picks when none is: a booted iPhone, else "iPhone N", else any iPhone (Studio's automaticTarget). */
 export function automaticTarget(targets: TargetsResult | null | undefined): Target | null {
   if (!targets) return null;

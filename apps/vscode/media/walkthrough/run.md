@@ -14,7 +14,7 @@ Every run is a VS Code debug session, so the usual keys work. Pick **Live: your 
 | **F5** | Live |
 | **Shift+F5** | Stop |
 | **Ctrl+Shift+F5** | Restart the app (Flutter: hot restart) |
-| **Ctrl+F5** while live | Hot reload (Flutter), reload the windows (Electron) |
+| **Ctrl+F5** while live | Hot reload (Flutter), reload the JavaScript (React Native), reload the windows (Electron) |
 
 The app's console (`console.log`, Dart's `print`, native logs) streams into the **Debug Console**, with links to the line that logged. Build errors go to **Problems**, at the line in your code. Type `r`, `R`, `b`, `s` or `q` in the Debug Console to reload, restart, rebuild, take a screenshot or stop.
 
