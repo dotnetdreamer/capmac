@@ -6,13 +6,14 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { log, withStep, type EngineContext } from '../context.js';
-import { UserError } from '../errors.js';
+import { toErrorInfo, UserError } from '../errors.js';
 import { chooseAppleSignIn, signInOnAppleWebsite } from '../wsl/apple-web.js';
 import { loginAppleAccount } from '../wsl/apple-account.js';
 import { savedCertificatePassword, setUpAutomaticSigning } from '../wsl/apple-auto-signing.js';
 import { prepareAppleSigningDirectory } from '../wsl/apple-signing.js';
 import { signWslApplication } from '../wsl/compiler.js';
 import { DEVELOPER_MODE_STEPS, selectWslDevice, type WslDevice } from '../wsl/device.js';
+import { toolchainConfig } from '../wsl/index.js';
 import { loadWslOptions, type WslOptions } from '../wsl/settings.js';
 import { inspectWslToolchain, WslExecutor } from '../wsl/toolchain.js';
 import { installedHashesFor, installWda, profileCovers, profileTeam, stageWdaApp, wdaBundleId } from './wda.js';
@@ -38,6 +39,23 @@ export async function iphoneTouchState(cwd: string, device: Pick<WslDevice, 'udi
 }
 
 /**
+ * Touch for this iPhone in this app, and the iPhone as the device tools see it now: starting touch
+ * needs its iOS version and whether it is on the cable or Wi-Fi. Looked up only when touch is set up.
+ */
+export async function iphoneTouchTarget(cwd: string, udid: string): Promise<{ touch: TouchState; device: WslDevice }> {
+  const unknown: WslDevice = { udid, name: 'iPhone', connection: 'usb' };
+  const touch = await iphoneTouchState(cwd, { udid }).catch((): TouchState => ({ unavailable: 'Touch is unavailable', canSetUp: false }));
+  if (!('bundleId' in touch)) return { touch, device: unknown };
+  try {
+    const options = await loadWslOptions({}, cwd);
+    return { touch, device: await selectWslDevice(udid, { python: options.python }) };
+  } catch (error) {
+    const info = toErrorInfo(error);
+    return { touch: { unavailable: info.hint ? `${info.message} ${info.hint}` : info.message, canSetUp: false }, device: unknown };
+  }
+}
+
+/**
  * Signs WebDriverAgent for the app's team and installs it on the iPhone. Makes its App ID and
  * development profile first when the team has none for it yet (or not with this iPhone), after
  * one Apple sign-in, the same one setup uses.
@@ -52,7 +70,8 @@ export async function setUpIphoneTouch(input: { cwd: string; udid: string }, ctx
   const team = await profileTeam(path.resolve(input.cwd, options.profile));
   const bundleId = wdaBundleId(team);
 
-  const report = await inspectWslToolchain({ distro: options.distro, signerPath: options.signer }, { signal, reuseProbe: true });
+  // The tools the app's builds use: the check wants all of them (the SDK, the compiler, …), not just zsign.
+  const report = await inspectWslToolchain(toolchainConfig(options), { signal, reuseProbe: true });
   if (!report.ready || !report.distro || !report.tools) throw new UserError('This PC’s iPhone tools are not ready.', 'Run This PC’s setup again for this app.');
   const executor = new WslExecutor(report.distro);
 

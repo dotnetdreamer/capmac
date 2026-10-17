@@ -65,6 +65,29 @@ describe('an iPhone’s screen at this PC', () => {
     fakes.receiver.subscribes = 0;
   });
 
+  it('keeps touch off while another iPhone mirrors than the one touch drives', async () => {
+    const infos: Array<{ input: boolean; inputReason?: string }> = [];
+    const iphone8 = { ...iphone('808ccae4399545073522715663f015d9727366c4'), productType: 'iPhone10,4' };
+    const screen = new PhoneScreen(iphone8, { touch: helper }, { onFrame: () => undefined, onInfo: (info) => infos.push(info) });
+    await screen.start();
+    fakes.helpers.at(-1)!.finish();
+    await settle();
+    expect(screen.info?.input).toBe(true);
+    // The 14 Pro Max starts mirroring: a click would land on the iPhone 8, which nobody sees.
+    fakes.receiver.listener!.onState('mirroring', { name: 'IK 14 Pro Max', model: 'iPhone15,3', deviceId: 'CA:E5:70:45:CA:32' } as never);
+    expect(screen.info?.input).toBe(false);
+    expect(screen.info?.inputReason).toBe('IK 14 Pro Max is mirroring, but touch is for iPhone. Mirror iPhone instead, or pick IK 14 Pro Max as the target');
+    await expect(screen.still()).rejects.toThrow(/IK 14 Pro Max is mirroring/);
+    // The iPhone 8 mirrors instead: touch is back.
+    fakes.receiver.listener!.onState('mirroring', { name: 'iPhone', model: 'iPhone10,4', deviceId: '9A:1B:2C:3D:4E:5F' } as never);
+    expect(screen.info?.input).toBe(true);
+    expect(infos.at(-1)?.input).toBe(true);
+    screen.stop();
+    fakes.helpers.length = 0;
+    fakes.receiver.unsubscribed.length = 0;
+    fakes.receiver.subscribes = 0;
+  });
+
   it('moves touch to another iPhone or app while the picture goes on', async () => {
     const screen = new PhoneScreen(iphone('00008120-00012840269B401E'), { touch: { unavailable: 'Turn on touch to use the iPhone from here' } }, { onFrame: () => undefined });
     await screen.start();

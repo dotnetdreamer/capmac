@@ -54,7 +54,8 @@ function builderOutput(ctx: EngineContext): (text: string, stream: 'stdout' | 's
   };
 }
 
-function toolchainConfig(options: WslOptions, native = false): WslToolchainConfig {
+/** The tools a project's saved setup points at, as the toolchain check and the builds need them. */
+export function toolchainConfig(options: WslOptions, native = false): WslToolchainConfig {
   return { distro: options.distro, native, sdkPath: options.sdk, swiftcPath: options.swift, linkerPath: options.linker, signerPath: options.signer, swiftResourcePath: options.swiftResources,
     clangPath: options.clang, archivePath: options.archive, lipoPath: options.lipo, stripPath: options.strip,
     actoolPath: options.actool, ibtoolPath: options.ibtool, momcPath: options.momc, xcstringsPath: options.xcstrings };

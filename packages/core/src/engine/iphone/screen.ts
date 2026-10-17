@@ -54,6 +54,8 @@ export class PhoneScreen {
   private unsubscribe: ((options?: { now?: boolean }) => void) | null = null;
   private receiverState: ReceiverState = 'stopped';
   private firewallBlocked = false;
+  /** The iPhone mirroring now, as it named itself. */
+  private client: MirrorClient | null = null;
 
   constructor(private device: WslDevice, private readonly options: PhoneScreenOptions, private readonly handlers: PhoneScreenHandlers) {
     this.touch = options.touch;
@@ -114,6 +116,10 @@ export class PhoneScreen {
     const was = this.receiverState;
     this.receiverState = state;
     this.handlers.onClient?.(client);
+    if (client?.name !== this.client?.name || client?.model !== this.client?.model) {
+      this.client = client;
+      this.publishInfo();
+    }
     switch (state) {
       case 'starting':
       case 'waiting':
@@ -191,8 +197,20 @@ export class PhoneScreen {
     this.handlers.onTouch?.(ready, reason);
   }
 
+  /**
+   * The iPhone mirroring, when it isn't the one touch is for (by the name and model it gave the
+   * receiver): touch then stays off, so nobody drives a phone they can't see.
+   */
+  private otherPhone(): MirrorClient | null {
+    const client = this.client;
+    if (!client || !this.touch || 'unavailable' in this.touch) return null;
+    const sameModel = !client.model || !this.device.productType || client.model === this.device.productType;
+    return client.name === this.device.name && sameModel ? null : client;
+  }
+
   private publishInfo(): void {
-    const touch = this.wda?.ready === true;
+    const other = this.otherPhone();
+    const touch = this.wda?.ready === true && !other;
     const scale = 3;
     this.info = {
       t: 'screen', source: 'device', codec: 'h264',
@@ -200,7 +218,11 @@ export class PhoneScreen {
       scale,
       input: touch,
       inputMode: 'gestures',
-      ...(touch ? {} : { inputReason: this.touchReason || 'Touch needs Developer Mode on the iPhone' }),
+      ...(touch ? {} : {
+        inputReason: other
+          ? `${other.name} is mirroring, but touch is for ${this.device.name}. Mirror ${this.device.name} instead, or pick ${other.name} as the target`
+          : this.touchReason || 'Touch needs Developer Mode on the iPhone',
+      }),
     };
     this.handlers.onInfo?.(this.info);
   }
@@ -216,13 +238,15 @@ export class PhoneScreen {
   /** A full-size PNG: WebDriverAgent's when touch is on. */
   async still(): Promise<Buffer> {
     if (!this.wda?.ready) throw new UserError('Full-size screenshots of this iPhone need touch to be on.', 'Turn on touch, or use a screenshot of the pane.');
+    const other = this.otherPhone();
+    if (other) throw new UserError(`${other.name} is mirroring, but full-size screenshots come from ${this.device.name}.`, `Mirror ${this.device.name} instead, or pick ${other.name} as the target.`);
     return this.wda.screenshot();
   }
 
   /** Taps, swipes, text, keys and buttons (the pane's gestures mode). */
   input(event: InputEvent): void {
     const wda = this.wda;
-    if (!wda?.ready) return;
+    if (!wda?.ready || this.otherPhone()) return;
     void this.perform(wda, event).catch((error: unknown) => {
       const info = toErrorInfo(error);
       this.handlers.onLog?.('warn', `Touch: ${info.message}${info.hint ? ` ${info.hint}` : ''}`);

@@ -570,6 +570,8 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
     codec === 'h264' && stats?.fps === 0 ? t.simulator.still : null,
   ].filter(Boolean).join(' · ');
   const viewOnlyReason = mirrorOnly ? t.pc.screen.touchPlugIn : pc ? tidy(info?.inputReason) ?? t.pc.screen.touchOffWhy : device ? t.simulator.deviceViewOnly : tidy(info?.inputReason) ?? t.simulator.viewOnlyWhy;
+  // Another iPhone mirrors than the target: touch stays off (the engine says why), nothing to turn on.
+  const otherPhone = pc && mirroring !== null && mirroring !== target.name;
   const inputHelp = mode === 'touch' ? t.simulator.helpTouch : t.simulator.helpBasic;
   return (
     <div className="sim">
@@ -643,7 +645,7 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
                 {t.simulator.viewOnly}
               </span>
             </Tooltip>
-            {mirrorOnly ? null : pc ? (
+            {mirrorOnly || otherPhone ? null : pc ? (
               <Button size="sm" variant="ghost" icon="phone" busy={settingUpTouch} onClick={() => void setUpTouch()}>
                 {t.pc.screen.turnOnTouch}
               </Button>

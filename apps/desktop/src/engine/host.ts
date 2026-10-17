@@ -83,7 +83,7 @@ import {
   type Prompter,
   type VideoPacket,
 } from '@capmac/core/engine';
-import { PhoneScreen, iphoneTouchState, setUpIphoneTouch, receiverInstalled, setBundledReceiver, type TouchState } from '@capmac/core/engine/iphone/index';
+import { PhoneScreen, iphoneTouchState, iphoneTouchTarget, setUpIphoneTouch, receiverInstalled, setBundledReceiver } from '@capmac/core/engine/iphone/index';
 import { isSoundMode } from '@capmac/core/shared/electron';
 import { STREAM_CONFIG } from '@capmac/core/shared/stream';
 import type { ProbeResult, Target, TargetsResult } from '@capmac/core/shared/protocol';
@@ -836,13 +836,6 @@ function openScreen(streamId: string, mac: string, udid: string, port: MessagePo
   );
 }
 
-/** Touch for this iPhone in this app: WebDriverAgent's bundle id when it is set up, else why not. */
-function phoneTouch(capDir: string, udid: string): Promise<TouchState> {
-  return iphoneTouchState(capDir, { udid }).catch(() => ({ unavailable: 'Touch is unavailable', canSetUp: false }));
-}
-
-const phoneDevice = (udid: string) => ({ udid, name: 'iPhone', productVersion: undefined, connection: 'usb' as const });
-
 /**
  * A real iPhone at this PC, with no Mac: its screen mirrored over Wi-Fi, and touch through
  * WebDriverAgent. Studio keeps this stream open while it runs (the iPhone can't send its keyframe
@@ -860,18 +853,18 @@ async function openPhoneScreen(streamId: string, udid: string, projectPath: stri
   let scope = { projectPath, streamId };
   // The iPhone sends a keyframe only when mirroring starts: a dropped frame could never be made up.
   const flow = screenFlow(post, () => stream.requestKeyframe(), { dropWhenBehind: false });
-  const touch = await phoneTouch(project.capDir, udid);
+  const target = await iphoneTouchTarget(project.capDir, udid);
   let retargets = 0;
   const retarget = async (nextUdid: string, nextPath: string) => {
     const mine = ++retargets;
     const next = await loadProject(nextPath).catch(() => null);
     if (!next) return;
-    const nextTouch = await phoneTouch(next.capDir, nextUdid);
+    const nextTarget = await iphoneTouchTarget(next.capDir, nextUdid);
     if (mine !== retargets || screens.get(streamId)?.stream !== stream) return;
     scope = { projectPath: nextPath, streamId };
-    stream.retarget(phoneDevice(nextUdid), nextTouch);
+    stream.retarget(nextTarget.device, nextTarget.touch);
   };
-  const stream: PhoneScreen = new PhoneScreen(phoneDevice(udid), { touch }, {
+  const stream: PhoneScreen = new PhoneScreen(target.device, { touch: target.touch }, {
     onFrame: () => undefined,
     onVideo: flow.sendVideo,
     onInfo: (info) => {
