@@ -7,6 +7,7 @@ import { workspaceBus, type WorkspaceAction } from '../../app/commands';
 import { toast, useApp } from '../../state/app';
 import { call, errorInfo } from '../../state/engine';
 import { useMacs } from '../../state/macs';
+import { PhoneMirror, type MirrorPane } from '../../lib/phone-mirror';
 import { claimScreenPort } from '../../lib/screen-ports';
 import { both } from '../../state/actions';
 import { Button, IconButton } from '../../ui/Button';
@@ -94,6 +95,28 @@ export function CompatibleNote({ fallback, onRetry, onRestart }: { fallback: Str
 /** An iPhone mirroring to this PC over Wi-Fi while none is plugged in or paired: its picture, no touch. */
 export const MIRROR_TARGET: Target = { kind: 'device', udid: 'wifi-mirror', name: 'iPhone', os: '', osVersion: '', state: 'available', available: true };
 
+let mirror: PhoneMirror | null = null;
+
+/** The iPhone mirroring to this PC: one decoder for every This-PC pane, kept while Studio runs (see phone-mirror.ts). */
+function phoneMirror(): PhoneMirror {
+  if (mirror) return mirror;
+  const created = new PhoneMirror({
+    createWorker: () => new Worker(new URL('../../workers/screen.worker.ts', import.meta.url), { type: 'module', name: 'capmac iphone mirror' }),
+    open: async ({ udid, projectPath }) => {
+      const opened = await window.capmac.invoke('app:screen-open', { udid, backend: 'wsl', projectPath });
+      return { streamId: opened.streamId, port: await claimScreenPort(opened.streamId) };
+    },
+    stop: (streamId) => call('screen.stop', { streamId }),
+    errorInfo,
+  });
+  // The engine stopped: its stream went with it (it restarts by itself).
+  useApp.subscribe((state, prev) => {
+    if (state.engine.state === 'crashed' && prev.engine.state !== 'crashed') created.lost({ message: t.engine.stopped, hint: t.engine.restartedHint, expected: true });
+  });
+  mirror = created;
+  return created;
+}
+
 /**
  * The live screen of a simulator, of an iPhone plugged into the Mac, or of an iPhone mirroring to
  * this PC: a canvas fed by a worker that decodes frames off the main thread.
@@ -103,13 +126,16 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
   // No iPhone found at this PC, only one mirroring to it: no touch to set up.
   const mirrorOnly = pc && target.udid === MIRROR_TARGET.udid;
   const device = target.kind === 'device';
-  const streamIdRef = useRef<string | null>(null);
   const macRoute = useMacs((s) => (mac ? s.macs.find((m) => m.name === mac)?.route ?? null : null));
   const [targetBitrate, setTargetBitrate] = useState<number | null>(null);
   const macRtt = useMacs((s) => (mac ? s.macs.find((m) => m.name === mac)?.rttMs ?? null : null));
   const stageRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const workerRef = useRef<Worker | null>(null);
+  // This PC: the shared mirror, while this pane shows it.
+  const mirrorRef = useRef<MirrorPane | null>(null);
+  /** A message for this pane's decoder: its own worker, or the shared mirror's. */
+  const post = useCallback((message: unknown) => (pc ? mirrorRef.current?.post(message) : workerRef.current?.postMessage(message)), [pc]);
   const prefer = useApp((s) => s.settings?.simulatorStream ?? 'smooth');
   const [state, setState] = useState<StreamState>({ kind: 'connecting' });
   const [info, setInfo] = useState<ScreenInfo | null>(null);
@@ -145,10 +171,37 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
     }
   }, [mac]);
 
+  // What the decoder says about the stream: its own news and the engine's, passed on.
+  const onScreenMessage = useCallback((m: MessageEvent['data']) => {
+    if (m.type === 'frame-size') setFrameSize({ width: m.width, height: m.height });
+    else if (m.type === 'mirror-client') setMirroring(m.name);
+    else if (m.type === 'first-frame') {
+      setHasFrame(true);
+      setPreparing(null);
+    } else if (m.type === 'stats') setStats({ fps: m.fps, kbps: m.kbps, decodeMs: m.decodeMs, latencyMs: m.latencyMs, latencyP95Ms: m.latencyP95Ms, inputMs: m.inputMs });
+    else if (m.type === 'info') setInfo(m.info);
+    else if (m.type === 'status') setTargetBitrate(m.bitrate);
+    else if (m.type === 'preparing') setPreparing({ stage: m.stage, xcode: m.xcode });
+    else if (m.type === 'device-wait') setWait(m.wait);
+    else if (m.type === 'codec') {
+      setCodec(m.codec);
+      setFallback(m.fallback);
+      if (m.fallback) setAnnounce(t.simulator.switched(tidy(m.fallback.message)));
+    } else if (m.type === 'state') setState(m.state === 'ended' ? { kind: 'ended', error: m.error } : { kind: m.state });
+  }, []);
+  const resetStream = () => {
+    setState({ kind: 'connecting' });
+    setHasFrame(false);
+    setPreparing(null);
+    setWait(null);
+    setMirroring(null);
+    setFallback(null);
+  };
+
   // Start the stream: worker + canvas + MessagePort from the engine.
   useEffect(() => {
     const host = hostRef.current;
-    if (!host) return;
+    if (pc || !host) return;
     // A fresh canvas per stream: control of a canvas can be handed to a worker only once.
     const canvas = document.createElement('canvas');
     canvas.className = 'sim__canvas';
@@ -160,42 +213,13 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
     workerRef.current = worker;
     const offscreen = canvas.transferControlToOffscreen();
     worker.postMessage({ type: 'canvas', canvas: offscreen }, [offscreen]);
-    // A mirrored iPhone sends a keyframe only when mirroring starts: never skip frames to wait for one.
-    if (pc) worker.postMessage({ type: 'keyframes', onRequest: false });
-    worker.onmessage = (e) => {
-      const m = e.data;
-      if (m.type === 'frame-size') setFrameSize({ width: m.width, height: m.height });
-      else if (m.type === 'mirror-client') setMirroring(m.name);
-      // Without keyframes on request, a broken picture comes back only when mirroring starts again.
-      else if (m.type === 'decoder-error' && pc) setWait('restart-mirroring');
-      else if (m.type === 'first-frame') {
-        setHasFrame(true);
-        setPreparing(null);
-      } else if (m.type === 'stats') setStats({ fps: m.fps, kbps: m.kbps, decodeMs: m.decodeMs, latencyMs: m.latencyMs, latencyP95Ms: m.latencyP95Ms, inputMs: m.inputMs });
-      else if (m.type === 'info') setInfo(m.info);
-      else if (m.type === 'status') setTargetBitrate(m.bitrate);
-      else if (m.type === 'preparing') setPreparing({ stage: m.stage, xcode: m.xcode });
-      else if (m.type === 'device-wait') setWait(m.wait);
-      else if (m.type === 'codec') {
-        setCodec(m.codec);
-        setFallback(m.fallback);
-        if (m.fallback) setAnnounce(t.simulator.switched(tidy(m.fallback.message)));
-      } else if (m.type === 'state') setState(m.state === 'ended' ? { kind: 'ended', error: m.error } : { kind: m.state });
-    };
-    setState({ kind: 'connecting' });
-    setHasFrame(false);
-    setPreparing(null);
-    setWait(null);
-    setMirroring(null);
-    setFallback(null);
+    worker.onmessage = (e) => onScreenMessage(e.data);
+    resetStream();
     (async () => {
       try {
         const maxSize = canvasPixels.current ? videoSizeFor(canvasPixels.current, null) : undefined;
-        const opened = await window.capmac.invoke('app:screen-open', pc
-          ? { udid: target.udid, maxSize, backend: 'wsl', projectPath }
-          : { mac, udid: target.udid, maxSize, device: device ? { name: target.name } : undefined });
+        const opened = await window.capmac.invoke('app:screen-open', { mac, udid: target.udid, maxSize, device: device ? { name: target.name } : undefined });
         streamId = opened.streamId;
-        streamIdRef.current = opened.streamId;
         const port = await claimScreenPort(opened.streamId);
         if (disposed) {
           port.close();
@@ -211,10 +235,28 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
       worker.terminate();
       canvas.remove();
       workerRef.current = null;
-      streamIdRef.current = null;
       if (streamId) void call('screen.stop', { streamId }).catch(() => undefined);
     };
-  }, [mac, target.udid, target.name, device, epoch, prefer, pc, projectPath]);
+  }, [mac, target.udid, target.name, device, epoch, prefer, pc, onScreenMessage]);
+
+  // This PC: the shared mirror draws on a fresh canvas while this pane is shown, and says how the
+  // stream is now. Before the first paint, so its picture shows at once.
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    if (!pc || !host || !projectPath) return;
+    const canvas = document.createElement('canvas');
+    canvas.className = 'sim__canvas';
+    canvas.setAttribute('aria-hidden', 'true');
+    host.prepend(canvas);
+    resetStream();
+    const pane = phoneMirror().attach({ udid: target.udid, projectPath }, canvas.transferControlToOffscreen(), onScreenMessage);
+    mirrorRef.current = pane;
+    return () => {
+      pane.detach();
+      mirrorRef.current = null;
+      canvas.remove();
+    };
+  }, [pc, target.udid, projectPath, epoch, onScreenMessage]);
 
   // The iPhone's screen is up but no picture came: its screen is probably off.
   useEffect(() => {
@@ -251,8 +293,8 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
   useEffect(() => {
     const dpr = window.devicePixelRatio || 1;
     canvasPixels.current = Math.round(Math.max(screenW, screenH) * dpr);
-    workerRef.current?.postMessage({ type: 'size', width: Math.round(screenW * dpr), height: Math.round(screenH * dpr) });
-  }, [screenW, screenH, epoch]);
+    post({ type: 'size', width: Math.round(screenW * dpr), height: Math.round(screenH * dpr) });
+  }, [screenW, screenH, epoch, post]);
 
   // Smooth stream: keep the video about as sharp as the canvas shows it (settled sizes only).
   const devicePixels = info?.points && info.scale ? Math.round(Math.max(info.points.width, info.points.height) * info.scale) : null;
@@ -263,16 +305,16 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
       const want = videoSizeFor(canvasPixels.current, devicePixels);
       if (sentVideoSize.current && Math.abs(want - sentVideoSize.current) / sentVideoSize.current < 0.12) return;
       sentVideoSize.current = want;
-      workerRef.current?.postMessage({ type: 'video-size', maxSize: want });
+      post({ type: 'video-size', maxSize: want });
     }, 600);
     return () => window.clearTimeout(timer);
-  }, [codec, screenW, screenH, devicePixels]);
+  }, [codec, screenW, screenH, devicePixels, post]);
 
   // ─── Input ───────────────────────────────────────────────────────────────
   // 'touch' (capmac's helper): fingers stream as they move. 'gestures' (AXe): whole taps and swipes.
   const mode = info?.input ? (info.inputMode ?? 'gestures') : null;
   const canInput = mode !== null;
-  const send = useCallback((event: InputEvent) => workerRef.current?.postMessage({ type: 'input', event }), []);
+  const send = useCallback((event: InputEvent) => post({ type: 'input', event }), [post]);
   const point = (e: { clientX: number; clientY: number }) => {
     const r = hostRef.current!.getBoundingClientRect();
     return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)), px: e.clientX - r.left, py: e.clientY - r.top };
@@ -456,8 +498,8 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
 
   const retrySmooth = useCallback(() => {
     setFallback(null);
-    workerRef.current?.postMessage({ type: 'retry-smooth' });
-  }, []);
+    post({ type: 'retry-smooth' });
+  }, [post]);
   // This PC iPhone: sign and install WebDriverAgent so the screen takes taps (one Apple sign-in).
   const [settingUpTouch, setSettingUpTouch] = useState(false);
   const setUpTouch = useCallback(async () => {
@@ -466,7 +508,8 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
     try {
       await call('iphone.setUpTouch', { projectPath, udid: target.udid });
       toast({ tone: 'success', title: t.pc.screen.touchOn });
-      setEpoch((e) => e + 1);
+      // Touch starts on the stream that is open: a new one could not show the picture again.
+      mirrorRef.current?.refreshTouch();
     } catch (err) {
       const e = errorInfo(err);
       if (!e.cancelled) toast({ tone: 'critical', title: t.pc.screen.touchFailed, body: both(e) });
@@ -485,14 +528,20 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
     }
   }, [mac, target.udid, target.name]);
 
+  /** Where a full-size screenshot comes from: the Mac's simulator, or this PC's iPhone stream. */
+  const shotSource = (): { mac: string } | { streamId: string } => {
+    const streamId = pc ? mirrorRef.current?.streamId : null;
+    return streamId ? { streamId } : { mac: mac! };
+  };
+
   // Workspace command: Ctrl+Shift+S
   useEffect(() => {
     const onAction = (e: Event) => {
-      if ((e as CustomEvent<WorkspaceAction>).detail === 'screenshot') void screenshot(pc && streamIdRef.current ? { streamId: streamIdRef.current } : { mac: mac! }, target, 'save');
+      if ((e as CustomEvent<WorkspaceAction>).detail === 'screenshot') void screenshot(shotSource(), target, 'save');
     };
     workspaceBus.addEventListener('action', onAction);
     return () => workspaceBus.removeEventListener('action', onAction);
-  }, [mac, target]);
+  }, [mac, target, pc]);
 
   const ended = state.kind === 'ended';
   // The connection dropped, or the iPhone was unplugged: keep the last frame, dimmed, until the picture is back.
@@ -639,8 +688,8 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
           label={t.simulator.screenshot}
           placement="top-start"
           items={[
-            { id: 'save', label: t.simulator.saveShot, icon: 'download', shortcut: 'Ctrl+Shift+S', onSelect: () => void screenshot(pc && streamIdRef.current ? { streamId: streamIdRef.current } : { mac: mac! }, target, 'save') },
-            { id: 'copy', label: t.simulator.copyShot, icon: 'copy', onSelect: () => void screenshot(pc && streamIdRef.current ? { streamId: streamIdRef.current } : { mac: mac! }, target, 'copy') },
+            { id: 'save', label: t.simulator.saveShot, icon: 'download', shortcut: 'Ctrl+Shift+S', onSelect: () => void screenshot(shotSource(), target, 'save') },
+            { id: 'copy', label: t.simulator.copyShot, icon: 'copy', onSelect: () => void screenshot(shotSource(), target, 'copy') },
           ]}
         />
         <span className="sim__spacer" />
@@ -659,7 +708,7 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
             ) : reconnecting ? (
               t.common.reconnecting
             ) : waiting ? (
-              wait === 'device' ? t.simulator.waitingCable : t.simulator.waitingAllow
+              pc ? (wait === 'firewall' ? t.pc.screen.blocked : t.pc.screen.waiting) : wait === 'device' ? t.simulator.waitingCable : t.simulator.waitingAllow
             ) : (
               t.common.connecting
             )}

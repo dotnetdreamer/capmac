@@ -27,7 +27,7 @@ import { installSkill, removeSkill, skillProjectRoot, skillStatus } from '@capma
 import { capmacCommandStatus, installCapmacCommand, removeCapmacCommand } from '@capmac/core/engine/capmac-command';
 import { loadGlobalConfig, streamPreference } from '@capmac/core/engine/config';
 import { disableTakeover, enableTakeover, ensureTakeoverDefault, samePath, takeoverStatus, type TakeoverInstall } from '@capmac/core/engine/takeover';
-import { agentPath, cliDir, electronSampleDir, flutterSampleDir, iconsDir, outDir, reactNativeSampleDir, remoteModulesDir, sampleDir } from './paths.js';
+import { agentPath, cliDir, electronSampleDir, flutterSampleDir, iconsDir, mirrorReceiverDir, outDir, reactNativeSampleDir, remoteModulesDir, sampleDir } from './paths.js';
 import { SettingsStore } from './settings.js';
 import { AppTray } from './tray.js';
 import { Updates } from './updates.js';
@@ -460,6 +460,7 @@ app.whenReady().then(async () => {
     reactNativeSampleDir: reactNativeSampleDir(),
     samplesHome: path.join(app.getPath('documents'), 'CapMac Studio'),
     remoteModulesDir: remoteModulesDir(),
+    mirrorReceiverDir: mirrorReceiverDir(),
     settings: { verbose: settings.get().verbose, osLogs: settings.get().osLogs },
   }), {
     onEvents: onEngineEvents,

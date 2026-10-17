@@ -1390,8 +1390,11 @@ export const en = {
       mirrorAgainTitle: 'Start mirroring again to see it here',
       mirrorAgainBody: (name: string) => `On your iPhone, open Control Center, tap Screen Mirroring, tap Stop Mirroring, then choose ${name} again`,
       firewallTitle: 'Windows Firewall is blocking the screen receiver',
-      firewallBody: 'Open Windows Security, go to Firewall & network protection, choose Allow an app through firewall, then tick uxplay.exe for this network. Then try again',
+      firewallBody: 'If Windows asks about uxplay.exe, click Allow. If it doesn’t, open Windows Security, go to Firewall & network protection, choose Allow an app through firewall, then tick uxplay.exe for this network',
       mirroring: (name: string) => `${name} is mirroring`,
+      /** The footer while no picture comes. */
+      waiting: 'Waiting for your iPhone',
+      blocked: 'Blocked by Windows Firewall',
       touchPlugIn: 'To tap and type from here, plug in your iPhone with a cable, then turn on touch',
       turnOnTouch: 'Turn on touch',
       touchOn: 'Touch is on for this iPhone',

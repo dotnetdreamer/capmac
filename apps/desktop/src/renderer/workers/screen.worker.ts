@@ -12,7 +12,8 @@ import { parseVideoConfig, STREAM_HEADER_BYTES } from '@capmac/core/shared/strea
 import type { ScreenPortCommand, ScreenPortMessage } from '../../shared/contract';
 
 type InMessage =
-  | { type: 'canvas'; canvas: OffscreenCanvas }
+  /** null: the pane closed. Decoding goes on, for a source that can't send a keyframe when asked. */
+  | { type: 'canvas'; canvas: OffscreenCanvas | null }
   | { type: 'port'; port: MessagePort }
   | { type: 'size'; width: number; height: number }
   | { type: 'input'; event: unknown }
@@ -23,6 +24,8 @@ type InMessage =
   | { type: 'window-action'; window: number; action: 'close' | 'minimize' | 'zoom' }
   /** false: the source cannot send a keyframe when asked (a mirrored iPhone), so never skip frames to wait for one. */
   | { type: 'keyframes'; onRequest: boolean }
+  /** An iPhone at this PC: touch for this iPhone and app from now on (the picture goes on). */
+  | { type: 'phone-target'; udid: string; projectPath: string }
   /** An app's dialogs and sound: a command for the engine, as it is. */
   | { type: 'dialog'; command: Extract<ScreenPortCommand, { type: 'dialog-answer' | 'dialog-list' | 'dialog-mkdir' | 'sound' }> };
 
@@ -291,13 +294,16 @@ scope.onmessage = (e) => {
   switch (message.type) {
     case 'canvas':
       canvas = message.canvas;
-      ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+      ctx = canvas?.getContext('2d', { alpha: false, desynchronized: true }) ?? null;
       // A new canvas for a decoder that already has a picture: show it at once.
       if (latestFrame) drawFrame();
       else drawBitmap();
       break;
     case 'keyframes':
       keyframesOnRequest = message.onRequest;
+      break;
+    case 'phone-target':
+      port?.postMessage({ type: 'phone-target', udid: message.udid, projectPath: message.projectPath });
       break;
     case 'port':
       port = message.port;

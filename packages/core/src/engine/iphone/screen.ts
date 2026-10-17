@@ -38,20 +38,26 @@ export interface PhoneScreenHandlers extends Omit<ScreenHandlers, 'onWaiting'> {
   onClient?(client: MirrorClient | null): void;
 }
 
+const touchReasonFor = (touch: PhoneScreenOptions['touch']) => (touch && 'unavailable' in touch ? touch.unavailable : 'Touch is starting');
+
 export class PhoneScreen {
   info: ScreenInfo | null = null;
   readonly fallback = null;
   private wda: WdaControl | null = null;
   private wdaStarting: Promise<void> | null = null;
+  /** Counts touch targets: a helper that finishes starting for an earlier one stops again. */
+  private touchTarget = 0;
   private active = false;
+  private touch: PhoneScreenOptions['touch'];
   private touchReason: string;
   private pixels: { width: number; height: number } | null = null;
-  private unsubscribe: (() => void) | null = null;
+  private unsubscribe: ((options?: { now?: boolean }) => void) | null = null;
   private receiverState: ReceiverState = 'stopped';
   private firewallBlocked = false;
 
-  constructor(readonly device: WslDevice, private readonly options: PhoneScreenOptions, private readonly handlers: PhoneScreenHandlers) {
-    this.touchReason = options.touch && 'unavailable' in options.touch ? options.touch.unavailable : 'Touch is starting';
+  constructor(private device: WslDevice, private readonly options: PhoneScreenOptions, private readonly handlers: PhoneScreenHandlers) {
+    this.touch = options.touch;
+    this.touchReason = touchReasonFor(options.touch);
   }
 
   get udid(): string {
@@ -78,6 +84,7 @@ export class PhoneScreen {
   async start(): Promise<void> {
     if (this.active) return;
     this.active = true;
+    this.receiverState = 'stopped';
     this.publishInfo();
     this.handlers.onCodec?.('h264', null);
     const receiver = mirrorReceiver();
@@ -104,6 +111,7 @@ export class PhoneScreen {
 
   private onReceiverState(state: ReceiverState, client: MirrorClient | null): void {
     if (!this.active) return;
+    const was = this.receiverState;
     this.receiverState = state;
     this.handlers.onClient?.(client);
     switch (state) {
@@ -119,14 +127,37 @@ export class PhoneScreen {
         this.handlers.onState?.('streaming');
         break;
       case 'stopped':
-        this.handlers.onEnd?.(toErrorInfo(new UserError('The screen receiver stopped.', 'Try again.', mirrorReceiver().lastLines)));
+        // Not when this screen subscribes to a receiver that start() is about to start.
+        if (was !== 'stopped') this.handlers.onEnd?.(toErrorInfo(new UserError('The screen receiver stopped.', 'Try again.', mirrorReceiver().lastLines)));
         break;
     }
   }
 
+  /**
+   * Touch for another iPhone or app (Studio's pane moved to another target or project), while the
+   * picture goes on as it is. Touch that is on, or starting, with the same helper on the same iPhone
+   * stays on.
+   */
+  retarget(device: WslDevice, touch: PhoneScreenOptions['touch']): void {
+    const helper = (t: PhoneScreenOptions['touch']) => (t && 'bundleId' in t ? t.bundleId : null);
+    const same = device.udid === this.device.udid && helper(touch) !== null && helper(touch) === helper(this.touch);
+    this.device = device;
+    this.touch = touch;
+    if (same && (this.wda || this.wdaStarting)) return;
+    this.touchTarget += 1;
+    const wda = this.wda;
+    this.wda = null;
+    this.wdaStarting = null;
+    void wda?.stop();
+    this.touchReason = touchReasonFor(touch);
+    this.publishInfo();
+    if (this.active) void this.startTouch();
+  }
+
   private startTouch(): Promise<void> {
-    const touch = this.options.touch;
+    const touch = this.touch;
     if (!touch || 'unavailable' in touch || this.wda || this.wdaStarting) return this.wdaStarting ?? Promise.resolve();
+    const target = this.touchTarget;
     const wda = new WdaControl(this.device, touch.bundleId, {
       python: this.options.python,
       onEnded: (reason) => {
@@ -135,21 +166,23 @@ export class PhoneScreen {
         this.setTouch(false, `Touch stopped: ${reason}`);
       },
     });
-    this.wdaStarting = wda.start().then(
+    const starting: Promise<void> = wda.start().then(
       () => {
-        if (!this.active) return void wda.stop();
+        if (!this.active || target !== this.touchTarget) return void wda.stop();
         this.wda = wda;
         this.setTouch(true);
       },
       (error: unknown) => {
         void wda.stop();
+        if (target !== this.touchTarget) return;
         const info = toErrorInfo(error);
         this.setTouch(false, info.hint ? `${info.message} ${info.hint}` : info.message);
       },
     ).finally(() => {
-      this.wdaStarting = null;
+      if (this.wdaStarting === starting) this.wdaStarting = null;
     });
-    return this.wdaStarting;
+    this.wdaStarting = starting;
+    return starting;
   }
 
   private setTouch(ready: boolean, reason?: string): void {
@@ -222,18 +255,22 @@ export class PhoneScreen {
     }
   }
 
-  /** Leaves the receiver (it keeps running a while, so the iPhone keeps mirroring) and stops touch. */
-  stop(): void {
+  /**
+   * Leaves the receiver and stops touch. The receiver keeps running a while, so the iPhone keeps
+   * mirroring for a window that reloads; `forGood`: the screen was closed for good, so the receiver
+   * stops at once when no other screen uses it.
+   */
+  stop({ forGood = false }: { forGood?: boolean } = {}): void {
     this.active = false;
-    this.unsubscribe?.();
+    this.unsubscribe?.({ now: forGood });
     this.unsubscribe = null;
     const wda = this.wda;
     this.wda = null;
     void wda?.stop();
   }
 
-  dispose(): void {
-    this.stop();
+  dispose(options?: { forGood?: boolean }): void {
+    this.stop(options);
   }
 }
 

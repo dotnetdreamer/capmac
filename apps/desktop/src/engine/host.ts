@@ -83,13 +83,14 @@ import {
   type Prompter,
   type VideoPacket,
 } from '@capmac/core/engine';
-import { PhoneScreen, iphoneTouchState, setUpIphoneTouch, receiverInstalled } from '@capmac/core/engine/iphone/index';
+import { PhoneScreen, iphoneTouchState, setUpIphoneTouch, receiverInstalled, setBundledReceiver, type TouchState } from '@capmac/core/engine/iphone/index';
 import { isSoundMode } from '@capmac/core/shared/electron';
 import { STREAM_CONFIG } from '@capmac/core/shared/stream';
 import type { ProbeResult, Target, TargetsResult } from '@capmac/core/shared/protocol';
 import type { RemoteDoorStatus } from '@capmac/core/shared/remote-door';
 import {
   inputEventSchema,
+  phoneTargetSchema,
   type CallResult,
   type EngineMethod,
   type Envelope,
@@ -835,7 +836,18 @@ function openScreen(streamId: string, mac: string, udid: string, port: MessagePo
   );
 }
 
-/** A real iPhone at this PC, with no Mac: its screen mirrored over Wi-Fi, and touch through WebDriverAgent. */
+/** Touch for this iPhone in this app: WebDriverAgent's bundle id when it is set up, else why not. */
+function phoneTouch(capDir: string, udid: string): Promise<TouchState> {
+  return iphoneTouchState(capDir, { udid }).catch(() => ({ unavailable: 'Touch is unavailable', canSetUp: false }));
+}
+
+const phoneDevice = (udid: string) => ({ udid, name: 'iPhone', productVersion: undefined, connection: 'usb' as const });
+
+/**
+ * A real iPhone at this PC, with no Mac: its screen mirrored over Wi-Fi, and touch through
+ * WebDriverAgent. Studio keeps this stream open while it runs (the iPhone can't send its keyframe
+ * again), so touch follows Studio's pane to another iPhone or app ('phone-target').
+ */
 async function openPhoneScreen(streamId: string, udid: string, projectPath: string, port: MessagePortMain, maxSize?: number): Promise<void> {
   const post = (message: ScreenPortMessage) => port.postMessage(message);
   let project;
@@ -845,11 +857,21 @@ async function openPhoneScreen(streamId: string, udid: string, projectPath: stri
     post({ type: 'state', state: 'ended', error: toErrorInfo(err) });
     return;
   }
-  const scope = { projectPath, streamId };
+  let scope = { projectPath, streamId };
   // The iPhone sends a keyframe only when mirroring starts: a dropped frame could never be made up.
   const flow = screenFlow(post, () => stream.requestKeyframe(), { dropWhenBehind: false });
-  const touch = await iphoneTouchState(project.capDir, { udid }).catch(() => ({ unavailable: 'Touch is unavailable', canSetUp: false }));
-  const stream: PhoneScreen = new PhoneScreen({ udid, name: 'iPhone', productVersion: undefined, connection: 'usb' }, { touch }, {
+  const touch = await phoneTouch(project.capDir, udid);
+  let retargets = 0;
+  const retarget = async (nextUdid: string, nextPath: string) => {
+    const mine = ++retargets;
+    const next = await loadProject(nextPath).catch(() => null);
+    if (!next) return;
+    const nextTouch = await phoneTouch(next.capDir, nextUdid);
+    if (mine !== retargets || screens.get(streamId)?.stream !== stream) return;
+    scope = { projectPath: nextPath, streamId };
+    stream.retarget(phoneDevice(nextUdid), nextTouch);
+  };
+  const stream: PhoneScreen = new PhoneScreen(phoneDevice(udid), { touch }, {
     onFrame: () => undefined,
     onVideo: flow.sendVideo,
     onInfo: (info) => {
@@ -888,8 +910,14 @@ async function openPhoneScreen(streamId: string, udid: string, projectPath: stri
         flow.reset();
         void stream.start().catch((err) => post({ type: 'state', state: 'ended', error: toErrorInfo(err) }));
         break;
+      case 'phone-target': {
+        const parsed = phoneTargetSchema.safeParse(message);
+        if (parsed.success) void retarget(parsed.data.udid, parsed.data.projectPath);
+        break;
+      }
     }
   });
+  // The window closed or reloaded: the receiver keeps running a while, for a reloaded one to catch up.
   port.on('close', () => closeScreen(streamId));
   port.start();
   screens.set(streamId, { stream, port });
@@ -900,11 +928,13 @@ async function openPhoneScreen(streamId: string, udid: string, projectPath: stri
   );
 }
 
-function closeScreen(streamId: string): void {
+/** `forGood`: the renderer closed it (not a closed or reloaded window), so a This-PC iPhone's receiver can stop at once. */
+function closeScreen(streamId: string, { forGood = false }: { forGood?: boolean } = {}): void {
   const entry = screens.get(streamId);
   if (!entry) return;
   screens.delete(streamId);
-  entry.stream.dispose();
+  if (entry.stream instanceof PhoneScreen) entry.stream.dispose({ forGood });
+  else entry.stream.dispose();
   try {
     entry.port.close();
   } catch {
@@ -1082,7 +1112,7 @@ const handlers: Handlers = {
     const name = mac ?? project.config.host ?? (await defaultMacName());
     return { text: await readFromMac(await link(name).session(), project, logPath) };
   },
-  'screen.stop': async ({ streamId }) => closeScreen(streamId),
+  'screen.stop': async ({ streamId }) => closeScreen(streamId, { forGood: true }),
   // ── A real iPhone on this PC (the WSL backend), with no Mac ──
   'iphone.screenReady': async ({ projectPath, udid }) => {
     const project = await loadProject(projectPath);
@@ -1217,6 +1247,7 @@ parent.on('message', (e) => {
       settings = message.init.settings;
       setAgentBundlePath(message.init.agentPath);
       if (message.init.remoteModulesDir) setNodeDataChannelDir(message.init.remoteModulesDir);
+      setBundledReceiver(message.init.mirrorReceiverDir);
       send({ kind: 'ready' });
       break;
     case 'call':

@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Builds CapMac's screen-mirroring receiver for Windows: UxPlay (GPL-3.0, https://github.com/FDH2/UxPlay)
 # at a pinned commit with capmac-uxplay.patch, plus only the GStreamer pieces its forwarding path uses.
-# The engine runs it from %LOCALAPPDATA%\CapMac\mirror-receiver\<RECEIVER_VERSION> (receiver.ts).
+# Studio's installer ships it in resources\mirror-receiver: set CAPMAC_MIRROR_RECEIVER to the receiver/
+# folder this makes before npm run desktop:build (apps/desktop/scripts/mirror-receiver.mjs). A development
+# engine runs it from %LOCALAPPDATA%\CapMac\mirror-receiver\<RECEIVER_VERSION> (receiver.ts).
 #
 # Run in an MSYS2 UCRT64 shell (a portable MSYS2 is enough: https://github.com/msys2/msys2-installer
 # releases, msys2-base-x86_64-*.tar.xz), from any empty folder:
 #   bash <repo>/packages/core/receiver/build.sh
-# Out: receiver/ (the folder to install) and capmac-mirror-receiver-<version>.zip with its SHA-256.
+# Out: receiver/ (the folder to ship or install) and capmac-mirror-receiver-<version>.zip with its SHA-256.
 set -euo pipefail
 
 UXPLAY_COMMIT=4e95a9ec013c52d8555d88dbc55abe346e94d56e # UxPlay 1.74: its own mDNS, so no Bonjour on Windows

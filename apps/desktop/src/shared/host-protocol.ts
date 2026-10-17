@@ -21,6 +21,8 @@ export interface HostInit {
   samplesHome: string;
   /** node-datachannel for remote access (resources/remote when packaged; null: from node_modules). */
   remoteModulesDir: string | null;
+  /** The screen-mirroring receiver the installer ships (resources/mirror-receiver; null: not packaged). */
+  mirrorReceiverDir: string | null;
   settings: HostSettings;
 }
 

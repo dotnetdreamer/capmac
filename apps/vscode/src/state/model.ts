@@ -154,6 +154,8 @@ export class Model implements vscode.Disposable {
       reactNativeSampleDir: sample('hello-react-native'),
       samplesHome: path.join(os.homedir(), 'Documents', 'CapMac'),
       remoteModulesDir: existsSync(dist('remote', 'node_modules')) ? dist('remote') : null,
+      // Only Studio's installer ships the screen-mirroring receiver: the engine looks for one set up on this PC.
+      mirrorReceiverDir: null,
       settings: this.hostSettings(),
     });
     this.client = new EngineClient(

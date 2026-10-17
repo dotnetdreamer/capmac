@@ -101,9 +101,33 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'CLI help failed.' }
       - name: Pack CLI
         run: npm pack --workspace capmac --ignore-scripts --pack-destination "$env:RUNNER_TEMP"
+      # This PC's iPhone screen: the screen-mirroring receiver (UxPlay, GPL-3.0) the installers
+      # ship, made by packages/core/receiver/build.sh. Kept between runs while the recipe is the same.
+      - name: Restore the screen receiver
+        id: receiver
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ runner.temp }}/mirror-receiver/receiver
+            ${{ runner.temp }}/mirror-receiver/capmac-mirror-receiver-*.zip
+          key: mirror-receiver-${{ hashFiles('packages/core/receiver/**') }}
+      - uses: msys2/setup-msys2@v2
+        if: steps.receiver.outputs.cache-hit != 'true'
+        with:
+          msystem: UCRT64
+          update: true
+          install: git
+      - name: Build the screen receiver
+        if: steps.receiver.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: |
+          dir="$(cygpath -u "$RUNNER_TEMP")/mirror-receiver"
+          mkdir -p "$dir" && cd "$dir"
+          bash "$(cygpath -u "$GITHUB_WORKSPACE")/packages/core/receiver/build.sh"
       - name: Build Windows installers and portable executables
         run: npm run desktop:build
         env:
+          CAPMAC_MIRROR_RECEIVER: ${{ runner.temp }}/mirror-receiver/receiver
           CAPMAC_UPDATE_URL: ${{ vars.CAPMAC_UPDATE_URL || format('https://github.com/{0}/releases/latest/download/', github.repository) }}
           CAPMAC_RELEASE_NOTES_URL: ${{ vars.CAPMAC_RELEASE_NOTES_URL || format('https://github.com/{0}/releases/tag/v{{version}}', github.repository) }}
           CAPMAC_DEFAULT_SIGNAL_URL: ${{ vars.CAPMAC_DEFAULT_SIGNAL_URL }}
@@ -134,6 +158,12 @@ jobs:
           foreach ($arch in @('x64', 'arm64')) {
             if (-not $feed.Contains("capmac-studio-$env:RELEASE_VERSION-$arch-setup.exe")) {
               throw "Update feed is missing the $arch installer."
+            }
+          }
+          foreach ($unpacked in @('win-unpacked', 'win-arm64-unpacked')) {
+            $receiver = Join-Path $releaseDir "$unpacked/resources/mirror-receiver/bin/uxplay.exe"
+            if (-not (Test-Path -LiteralPath $receiver -PathType Leaf)) {
+              throw "The $unpacked app is missing the screen receiver."
             }
           }
       - uses: actions/upload-artifact@v7

@@ -20,10 +20,12 @@ files:
   - '!out/sample-flutter/**'
   - '!out/sample-react-native/**'
   - '!out/remote/**'
+  - '!out/mirror-receiver/**'
   - '!**/*.map'
 # Outside app.asar: the agent is uploaded to Macs, the sample is copied to Documents,
-# the CLI is run by the Node.js in the user's terminals (takeover), and
-# node-datachannel is a native module (remote access).
+# the CLI is run by the Node.js in the user's terminals (takeover),
+# node-datachannel is a native module (remote access), and the screen receiver is
+# a program the engine starts (dist.mjs puts it in out/).
 extraResources:
   - from: out/agent
     to: agent
@@ -40,6 +42,10 @@ extraResources:
   # node-datachannel (native) for remote access, for this build's architecture.
   - from: out/remote/${arch}
     to: remote
+  # This PC's iPhone screen: UxPlay (GPL-3.0) and the GStreamer parts it uses, with their
+  # licenses and SOURCES.txt (packages/core/receiver/build.sh).
+  - from: out/mirror-receiver
+    to: mirror-receiver
   - from: resources/icons
     to: icons
 asar: true

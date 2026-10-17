@@ -394,6 +394,9 @@ export const inputEventSchema = z.discriminatedUnion('kind', [
   }).strict(),
 ]);
 
+/** An iPhone at this PC: touch for this iPhone and app from now on, while its picture goes on. */
+export const phoneTargetSchema = z.object({ type: z.literal('phone-target'), udid, projectPath: fsPath }).strict();
+
 /** Messages on a screen port, engine → renderer. Frames are ArrayBuffers sent with a transfer list. */
 export type ScreenPortMessage =
   /** Compatible stream: one JPEG. */
@@ -452,7 +455,8 @@ export type ScreenPortCommand =
   | { type: 'dialog-list'; req: number; path: string; hidden?: boolean }
   | { type: 'dialog-mkdir'; req: number; path: string }
   /** An Electron app: where its sound plays from now on (remembered for the project). */
-  | { type: 'sound'; mode: SoundMode };
+  | { type: 'sound'; mode: SoundMode }
+  | z.infer<typeof phoneTargetSchema>;
 
 // ─── App (main process) ────────────────────────────────────────────────────
 
