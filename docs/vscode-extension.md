@@ -18,7 +18,7 @@ VS Code extension host                         engine process (Code.exe as Node.
 - `child_process.fork` runs `dist/engine.cjs` with VS Code's own binary (`process.execPath`, `ELECTRON_RUN_AS_NODE=1`) and `serialization: 'advanced'`, so frames arrive as `ArrayBuffer`s, not JSON. Both ends must be the same V8 build (they are: the extension host is that binary too).
 - `EngineClient` is Studio's `main/engine.ts` for a child process: typed `call`/`invoke` over `contract.ts`, batched events, prompts and their withdrawal, a channel per screen (`openScreen`, commands queued behind the open), restarts after a crash (5 a minute), and a clean shutdown in `deactivate()` (the shim also shuts down when the extension host goes away).
 
-Two build-time values come from `contract.ts`'s text (`scripts/build.mjs`): the `sessions.start` modes (Sync appears when `feature/run-options-console` lands) and the `projects.createSample` kinds (a React Native sample with `feature/react-native`). The extension bundle therefore has no zod (it is 180 KB minified).
+Two build-time values come from `contract.ts`'s text (`scripts/build.mjs`): the `sessions.start` modes (Sync is offered because the engine has it) and the `projects.createSample` kinds (the samples *Try a Sample App* offers). The extension bundle therefore has no zod (it is 180 KB minified).
 
 ## The workspace is the project
 
@@ -70,10 +70,16 @@ Live actions (`src/session.ts`): `r` is `sessions.reload` for Flutter, React Nat
 
 Verified end to end on a real Mac (2026-10-16): Capacitor run and live reload on an iPhone simulator, the H.264 screen with touch and typing, Problems from an Xcode error, Debug Console commands, screenshots; an Electron app's window; Flutter's iOS app (hot reload, hot restart) and Mac app (hot reload); the Windows app's Visual Studio prompt; the keychain password prompt; pairing discovery; health checks; the installed `.vsix`.
 
+React Native and Capacitor's two extra run options arrived with their branches' merge into main (2026-10-17), switched on by `contract.ts` as planned:
+
+- React Native: runs of its iOS, Mac and Windows apps, Metro as the first step ("Metro", "Packages and pods", Studio's order), `r`/`R`/`b` as reload/relaunch/rebuild, React Native DevTools (`j` in the Debug Console, a button on the debug toolbar and the Run view, `capmac.devtools`; `__CAPMAC_HAS_DEVTOOLS__` reads `sessions.devtools` from `contract.ts`), *Run in Release Mode* (`options.configuration: 'Release'`, also a dynamic debug configuration), its sample (`reactNativeSampleDir`, `dist/samples/hello-react-native`).
+- A Capacitor app's *Run without Building the Web App* (`options.webBuild: false`) and *Sync to the Mac* (`sessions.start` mode `sync`), in the Run view's menu and the command palette.
+
+Checked on main after the merge: 31 unit tests (Studio's real host finds the React Native sample's three apps) and 10 integration tests; live on a real Mac, Sync and Run without building of the Capacitor sample, and the React Native sample in Live on an iPhone simulator (Metro, the app's `js` and `app` logs, its screen in the tab, Stop, Metro gone after).
+
+Activation: `workspaceContains` takes a pattern as a glob only when it has `*` or `?`, so a root pattern with braces alone (`metro.config.{js,ts}`) never matches; React Native folders activate on `metro.config.*`, Expo ones on `app.config.js|ts` or `eas.json` (else when the CapMac view opens).
+
 ## Not done yet
 
 - Publishing to the Marketplace (needs a publisher account; the `publisher` field is a placeholder) and per-architecture `.vsix` files (the WebRTC module for remote access is most of the size).
 - A real JavaScript debugger: Electron apps already expose the DevTools protocol on the Mac, which could be tunnelled to VS Code's `js-debug`; Flutter's VM service could be handed to the Dart extension.
-- React Native (`feature/react-native`, in progress): the extension is ready for its contract and switches it on by itself when that branch merges: runs of its iOS, Mac and Windows apps, Metro as the first step ("Metro", "Packages and pods", Studio's order), `r`/`R`/`b` as reload/relaunch/rebuild, React Native DevTools (`j` in the Debug Console, a button on the debug toolbar and the Run view, `capmac.devtools`; `__CAPMAC_HAS_DEVTOOLS__` reads `sessions.devtools` from `contract.ts`), *Run in Release Mode* (`options.configuration: 'Release'`, also a dynamic debug configuration), its sample (`reactNativeSampleDir`, `dist/samples/hello-react-native`). Checked on 2026-10-17 against that branch's uncommitted work combined with this one: build, full typecheck, 31 unit tests (Studio's real host finds the sample's three apps) and 10 integration tests; and live on a real Mac: the sample in Live on an iPhone simulator (Metro, packages and pods, Xcode build, the app's `js` and `app` logs, its screen in the tab), Fast Refresh on save, `r` in the Debug Console, Stop.
-- Activation: `workspaceContains` takes a pattern as a glob only when it has `*` or `?`, so a root pattern with braces alone (`metro.config.{js,ts}`) never matches; React Native folders activate on `metro.config.*`, Expo ones on `app.config.js|ts` or `eas.json` (else when the CapMac view opens).
-- Sync and "Run without building" options of `feature/run-options-console`: "Run without building" works today; Sync shows up by itself once that contract lands.

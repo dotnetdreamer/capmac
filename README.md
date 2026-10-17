@@ -131,7 +131,7 @@ Maintainers can use **Actions → Release CapMac Studio** to build a dry run or 
 ## CapMac for VS Code
 
 The same engine as a VS Code extension, for the folder you have open: no project to add.
-CapMac finds the apps in the workspace (Capacitor, Flutter, Electron), and **⚡ Live** or **▶ Run** starts the one you work on.
+CapMac finds the apps in the workspace (Capacitor, Flutter, React Native, Electron), and **⚡ Live** or **▶ Run** starts the one you work on.
 
 - Every run is a VS Code debug session: Stop, Restart and Hot Reload on the debug toolbar, F5 once you pick *Live: your app* in Run and Debug, and the app's console in the Debug Console.
 - The simulator's screen, an iPhone's, or a Mac app's window streams into a tab beside your code, with touch, typing and screenshots.

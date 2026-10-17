@@ -4,7 +4,7 @@
 
 **Run your iPhone, Mac and Windows apps from VS Code on Windows**
 
-Capacitor, Ionic, Flutter and Electron apps on iPhone simulators, real iPhones, the Mac's desktop and Windows.
+Capacitor, Ionic, Flutter, React Native and Electron apps on iPhone simulators, real iPhones, the Mac's desktop and Windows.
 With your own Mac, or with no Mac at all.
 
 Open your project's folder: CapMac finds the app in it. Press **⚡ Live** and the app opens on the simulator,
@@ -18,8 +18,8 @@ its screen shows up in a tab beside your code, and every save updates it.
 
 | | |
 | --- | --- |
-| **Your project, found** | CapMac reads the open folder and finds its apps: a Capacitor app's iPhone and Electron apps, a Flutter app's iPhone, Mac and Windows apps, an Electron app. No project to pick, nothing to configure. |
-| **Run and live reload** | ▶ **Run** builds and opens the app. ⚡ **Live** keeps it running and updates it when you save: your dev server's live reload for Capacitor, hot reload for Flutter, window reloads for Electron. |
+| **Your project, found** | CapMac reads the open folder and finds its apps: a Capacitor app's iPhone and Electron apps, a Flutter or React Native app's iPhone, Mac and Windows apps, an Electron app. No project to pick, nothing to configure. |
+| **Run and live reload** | ▶ **Run** builds and opens the app. ⚡ **Live** keeps it running and updates it when you save: your dev server's live reload for Capacitor, hot reload for Flutter, Fast Refresh for React Native, window reloads for Electron. |
 | **The screen, in a tab** | The simulator's screen, or your Mac app's window, streams into VS Code as smooth video. Click, drag, scroll and type on it, take full-size screenshots, and put it in a window of its own like a real simulator. |
 | **A debug session like any other** | Every run is a VS Code debug session: Stop, Restart and Hot Reload on the debug toolbar, F5 to start, and the app's console (`console.log`, Dart's `print`, native logs) in the Debug Console with links to the line that logged. |
 | **Errors where your code is** | Xcode, Swift and Dart errors from the Mac, and TypeScript and Vite errors from the web build, land in **Problems**, at the line in your files on this PC. |
@@ -30,26 +30,30 @@ its screen shows up in a tab beside your code, and every save updates it.
 ## Get started
 
 1. **Choose where your app builds.** Pair your Mac with **CapMac: Pair a Mac**: CapMac finds it on your network (turn on *Remote Login* on the Mac first). No Mac? Run **CapMac: Set Up This PC for iPhones** instead.
-2. **Open your app's folder.** The one with your `capacitor.config` file, your Flutter app's `pubspec.yaml`, or your Electron app's `package.json`. No app yet? **CapMac: Try a Sample App** copies one for you.
+2. **Open your app's folder.** The one with your `capacitor.config` file, your Flutter app's `pubspec.yaml`, or your React Native or Electron app's `package.json`. No app yet? **CapMac: Try a Sample App** copies one for you.
 3. **Press ⚡ Live** in the CapMac view, on the status bar, or above your config file.
 
 The **Get started** walkthrough (in VS Code's Welcome page) takes you through it.
 
-## Live reload, with hot reload for Flutter
+## Live reload, hot reload and Fast Refresh
 
 ![Saving a file reloads the app: Vite's page reload in the Debug Console, the new heading on the simulator](media/screenshots/live-reload.png)
 
 Save a file and the app updates. A Capacitor app reloads from your dev server on this PC; native changes (a plugin, Swift code, `capacitor.config`) rebuild the app by themselves.
 
+A Capacitor app has two more ways to run, in the Run view's **…** menu and the command palette: **Run without Building the Web App** uses the web files you built last time, like `npx cap run`, and **Sync to the Mac** runs `cap sync` there without building or opening the app.
+
 ![A Flutter app hot-reloaded on the iPhone simulator, "Reloaded 1 of 844 libraries" in the Debug Console](media/screenshots/flutter-hot-reload.png)
 
 Flutter apps hot-reload when you save, keeping their state. Hot restart is **Ctrl+Shift+F5**, or `R` in the Debug Console.
+
+React Native apps get their JavaScript from Metro on this PC, so a save shows in the app at once (Fast Refresh). `j` in the Debug Console, or the DevTools button on the debug toolbar, opens React Native DevTools, and **Run in Release Mode** runs the app as people get it.
 
 ## Mac and Windows apps
 
 ![A Flutter app's Mac app, its window streamed from the Mac into VS Code](media/screenshots/flutter-mac.png)
 
-Electron apps and Flutter's Mac apps open on the Mac's desktop, in the background, so they never take over the Mac of someone working at it. Their window shows up in VS Code with a Mac title bar: click, scroll and type on it, and answer the app's dialogs right there. A Flutter app's Windows app runs on this PC, in its own window.
+Electron apps and Flutter's and React Native's Mac apps open on the Mac's desktop, in the background, so they never take over the Mac of someone working at it. Their window shows up in VS Code with a Mac title bar: click, scroll and type on it, and answer the app's dialogs right there. A Flutter or React Native app's Windows app runs on this PC, in its own window.
 
 ![An Electron app's window from the Mac, in a VS Code tab](media/screenshots/electron.png)
 
@@ -81,14 +85,15 @@ Every app is in the **Run and Debug** dropdown with no `launch.json`: *Live: Hel
 }
 ```
 
-Other options: `app` (`ios`, `electron`, or a Flutter app's `macos` or `windows`), `mac`, `backend` (`mac` or `wsl` for this PC), `webBuild`, `clean`, `configuration`, `flutterMode` (`debug`, `profile`, `release`) and `screen`.
+Other options: `app` (`ios`, `electron`, or a Flutter or React Native app's `macos` or `windows`), `mac`, `backend` (`mac` or `wsl` for this PC), `webBuild`, `clean`, `configuration` (`Release` for a React Native release run), `flutterMode` (`debug`, `profile`, `release`) and `screen`.
 
 In the Debug Console, type:
 
 | | |
 | --- | --- |
-| `r` | Reload (Flutter: hot reload, Electron: reload the windows) |
+| `r` | Reload (Flutter: hot reload, React Native: reload the JavaScript, Electron: reload the windows) |
 | `R` | Restart the app (Flutter: hot restart) |
+| `j` | Open React Native DevTools |
 | `b` | Rebuild the native app and restart it |
 | `s` | Save a screenshot and open it |
 | `o` | Show the screen |
@@ -129,7 +134,7 @@ When something is missing (Visual Studio's C++ tools for a Windows app, Flutter 
 | `capmac.console.bridge` | Capacitor's bridge messages in the Debug Console |
 | `capmac.osLogs` | The iPhone's system logs next to your app's console |
 | `capmac.verbose` | Every line the build tools print |
-| `capmac.codeLens` | Run and Live above `capacitor.config`, `pubspec.yaml` and `capmac.json` |
+| `capmac.codeLens` | Run and Live above `capacitor.config`, `pubspec.yaml`, `metro.config`, `app.json` and `capmac.json` |
 | `capmac.terminal.capmacCommand` | The `capmac` command in VS Code's terminals |
 
 The screen stream (smooth video, or compatible pictures), your paired Macs and each project's choices (its app, where it builds) are shared with the `capmac` command and CapMac Studio.
