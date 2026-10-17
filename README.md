@@ -1,522 +1,209 @@
 <div align="center">
 
+<img src="apps/desktop/resources/icons/icon-256.png" width="104" alt="CapMac" />
+
 # CapMac
 
-**Build Capacitor iOS apps from Windows with your own Mac**
+### Build iPhone apps on Windows<br>With your Mac, or with no Mac at all
 
-Keep your editor, web build and dev server on Windows.
-CapMac builds your Capacitor or Ionic app with Xcode on a paired Mac and brings the simulator screen, build errors and app logs back to your PC.
+CapMac builds your app and runs it on the iOS Simulator or your own iPhone<br>You use it, read its logs and fix its errors without leaving your PC
 
-Run on iOS simulators or connected iPhones, export signed builds, and run Flutter and React Native apps (iOS, Mac and Windows) and Electron apps through the same CLI or Windows app.
+**Capacitor · Ionic · Flutter · React Native · Electron**
 
-**Your own Mac · SSH connection · CLI and CapMac Studio**
+[![Latest release](https://img.shields.io/github/v/release/dotnetdreamer/capmac?label=release&color=5B4BF0)](https://github.com/dotnetdreamer/capmac/releases/latest)
+[![MIT license](https://img.shields.io/badge/license-MIT-5B4BF0)](LICENSE)
+[![Windows x64 and Arm64](https://img.shields.io/badge/Windows-x64%20%7C%20Arm64-5B4BF0)](https://github.com/dotnetdreamer/capmac/releases/latest)
 
-[Quick start](#quick-start) | [Download Studio](https://github.com/dotnetdreamer/capmac/releases/latest) | [Why CapMac](#why-capmac)
+[**Download CapMac Studio**](https://github.com/dotnetdreamer/capmac/releases/latest) · [**CapMac for VS Code**](apps/vscode/README.md)
+
+[Quick start](#quick-start) · [No Mac?](#no-mac-at-all) · [FAQ](#faq) · [Guide](docs/guide.md)
 
 https://github.com/user-attachments/assets/d55fac9f-92fc-4e6e-953a-574a824a5ecb
 
 </div>
 
-[CapMac Studio](#capmac-studio) | [VS Code](#capmac-for-vs-code) | [Capacitor and Ionic commands](#keep-your-capacitor-and-ionic-commands) | [Commands](#commands) | [Flutter apps](#flutter-apps) | [React Native apps](#react-native-apps) | [Electron apps](#electron-apps) | [AI coding agents](#ai-coding-agents) | [Remote access](#away-from-the-macs-network) | [Development](#developing-capmac)
-
 ## Why CapMac
 
-The default backend uses a Mac for Xcode builds while you keep your daily work on Windows.
-CapMac handles the file sync, Xcode build and app launch, then brings the result back to the machine where you wrote the code.
+Apple's tools for building iPhone apps only run on a Mac. If you work on a Windows PC, every usual way around that has a catch.
 
-| What you need | What CapMac does |
+- **Switch to a Mac**, and your editor, your tools and your habits stay behind
+- **Rent a Mac in the cloud**, and you work through a remote desktop, pay every month, and keep your code on someone else's computer
+- **Use a cloud build service**, and every native change waits for a build on someone else's computer
+
+CapMac lets you stay on your PC. It uses a Mac you already have, even an old one in another room, or no Mac at all. Your code never leaves your own machines.
+
+## What you get
+
+- **The simulator on your PC.** The iOS Simulator streams to your screen as smooth video, around 60 frames a second. Click, drag, scroll and type into it.
+- **Live reload.** Your dev server keeps running on Windows. Save a file and the app updates. Change native code and CapMac rebuilds it. Flutter's hot reload and React Native's Fast Refresh work too.
+- **VS Code, Studio or the terminal.** Run your app from the VS Code extension, the CapMac Studio app or the `capmac` command. They share one engine and one set of settings.
+- **Your own iPhone.** Run on an iPhone plugged into your Mac or your PC, or over Wi-Fi.
+- **No Mac? Still fine.** CapMac can build, sign and install your iPhone app from Windows alone. [See how](#no-mac-at-all).
+- **Errors you can click.** Xcode, Swift and Dart errors point at the files on your PC. The app's console comes back with search and filters.
+- **Your usual commands.** `npx cap run ios` and `ionic cap run ios -l` work in any Windows terminal. CapMac runs them on your Mac.
+- **Mac and Windows apps too.** Run the Mac and Windows versions of a Flutter or React Native app, or an Electron app on the Mac, with its window on your PC.
+- **Ready to ship.** Export a signed IPA, or send a build to TestFlight from your Mac.
+- **Built for AI agents.** Claude Code, Codex, GitHub Copilot, Cursor, Gemini CLI and ten more can build, run, read the logs and take screenshots through CapMac.
+
+## Works with
+
+| | iOS Simulator | iPhone | Mac app | Windows app | iPhone, no Mac |
+| --- | :---: | :---: | :---: | :---: | :---: |
+| **Capacitor and Ionic** | ✅ | ✅ | ✅ Electron | — | ✅ |
+| **Flutter** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **React Native** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Electron** | — | — | ✅ | — | — |
+
+Mac apps run on the Mac's desktop, and their window comes to your PC. Windows apps run on your PC and need no Mac.
+React Native's Mac and Windows apps use [react-native-macos](https://github.com/microsoft/react-native-macos) and [react-native-windows](https://github.com/microsoft/react-native-windows), and Expo apps run like React Native apps on iPhones and simulators.
+Without a Mac, Flutter apps run release and profile builds, so hot reload needs a Mac.
+
+## Quick start
+
+**1. Get CapMac.** All three share one engine and one set of settings, so you can switch any time.
+
+- [**CapMac Studio**](https://github.com/dotnetdreamer/capmac/releases/latest), the Windows app, as an installer or a portable app
+- [**CapMac for VS Code**](apps/vscode/README.md): `code --install-extension capmac-vscode-<version>.vsix`, from the same release
+- **The CLI:** `npm install -g capmac` (needs Node.js 20.10 or newer)
+
+**2. Run your app with a Mac.** On the Mac, install Xcode, open it once and add an iOS simulator when it asks. In System Settings, open General, then Sharing, and turn on **Remote Login**. Stay logged in on the Mac, because the simulator runs on its desktop. Then, on your PC:
+
+```powershell
+capmac pair     # find your Mac and connect to it, once
+cd my-app
+capmac run      # build, open in the simulator, show the logs
+capmac dev      # live reload as you save
+```
+
+**Or run it with no Mac** (experimental). You need WSL 2 (`wsl --install --no-distribution` adds it), an iPhone, and a paid Apple Developer Program membership.
+
+```powershell
+cd my-app
+capmac wsl setup     # tools, one Apple sign-in and signing, in one go
+capmac backend wsl   # build this app on this PC from now on
+capmac run           # build, sign and open it on your plugged-in iPhone
+```
+
+In CapMac Studio it's all buttons. Pair your Mac or pick **This PC (no Mac)**, add your app's folder, and press **Live** (F5) or **Run** (Ctrl+F5). **Try a sample** gives you a small app to start with.
+
+## Studio, CLI or VS Code
+
+**CapMac Studio** keeps the whole loop in one window. You see every build step, a console that stays fast with hundreds of thousands of lines, errors that open at the right line in your editor, and your app's screen.
+
+**The CLI** does everything Studio does, in your terminal and your scripts. `capmac --help` shows it all.
+
+**CapMac for VS Code** works on the folder you have open. Every run is a debug session, the screen opens in a tab next to your code, and errors land in Problems.
+
+<p align="center"><img src="apps/vscode/media/screenshots/capacitor-live.png" width="860" alt="CapMac for VS Code running a Capacitor app in the iOS Simulator, with each build step and the app's console"></p>
+
+## No Mac at all
+
+Apple's simulator only runs on macOS, but your iPhone doesn't care where its app was built. CapMac's no-Mac mode builds, signs and installs the app from Windows.
+
+- **No Linux to learn.** CapMac sets up its own Ubuntu in WSL and installs every tool in it. Your own WSL setup stays as it is.
+- **One Apple sign-in.** You sign in once on Apple's website. CapMac makes the certificate, App IDs and profiles, and downloads Xcode to take the iPhone SDK from it.
+- **USB or Wi-Fi.** Plug the iPhone in for the first run. After that, it works over Wi-Fi too.
+- **Live reload.** Capacitor apps reload as you save and React Native apps get Fast Refresh. Flutter apps rebuild and reopen.
+
+It's experimental, and it already runs a real Capacitor game with 20 plugins, Firebase and a home-screen widget. Not every Xcode feature has a Windows twin yet, so check the [limits](docs/wsl-ios.md#compatibility-limits) first.
+
+### How is that possible?
+
+Xcode only runs on macOS, but each job it does for an iPhone build has an open-source twin
+
+| Xcode's job | What CapMac uses instead |
 | --- | --- |
-| Test native iOS behavior | Builds and runs your app on the Mac's iOS simulators or connected iPhones |
-| See changes as you save | Uses your Windows dev server for web live reload and rebuilds when native code changes |
-| Work through errors in your editor | Maps Xcode and Swift errors to Windows file paths and streams the app's console back to your PC |
-| Use the simulator from Windows | Click, drag, scroll, type and take screenshots in Studio or your browser |
-| See a real iPhone from Windows | Shows the screen of an iPhone plugged into the Mac live in Studio or your browser, with full-size screenshots |
-| Keep familiar commands | Routes `npx cap run ios` and `ionic capacitor run ios -l` through your paired Mac |
-| Avoid repeating build work | Transfers changed files and reuses native simulator output when only web assets changed |
-| Prepare a release | Exports signed IPA files and uploads builds to App Store Connect for TestFlight |
+| Compile Swift, Objective-C and C++ | [Swift](https://www.swift.org) and [Clang](https://clang.llvm.org) for Linux, with Apple's iPhone SDK |
+| Link the app | LLVM's `ld64.lld`, plus a fix for the Objective-C method stubs it gets wrong in big apps |
+| Fetch native packages | The real [CocoaPods](https://cocoapods.org) and Swift Package Manager, pinned by your lockfiles |
+| Compile storyboards and asset catalogs | Open-source compilers from [omarchy-apple-dev](https://github.com/joshuaswarren/omarchy-apple-dev) |
+| Sign the app | [zsign](https://github.com/zhlynn/zsign) |
+| Install and open it on the iPhone | [pymobiledevice3](https://github.com/doronz88/pymobiledevice3) |
+| Compile Flutter's Dart code | Dart's iPhone compiler, built from Dart's source because Google ships it only for Macs. It makes the same machine code |
 
-Flutter projects use the same pairing and commands: the iOS app in simulators and on iPhones with hot reload, the Mac app on the Mac's desktop, and the Windows app on your PC.
-React Native projects do too, with Metro on your PC: each save shows in the app at once.
-Electron projects run on macOS the same way, with the app's window and consoles available on Windows.
-The [coding agent skill](#ai-coding-agents) lets your agent build, read logs and take screenshots through the CLI.
+Every step and every limit is in [iOS on Windows with no Mac](docs/wsl-ios.md)
 
 ## How it works
 
 ```mermaid
-flowchart TB
-    subgraph pc["Windows PC"]
-        workspace["Your editor and source files<br/>Web build and dev server"]
-        client["CapMac CLI or Studio<br/>Shared engine"]
-        workspace --> client
-    end
-
-    subgraph mac["Paired Mac"]
-        agent["CapMac agent<br/>Synced project and dependencies"]
-        xcode["Xcode build and signing"]
-        simulator["iOS Simulator<br/>Screen and input"]
-        iphone["Connected iPhone<br/>Install and run"]
-        electron["Electron app<br/>Window and input"]
-        agent --> xcode
-        xcode --> simulator
-        xcode --> iphone
-        agent --> electron
-    end
-
-    client <-->|"SSH: files, commands and input<br/>Errors and logs<br/>Simulator and Electron screens"| agent
+flowchart LR
+    pc["Your Windows PC<br/>code, editor, dev server<br/>CapMac"]
+    mac["Your Mac<br/>Xcode, iOS Simulator"]
+    wsl["WSL on your PC<br/>Swift, Clang, CocoaPods"]
+    phone["Your iPhone"]
+    pc <-->|"SSH: changed files, logs,<br/>screen, touch and keys"| mac
+    mac -->|"USB or Wi-Fi"| phone
+    pc -.->|"no Mac"| wsl
+    wsl -->|"USB or Wi-Fi"| phone
 ```
 
-Live reload uses an SSH tunnel to your Windows dev server.
-Optional internet access uses your [signaling server](services/signal/deploy/README.md) to set up a direct WebRTC connection or relay fallback, with SSH protecting the session.
+With a Mac, CapMac sends only the files that changed, builds with Xcode, and streams the simulator back as video. Your dev server stays on Windows, and the app reaches it through the same SSH connection. Without a Mac, all of this happens on your PC.
 
-## Quick start
+## FAQ
 
-Use the CLI below, or [download CapMac Studio](https://github.com/dotnetdreamer/capmac/releases/latest) for a Windows desktop workspace.
+**Is it free?**
+Yes. CapMac is open source under the MIT license. Apple charges for its Developer Program, which you need to sign apps for an iPhone without a Mac.
 
-On the Mac, install Xcode, open it once and install an iOS simulator runtime.
-Enable **System Settings › General › Sharing › Remote Login** and keep the paired user logged in to the macOS desktop so simulators can run.
+**Does my code go anywhere?**
+Only to your own Mac, over SSH. Without a Mac, it stays on your PC. There's no CapMac account, no CapMac server and no telemetry. CapMac even turns off Flutter's analytics.
 
-On Windows, install Node.js and npm, install your app's dependencies, then pair the Mac and run your app.
+**Can I use the iOS Simulator without a Mac?**
+No. Apple's simulator only runs on macOS. Without a Mac, CapMac runs your app on a real iPhone instead.
 
-```powershell
-npm install -g capmac
-capmac pair
-cd my-capacitor-app
-capmac doctor
-capmac run
-```
+**Can I publish to the App Store?**
+With a Mac, yes. `capmac build --upload` sends your app to App Store Connect for TestFlight. Without a Mac, CapMac makes development builds for your own iPhones.
 
-Run app commands from the folder containing `capacitor.config.*`.
-If the app has no iOS project yet, run `npx cap add ios` first.
+**Does CapMac include Apple's software?**
+No. With a Mac, it uses the Mac's own Xcode. Without one, setup downloads Xcode from Apple with your Apple Account and uses only its iPhone SDK. Make sure your use fits Apple's terms.
 
-`capmac pair` finds Macs on your network, or accepts an address such as `capmac pair user@mac.local`.
-It asks you to trust the Mac's host key and uses your password once to install a dedicated SSH key, without storing the password.
-Use `--identity <file>` for an existing SSH key or `--agent` for the Windows OpenSSH agent.
+**Which Mac do I need?**
+Any Mac that runs Xcode 16 or newer. It doesn't have to be nearby. [Remote access](docs/guide.md#away-from-the-macs-network) reaches it over the internet, through a small server you run yourself.
 
-If Node.js is missing or too old on the Mac, pairing offers a private copy in `~/.capmac/runtime`.
-CocoaPods is needed on the Mac only for projects that use it.
+**What does CapMac change on my PC?**
+To make `npx cap run ios` work in every terminal, CapMac adds a small preload to your Windows user's `NODE_OPTIONS`. `capmac takeover off` removes it. Native builds work on a copy of your project.
 
-For live reload with the simulator in your browser:
+**What about Android?**
+Android already builds on Windows, so CapMac leaves it alone. `cap sync`, `cap add` and Android commands still run on your PC.
 
-```powershell
-capmac dev --screen
-```
+**Is the no-Mac mode ready for my app?**
+It's experimental. It builds real apps, but some Xcode features have no Windows twin yet, such as Metal shaders and Core ML models. The [compatibility limits](docs/wsl-ios.md#compatibility-limits) list them all, and the Mac mode is always there.
 
-The dev server runs on Windows through an SSH tunnel.
-Web edits use the server's live reload, native edits trigger a rebuild, and the session reconnects if the connection drops.
-Use `capmac dev --url http://localhost:5173` with a server you already started.
+## Learn more
 
-## CapMac Studio
+- [The CapMac guide](docs/guide.md): every framework, command, setting and fix
+- [iOS on Windows with no Mac](docs/wsl-ios.md): setup, signing, Wi-Fi and limits
+- [CapMac for VS Code](apps/vscode/README.md)
+- [The remote access server](services/signal/deploy/README.md)
+- [How CapMac works inside](docs/desktop-design.md)
 
-Build, inspect logs and control the simulator in one Windows workspace.
-Studio uses the same engine as the CLI.
-Pair a Mac, add your project and press **Live** (F5) or **Run** (Ctrl+F5).
-For a Capacitor app, the arrow next to **Run** offers **Run without building**, which uses the web files you already built like `npx cap run ios`, and **Sync**, which runs `cap sync` on the Mac without building or launching the app.
+## Contributing
 
-The workspace shows the build timeline, errors that open at the line in your editor, a searchable console with source and level filters, expandable JSON, and an interactive simulator.
-The console stays fast with hundreds of thousands of lines.
-Select text across any number of lines, or press Ctrl+A, then copy it with Ctrl+C or a right-click; the arrow at the bottom right takes you back to the latest line.
-Click, drag, scroll and type from Windows, or use Home, Lock and screenshot controls.
-Pick a real iPhone as the target to see [its screen](#a-real-iphones-screen) in the same place.
-
-Studio uses an H264 stream with a screenshot fallback.
-If touch or keyboard input is unavailable, `capmac doctor --fix` can install AXe on the Mac.
-
-From a [development checkout](#developing-capmac), `npm run desktop:build` creates x64 and arm64 installers and portable executables in `apps/desktop/release/<version>/`.
-Builds are unsigned by default and updates stay off without a configured feed.
-See [signing and updates](docs/signing-and-updates.md) for distribution setup.
-
-Download installers and portable builds from [GitHub Releases](https://github.com/dotnetdreamer/capmac/releases/latest).
-Maintainers can use **Actions → Release CapMac Studio** to build a dry run or publish a new version; see [releasing CapMac](docs/releases.md) for setup.
-
-## CapMac for VS Code
-
-The same engine as a VS Code extension, for the folder you have open: no project to add.
-CapMac finds the apps in the workspace (Capacitor, Flutter, React Native, Electron), and **⚡ Live** or **▶ Run** starts the one you work on.
-
-- Every run is a VS Code debug session: Stop, Restart and Hot Reload on the debug toolbar, F5 once you pick *Live: your app* in Run and Debug, and the app's console in the Debug Console.
-- The simulator's screen, an iPhone's, or a Mac app's window streams into a tab beside your code, with touch, typing and screenshots.
-- Xcode, Swift, Dart, TypeScript and Vite errors land in **Problems**; the **Run** view shows each build step; the **Devices** view lists your Macs, simulators, iPhones, health checks and this PC.
-- Building on this PC with no Mac, pairing, remote access and the keychain all work from VS Code.
-- AI agents in VS Code get tools to run the app, read its console and look at its screen.
-- Claude Code, Codex, Gemini CLI and other coding agents get the [CapMac skill](#ai-coding-agents) in each project with an app, for the agents CapMac finds.
-
-Install the `.vsix` from [GitHub Releases](https://github.com/dotnetdreamer/capmac/releases/latest) (`code --install-extension capmac-vscode-<version>.vsix`).
-From a development checkout, `npm run vscode:build` builds it and `npm run vscode:package` makes the `.vsix`; open `apps/vscode` in VS Code and press F5 to try it. See [apps/vscode/README.md](apps/vscode/README.md) and the [design notes](docs/vscode-extension.md).
-
-## Keep your Capacitor and Ionic commands
-
-A global CapMac install enables takeover on your first command, and the packaged Studio app enables it on launch.
-After pairing, open a new terminal or restart VS Code so its terminals pick up the setting.
-
-```powershell
-npx cap run ios
-ionic capacitor run ios -l
-```
-
-| Command | What happens on the Mac |
-| --- | --- |
-| `npx cap run ios` | Uses your existing web build, builds with Xcode and launches the app |
-| `npx cap run ios --list` | Lists the Mac's simulators and connected devices |
-| `npx cap run ios -l` | Runs live reload through CapMac |
-| `ionic capacitor run ios -l` | Tunnels the dev server Ionic starts on Windows |
-| `npx cap open ios` or `ionic cap build ios` | Opens Xcode on the Mac's screen |
-| `npx cap build ios` | Exports a signed IPA into `ios/App/output` |
-
-`cap sync`, `cap copy`, `cap add` and Android commands still run on Windows.
-
-Takeover adds a preload to your Windows user's `NODE_OPTIONS`.
-Keep `%USERPROFILE%\.capmac\takeover.cjs` in place while it is enabled.
-Use `capmac takeover off` to disable it, `capmac takeover on` to enable it, or `CAPMAC_TAKEOVER=0` for one command.
-It is not enabled automatically by a temporary `npx capmac` copy or when `CI=true`.
-
-## Commands
-
-| Command | Use |
-| --- | --- |
-| `capmac run` | Build the web app, sync changes, build on the Mac, launch and stream the app's console |
-| `capmac dev` | Live reload with automatic rebuilds for native changes |
-| `capmac build` | Build without launching |
-| `capmac build --ipa` | Export a signed IPA to `build/ios/` |
-| `capmac build --upload` | Upload to App Store Connect for TestFlight |
-| `capmac targets` | List simulators and connected devices |
-| `capmac screen` | View and control a simulator in your browser (use `--stream compatible` for screenshots), or watch a plugged-in iPhone with `--device` |
-| `capmac screenshot [file]` | Save a PNG of a simulator, or of a plugged-in iPhone with `--device`, and print its path |
-| `capmac doctor --fix` | Check setup and repair what it can |
-| `capmac info --files` | Show the detected project and exact sync list without connecting |
-| `capmac sync` | Copy the project to the Mac and run `cap sync` there, without building or launching |
-| `capmac apps` | List the apps in this folder and the selected app; use `capmac apps use <app>` to switch |
-| `capmac exec -- <command>` | Run a command in the Mac's project copy |
-| `capmac pull <path>` | Copy files back from the Mac |
-| `capmac open` | Open the project in Xcode on the Mac |
-
-Use `--target "<name or UDID>"` to select a simulator or device and `--mac <name>` to select a paired Mac.
-For [projects with several apps](#one-folder-several-apps), use `--app ios`, `--app electron`, or a Flutter or React Native app's `--app mac` and `--app windows` to choose which app to run.
-For scripts, `capmac run --no-logs` returns after launch, while `capmac run --for 20` captures the console for 20 seconds and then stops the app.
-`capmac run --no-web-build` skips the web build and uses the web files you already built.
-
-Build errors use Windows file paths so you can open them from your terminal.
-Add `--os-logs` for NSLog and os_log, `--bridge` for Capacitor plugin traffic, or `--verbose` for full tool output.
-Use `capmac --help` and `capmac <command> --help` for the remaining commands and options.
-
-## Running on an iPhone
-
-Connect or pair the iPhone with the Mac, tap **Trust**, enable **Developer Mode** and sign in under **Xcode › Settings › Accounts**.
-
-```powershell
-capmac run --device --team "<TEAM_ID>"
-```
-
-Signing needs the Mac's login keychain unlocked.
-CapMac asks when needed, or you can unlock it before building with `capmac keychain`.
-For device live reload, the iPhone must be able to reach the Mac's network address.
-
-If Xcode reports an expired account session over SSH, supply an App Store Connect API key.
-
-```powershell
-capmac run --device --team "<TEAM_ID>" --api-key C:/keys/AuthKey_ABC123XYZ9.p8 --api-issuer "<ISSUER_ID>"
-```
-
-You can also set `ios.apiKey` in `capmac.json`, or use `CAPMAC_ASC_KEY_PATH`, `CAPMAC_ASC_KEY_ID` and `CAPMAC_ASC_ISSUER_ID`.
-The same key works for IPA exports and uploads.
-
-### Experimental WSL backend
-
-Build and sign Capacitor CocoaPods or SPM apps locally through WSL, then run them on an iPhone connected directly to Windows. CapMac imports the existing native application and extensions, including mixed Swift/Objective-C/C++ dependencies, resource bundles, build scripts, and profile-authorized entitlements. CocoaPods uses its real resolver; SPM evaluates real package manifests and preserves locked revisions and binary checksums. Builds use an isolated workspace, preserving your source iOS project and installed packages.
-
-`capmac wsl setup` (or **This PC** in CapMac Studio) installs the tools, signs in to Apple once for signing and the Xcode download, and `capmac backend wsl` makes the project build on this PC by default, in CapMac Studio too. The [WSL setup guide](docs/wsl-ios.md) covers the Studio flow, your own tools and signing files, and current compatibility limits. No Mac connection or xtool is used.
-
-```powershell
-capmac wsl setup
-capmac backend wsl
-capmac doctor
-capmac run
-capmac dev
-```
-
-Live development starts your Windows dev server and a LAN relay automatically; web changes reload and native changes rebuild and reinstall. Neither package path has an artificial Capacitor 8 restriction. macOS-only scripts, unsupported resource features, and Swift package build-tool plugins or macros need additional support. The WSL backend is experimental: application compilation and device validation with your SDK and signing material remain required. Standalone native project import and simulators are future work.
-
-Flutter apps build this way too, with plugins that come as Swift packages. Flutter's Linux tools compile the Dart code in WSL. Dart's iPhone compiler, which Google ships only for Macs, is built from Dart's own source the first time, in about 5 minutes. It makes byte-for-byte the same app code as Flutter's compiler on a Mac. An iPhone runs these builds in release mode, or in profile mode with `--mode profile`. Debug builds need Xcode's debugger, so hot reload stays with a paired Mac. Live mode here rebuilds the app and opens it again each time you save.
-
-### A real iPhone's screen
-
-Plug the iPhone into the Mac with a cable and unlock it.
-Its screen shows up in Studio when the iPhone is the target, and in your browser with:
-
-```powershell
-capmac screen --device
-capmac screenshot --device
-```
-
-The first time, the Mac asks whether **CapMac** may use the camera, because macOS treats an iPhone's screen as one.
-Click **Allow** on the Mac once.
-CapMac uses the same capture as QuickTime Player, through a small helper app that stays in the background on the Mac.
-The iPhone's camera is never turned on, and its sound keeps playing on the iPhone.
-
-The screen is view only for now: tap and type on the iPhone itself.
-Over Wi-Fi alone, the iPhone runs your app but its screen can't be shown.
-
-## Flutter apps
-
-CapMac runs a Flutter app's iOS app, Mac app and Windows app.
-
-```powershell
-cd my_flutter_app
-capmac run                          # the iOS app, in a simulator on the Mac
-capmac dev                          # live: each save hot-reloads the app
-capmac run --app mac                # the Mac app, on the Mac's desktop
-capmac run --app windows            # the Windows app, on this PC (no Mac needed)
-capmac run --device --mode release  # on an iPhone, as people get it
-capmac build --ipa
-```
-
-On the Mac, Flutter itself builds and runs the app (`flutter run`), the way an editor drives it.
-CapMac syncs the project and installs Flutter on the Mac the first time, in `~/.capmac/flutter`, apart from any Flutter you install yourself.
-It uses this PC's Flutter version, or the one your project pins with FVM or `capmac.json`.
-Flutter's steps, the Dart console and the engine's logs come back to Windows, and Dart compile errors use Windows file paths.
-
-`capmac dev` hot-reloads the app when you save Dart code or assets.
-In the terminal, press `r` to hot reload and `R` to hot restart.
-A change to `pubspec.yaml` or to the app's native code rebuilds the app.
-
-The Mac app opens behind the windows on the Mac and never takes its keyboard.
-Its window comes to Studio and to `capmac screen --app mac`, where you can click, scroll and type.
-CapMac reads the window's frames from the surfaces Flutter draws into, so it shows even while the Mac is locked, with no Screen Recording permission.
-
-The Windows app runs with Flutter on this PC: yours, or one CapMac installs in `%LOCALAPPDATA%\CapMac\flutter`.
-It needs Visual Studio with **Desktop development with C++** and **C++ CMake tools for Windows**.
-CapMac checks before building and offers to add what's missing with Visual Studio's installer.
-
-Build options: `--mode debug|profile|release`, `--flavor <name>`, `--main lib/main_dev.dart` and `--dart-define KEY=VALUE`.
-Defaults for every run go in `capmac.json`:
-
-```json
-{ "flutter": { "target": "lib/main_dev.dart", "flavor": "dev", "dartDefines": { "API_URL": "https://dev.example.com" }, "version": "3.47.7" } }
-```
-
-In Studio, the toolbar's app picker switches between a Flutter project's apps.
-Live mode has **Hot reload** and **Hot restart** buttons, and the **More** menu runs profile and release builds.
-**Try a sample › iPhone, Mac and Windows app (Flutter)** creates a small Flutter app with all three ([examples/hello-flutter](examples/hello-flutter)).
-With no Mac, the iOS app builds on this PC too: see the [WSL backend](#experimental-wsl-backend).
-
-## React Native apps
-
-CapMac runs a React Native app's iOS app, its Mac app ([react-native-macos](https://github.com/microsoft/react-native-macos)) and its Windows app ([react-native-windows](https://github.com/microsoft/react-native-windows)).
-
-```powershell
-cd my-react-native-app
-capmac run                   # the iOS app, in a simulator on the Mac
-capmac dev                   # live: each save shows in the app at once (Fast Refresh)
-capmac run --app mac         # the Mac app, on the Mac's desktop
-capmac run --app windows     # the Windows app, on this PC (no Mac needed)
-capmac run --release         # the JavaScript built into the app, no Metro
-```
-
-Metro runs on this PC and serves the app's JavaScript, and CapMac connects the app to it on the Mac.
-The Mac installs the app's packages and runs `pod install` when they change, and Xcode builds the app only when something native changed, so after the first build a run takes seconds.
-The app's `console.log` lines come back to Windows with its native logs, and a JavaScript error shows its file and line on this PC.
-
-`capmac dev` keeps Metro running: save a file and the app shows it at once, with no build.
-In the terminal, press `r` to reload the JavaScript, `j` to open React Native DevTools, `b` to rebuild the app and `B` for a clean rebuild.
-A change to `package.json`, a Podfile or the app's native code rebuilds the app.
-
-The Mac app opens behind the windows on the Mac and never takes its keyboard.
-Its window comes to Studio and to `capmac screen --app mac`, and `capmac screenshot --app mac` saves a PNG of it.
-
-The Windows app builds with react-native-windows on this PC.
-It needs Windows' Developer Mode and Visual Studio 2022 with **Desktop development with C++** and **Universal Windows Platform development**, with its C++ tools.
-CapMac checks before building and offers to add what's missing with Visual Studio's installer.
-
-Defaults for every run go in `capmac.json`:
-
-```json
-{ "reactNative": { "port": 8081, "metroArgs": ["--max-workers", "4"], "podEnv": { "USE_FRAMEWORKS": "static" }, "macosScheme": "MyApp-macOS", "windowsArch": "x64" } }
-```
-
-In Studio, the toolbar's app picker switches between the apps.
-Live mode has **Reload**, **DevTools**, **Restart app** and **Rebuild** buttons, and the **More** menu runs a release build.
-**Try a sample › iPhone, Mac and Windows app (React Native)** creates a small app with all three ([examples/hello-react-native](examples/hello-react-native)), and offers to install its packages, which Metro needs on this PC.
-With no Mac, the iOS app builds on this PC too: see the [WSL backend](#experimental-wsl-backend).
-
-## Electron apps
-
-CapMac runs plain Electron, electron-vite and Electron Forge apps, and Capacitor's Electron platform (`@capacitor-community/electron`), on the Mac's desktop.
-
-```powershell
-cd my-electron-app
-capmac run
-capmac dev
-capmac screen --electron
-```
-
-`capmac run` syncs the app, installs its dependencies and Electron for the Mac, builds it and launches it, with the main process and page consoles in your terminal.
-Objects in console lines read as they do in DevTools, like `{type: 'roll', value: 6}`.
-`capmac dev` reloads the window when you save a page and restarts the app when main process code changes.
-electron-vite and Forge projects reload through their own dev command.
-In a Capacitor project, add `--electron` or `--target mac` to run the Electron platform, which loads your dev server in live reload.
-
-`capmac screen --electron` shows the app's window in your browser, where you can click, scroll, type and use the app's menu shortcuts with Ctrl as ⌘.
-`capmac screenshot --electron` saves a PNG of the window.
-The Mac needs no Screen Recording or Accessibility permission for this.
-
-The Mac encodes and streams the window as H.264 video.
-A still window sends one frame when a viewer connects, then no more until it changes.
-On slow connections, CapMac lowers the bitrate and skips frames to keep the stream responsive.
-Electron versions older than 30 use screenshots, and `--stream compatible` selects them on newer versions too.
-CapMac remembers this choice for both the CLI and Studio, where you can change it under **Settings › Screen stream**.
-
-Someone may be using the Mac while you work, so the app opens behind their windows and never takes their keyboard.
-DevTools and full screen wait until someone switches to the app on the Mac.
-After a restart, the app comes back to the front only if someone was using it there.
-
-The app's message boxes and file dialogs stay off the Mac's screen too.
-They show over the app's window in Studio and `capmac screen --electron`, and in your terminal, where you answer them.
-File dialogs browse the Mac's folders, starting in your project's copy on the Mac.
-`capmac dialog` lists them and answers one from a script or an AI agent: `capmac dialog 2`, `capmac dialog Discard`, `capmac dialog "~/Documents/photo.png"` or `capmac dialog --cancel`.
-Someone who switches to the app on the Mac gets the dialog there instead.
-
-In Studio, Electron apps run on **Mac desktop (Electron)** in the target picker and show in a window pane with the Mac's title bar.
-**Try a sample** on the home screen creates a small Electron app to start with.
-Change how the app is found, built or started in `capmac.json`.
-
-```json
-{ "electron": { "dir": "electron", "build": "npm run build", "start": "npm start", "dev": "npm run dev" } }
-```
-
-## One folder, several apps
-
-A folder can contain both a Capacitor iOS app and an Electron app for the Mac, and a Flutter or React Native project has an iOS, a Mac and a Windows app.
-CapMac finds the apps by reading their files, without running them.
-It also checks subfolders in a monorepo.
-
-Studio asks which app to use if you haven't already chosen one.
-Opening an app's folder, such as `electron/`, suggests that app.
-Use the toolbar's app picker to switch later.
-Targets follow your choice: simulators and connected iPhones for iOS, or the Mac desktop for Electron.
-
-The CLI uses the same saved choice:
-
-```powershell
-capmac apps                 # the apps here, and the one CapMac uses
-capmac apps use electron    # from now on, in the CLI and Studio
-capmac run --app ios        # just this once
-```
-
-CapMac also recognizes Tauri, .NET MAUI, Cordova, NativeScript and Xcode projects, but can't run them yet.
-
-## Configuration
-
-Place an optional `capmac.json` beside `capacitor.config.*`.
-
-```json
-{
-  "host": "studio",
-  "ios": { "target": "iPhone 16 Pro", "team": "ABCDE12345", "scheme": "App" },
-  "web": { "build": "npm run build", "dev": "npm run dev" },
-  "sync": { "exclude": ["docs/", "*.mp4"], "include": [".env.ios"] }
-}
-```
-
-Sync respects `.gitignore`, includes the iOS project and built web assets, and skips `node_modules`, Android, Pods and build output.
-In a Capacitor project, videos, design files, pictures over 2 MB and files over 100 MB stay on your PC unless they're in the web assets, a native platform or a local dependency: your PC builds the web app, so nothing on the Mac reads them.
-`capmac info` lists what stays behind, and a `!path` line in `.capmacignore` sends one anyway.
-Use `.capmacignore` or the sync settings above to change the file list.
-Dependencies are installed on the Mac when needed, and simulator builds reuse native output when only web assets changed.
-
-Monorepos sync from the lockfile root and run Capacitor in the app's subfolder.
-The Mac's project copy lives under `~/.capmac/projects/`.
-
-## Your Mac and your code
-
-Builds run on a Mac you control, with Xcode and the Mac's keychain handling iOS signing.
-CapMac syncs the files needed for the build to that Mac over SSH, and sends logs and simulator frames back through the connection.
-
-Pairing checks the Mac's host key and installs a dedicated SSH key without storing your password.
-You can also use an existing SSH key or the Windows OpenSSH agent.
-Use `capmac info --files` to inspect what will be synced and `.capmacignore` to adjust it.
-
-## Away from the Mac's network
-
-Remote access needs your own [signaling server](services/signal/deploy/README.md).
-Deploy it, then run these commands while your PC is on the Mac's network.
-
-```powershell
-capmac remote server wss://signal.example.com
-capmac remote on
-capmac remote status --test
-```
-
-CapMac then uses the local network when available and the internet otherwise, with WebRTC for a direct connection or your server's relay when needed.
-SSH protects the connection on either route.
-
-The Mac must stay awake and logged in.
-`capmac remote set --keep-awake on` prevents idle sleep while remote access is on.
-Use `capmac remote --help` for route, relay and access controls.
-
-## AI coding agents
-
-Give your coding agent access to the same build, run, log and screenshot commands you use.
-Install the CapMac skill for agents such as Claude Code, Codex, GitHub Copilot or Cursor.
-
-```powershell
-capmac skill add
-```
-
-Choose the agents and whether to install for all projects or just this repository.
-For an explicit choice, use `capmac skill add --agent claude-code,codex --global`.
-Start a new agent session after installation.
-
-Studio has the same setup under **Settings › Terminal commands › AI coding agents**.
-CapMac for VS Code adds the skill by itself to each project it finds an app in, for the agents it finds, and asks before it replaces a skill that is already there.
-**CapMac: Add the CapMac Skill for AI Agents…** adds it again, in the project or for all your projects.
-`capmac skill` shows installed copies and `capmac skill show` prints the instructions for other agents.
-
-## Troubleshooting
-
-| Problem | Fix |
-| --- | --- |
-| SSH connection refused | Enable Remote Login on the Mac |
-| Missing Node.js, Xcode setup or iOS runtime | Run `capmac doctor --fix` |
-| Simulator will not boot | Log in to the Mac's desktop as the paired user |
-| Signing reports `errSecInternalComponent` | Unlock the keychain with `capmac keychain` |
-| Signing requires a development team | Pass `--team <TEAM_ID>` or set `ios.team` |
-| Familiar Capacitor commands are still local | Check `capmac takeover` and open a new terminal or restart VS Code |
-| Remote Mac is offline | Check that it is awake, logged in and has remote access enabled |
-| No Electron window or page console | The app must start from source; a packaged app or a launcher that drops `NODE_OPTIONS` keeps CapMac out |
-| A real iPhone's screen stays dark | Plug it into the Mac with a cable, unlock it and quit QuickTime Player if it shows the same iPhone |
-| CapMac isn't allowed to see the iPhone's screen | On the Mac, turn on **CapMac** in **System Settings › Privacy & Security › Camera** |
-
-## Developing CapMac
+Bug reports and pull requests are welcome. If CapMac can't build your app, an issue with the build output helps the most.
 
 ```powershell
 npm install
-npm run build
+npm run build          # the CLI, then try: node bin/capmac.js --help
 npm test
 npm run typecheck
-node bin/capmac.js --help
-npm run desktop:dev
-npm run desktop:test
-npm run desktop:build
+npm run desktop:dev    # CapMac Studio, restarting as you edit
+npm run vscode:build   # CapMac for VS Code
 ```
 
-| Folder | Purpose |
+| Folder | What's in it |
 | --- | --- |
-| `packages/core` | Shared engine, protocol and Mac agent |
-| `packages/cli` | CLI commands and browser simulator viewer |
+| `packages/core` | The engine everything shares, and the agent that runs on the Mac |
+| `packages/cli` | The `capmac` command |
 | `apps/desktop` | CapMac Studio |
-| `services/signal` | Signaling and relay server for remote access |
-| `examples/hello-capacitor` | Minimal Vite and Capacitor app, with Capacitor's Electron platform |
-| `examples/hello-electron` | Minimal Electron app |
+| `apps/vscode` | CapMac for VS Code |
+| `services/signal` | The server for remote access |
+| `examples` | Sample Capacitor, Flutter, React Native and Electron apps |
 
-See the [desktop design](docs/desktop-design.md) for architecture and simulator streaming details.
+If CapMac saved you from buying a Mac, a star helps other Windows developers find it
 
-### Project intro video
+## Thanks
 
-The [Remotion intro](apps/intro/README.md) is an editable 68 second 1080p video showing the CLI, Studio and iOS workflow.
+CapMac stands on great open-source work, including [pymobiledevice3](https://github.com/doronz88/pymobiledevice3), [zsign](https://github.com/zhlynn/zsign), [Swift](https://www.swift.org), [LLVM](https://llvm.org), [CocoaPods](https://cocoapods.org), [omarchy-apple-dev](https://github.com/joshuaswarren/omarchy-apple-dev), [@expo/apple-utils](https://www.npmjs.com/package/@expo/apple-utils), [ssh2](https://github.com/mscdex/ssh2) and [Electron](https://www.electronjs.org)
 
-```powershell
-npm ci --prefix apps/intro
-npm run intro:studio
-npm run intro:render
-```
+## License
 
-The render is saved to `out/capmac-intro-v4.mp4`.
+[MIT](LICENSE)

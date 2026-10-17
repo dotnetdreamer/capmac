@@ -58,7 +58,7 @@ Enable macOS Remote Login before pairing and keep the Mac awake with a logged in
 
 Internet access needs your configured signaling server and initial activation while this PC is on the Mac network
 
-The [project setup instructions](../../README.md#quick-start), [command compatibility](../../README.md#keep-your-capacitor-and-ionic-commands) and [remote access setup](../../README.md#away-from-the-macs-network) explain these requirements
+The [project setup instructions](../../README.md#quick-start), [command compatibility](../../docs/guide.md#your-capacitor-and-ionic-commands) and [remote access setup](../../docs/guide.md#away-from-the-macs-network) explain these requirements
 
 ## Edit
 

@@ -1,7 +1,7 @@
 {
   "name": "capmac",
   "version": "0.1.1",
-  "description": "Pair to Mac for Capacitor: build, run, live-reload and see your iOS app on a remote Mac, straight from Windows.",
+  "description": "Build iPhone apps on Windows, with your Mac or with no Mac at all. Capacitor, Ionic, Flutter, React Native and Electron.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -21,9 +21,16 @@
   },
   "keywords": [
     "capacitor",
+    "ionic",
+    "flutter",
+    "react-native",
+    "expo",
+    "electron",
     "ios",
+    "iphone",
     "xcode",
     "windows",
+    "wsl",
     "remote",
     "pair-to-mac",
     "simulator",
