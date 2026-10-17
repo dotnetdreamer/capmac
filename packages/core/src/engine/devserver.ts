@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import net from 'node:net';
-import { log, type EngineContext } from './context.js';
-import { UserError } from './errors.js';
+import { log, throwIfAborted, type EngineContext } from './context.js';
+import { CancelledError, UserError } from './errors.js';
 import { stripAnsi } from './format.js';
 import { scriptCommand, type ProjectInfo } from './project.js';
 
@@ -79,14 +79,18 @@ export function killTree(child: ChildProcess): Promise<void> {
 export interface DevServerOptions {
   url?: string;
   command?: string;
+  signal?: AbortSignal;
 }
 
 export async function startDevServer(project: ProjectInfo, options: DevServerOptions, ctx: EngineContext): Promise<DevServer> {
+  throwIfAborted(options.signal);
   const explicit = options.url ?? project.config.web?.devUrl;
   if (explicit) {
     const url = new URL(explicit);
     const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80));
-    if (!(await canConnect(url.hostname, port))) {
+    const reachable = await canConnect(url.hostname, port);
+    throwIfAborted(options.signal);
+    if (!reachable) {
       throw new UserError(`Nothing is listening at ${url.href}.`, 'Start your dev server first, or let CapMac start it by leaving out --url.');
     }
     return { url, external: true, command: null, stop: async () => undefined, exited: new Promise(() => undefined) };
@@ -117,7 +121,10 @@ export async function startDevServer(project: ProjectInfo, options: DevServerOpt
     }
   };
   const url = await new Promise<URL>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new UserError('The dev server did not print a URL within 2 minutes.', 'Pass --url http://localhost:<port> if it is running, or check its output above.')), 120_000);
+    const onAbort = () => { clearTimeout(timer); reject(new CancelledError()); };
+    const cleanup = () => options.signal?.removeEventListener('abort', onAbort);
+    const timer = setTimeout(() => { cleanup(); reject(new UserError('The dev server did not print a URL within 2 minutes.', 'Pass --url http://localhost:<port> if it is running, or check its output above.')); }, 120_000);
+    options.signal?.addEventListener('abort', onAbort, { once: true });
     const onData = (chunk: Buffer) => {
       const text = chunk.toString('utf8');
       onText(text);
@@ -127,6 +134,7 @@ export async function startDevServer(project: ProjectInfo, options: DevServerOpt
       if (candidate) {
         found = candidate;
         clearTimeout(timer);
+        cleanup();
         resolve(candidate);
       }
     };
@@ -134,10 +142,12 @@ export async function startDevServer(project: ProjectInfo, options: DevServerOpt
     child.stderr!.on('data', onData);
     child.on('error', (err) => {
       clearTimeout(timer);
+      cleanup();
       reject(err);
     });
     child.on('close', (code) => {
       clearTimeout(timer);
+      cleanup();
       if (!found) {
         const missingDeps = /is not recognized|command not found|Cannot find module|ERR_MODULE_NOT_FOUND/i.test(output);
         reject(new UserError(
@@ -147,12 +157,14 @@ export async function startDevServer(project: ProjectInfo, options: DevServerOpt
         ));
       }
     });
+    if (options.signal?.aborted) onAbort();
   }).catch(async (err) => {
     await killTree(child);
     throw err;
   });
   const port = Number(url.port || 80);
-  for (let i = 0; i < 40 && !(await canConnect(url.hostname, port)); i++) await new Promise((r) => setTimeout(r, 250));
+  for (let i = 0; i < 40 && !options.signal?.aborted && !(await canConnect(url.hostname, port)); i++) await new Promise((r) => setTimeout(r, 250));
+  if (options.signal?.aborted) { await killTree(child); throw new CancelledError(); }
   if (url.protocol === 'https:') log(ctx, 'warn', 'The dev server uses HTTPS; iOS will reject a self-signed certificate. Prefer plain HTTP for live reload.');
   return { url, external: false, command, stop: () => killTree(child), exited };
 }

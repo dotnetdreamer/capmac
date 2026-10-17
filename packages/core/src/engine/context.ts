@@ -8,7 +8,7 @@ import type { EngineEvent, LogLevel, Phase, StepStatus } from './events.js';
 
 export interface PasswordRequest {
   /** Why the password is needed, which decides the dialog's wording. */
-  purpose: 'pair' | 'keychain' | 'sudo';
+  purpose: 'pair' | 'keychain' | 'sudo' | 'signing' | 'apple';
   message: string;
   /** Friendly name of the Mac. */
   mac?: string;
@@ -23,10 +23,23 @@ export interface ConfirmRequest {
   danger?: boolean;
   /** Label for the "yes" button in the UI. */
   confirmLabel?: string;
+  /** A web page the question is about (CapMac Studio shows a button that opens it). */
+  link?: { label: string; url: string };
+  /** Label for the "no" button in the UI. */
+  cancelLabel?: string;
+  /**
+   * The question stays up while CapMac waits for something else, such as a sign-in
+   * in a browser window ("Waiting for you to sign in…"). Its buttons are ways out.
+   */
+  waiting?: string;
+  /** Takes the question back (it no longer needs an answer): `confirm` then resolves false. */
+  signal?: AbortSignal;
 }
 
 export interface ChooseRequest<T> {
   message: string;
+  /** Why the question is asked, shown above the choices. */
+  detail?: string;
   items: Array<{ label: string; value: T; hint?: string }>;
 }
 
@@ -34,6 +47,8 @@ export interface TextRequest {
   message: string;
   defaultValue?: string;
   placeholder?: string;
+  /** What is asked, which decides the dialog's wording in CapMac Studio. */
+  purpose?: 'apple-email' | 'apple-code';
 }
 
 export interface Prompter {

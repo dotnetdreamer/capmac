@@ -7,7 +7,7 @@ export default defineConfig({
       name: 'objc-source-as-text',
       enforce: 'pre',
       transform(code, id) {
-        if (id.endsWith('.m')) return { code: `export default ${JSON.stringify(code)};`, map: null };
+        if (id.endsWith('.m') || id.endsWith('.rb')) return { code: `export default ${JSON.stringify(code)};`, map: null };
       },
     },
   ],

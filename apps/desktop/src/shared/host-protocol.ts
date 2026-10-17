@@ -35,5 +35,7 @@ export type HostToMain =
   | { kind: 'result'; id: number; result: CallResult<unknown> }
   | { kind: 'events'; batch: Envelope[] }
   | { kind: 'prompt'; prompt: PromptRequest }
+  /** The engine no longer needs that answer: close its dialog. */
+  | { kind: 'prompt-withdraw'; id: string }
   | { kind: 'log'; level: 'info' | 'warn' | 'error'; message: string }
   | { kind: 'shutdown-done' };

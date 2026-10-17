@@ -11,10 +11,12 @@ import type { MessagePortMain } from 'electron';
 import {
   applyFix,
   AppScreenStream,
+  backendOf,
   bootSimulator,
   buildApp,
   CancelledError,
   chooseApp,
+  chooseBackend,
   disableRemote,
   discoverMacs,
   ElectronLiveSession,
@@ -65,6 +67,7 @@ import {
   type Check,
   type EngineContext,
   type HostConfig,
+  type ProjectInfo,
   type Prompter,
   type VideoPacket,
 } from '@capmac/core/engine';
@@ -90,6 +93,7 @@ import {
 } from '../shared/contract.js';
 import type { HostInit, HostSettings, HostToMain, MainToHost } from '../shared/host-protocol.js';
 import { t } from '../shared/i18n/index.js';
+import { createWslHost } from './wsl-host.js';
 
 const parent = process.parentPort;
 let init: HostInit | null = null;
@@ -127,10 +131,21 @@ const pendingPrompts = new Map<string, (response: PromptResponse) => void>();
 
 type PromptBody = PromptRequest extends infer P ? (P extends unknown ? Omit<P, 'id'> : never) : never;
 
-function ask(prompt: PromptBody): Promise<PromptResponse> {
+/** `signal` takes the question back: the dialog closes and the answer is "no". */
+function ask(prompt: PromptBody, signal?: AbortSignal): Promise<PromptResponse> {
   const id = newId('p');
+  if (signal?.aborted) return Promise.resolve({ id, ok: false });
   return new Promise((resolve) => {
-    pendingPrompts.set(id, resolve);
+    const withdraw = () => {
+      if (!pendingPrompts.delete(id)) return;
+      send({ kind: 'prompt-withdraw', id });
+      resolve({ id, ok: false });
+    };
+    pendingPrompts.set(id, (response) => {
+      signal?.removeEventListener('abort', withdraw);
+      resolve(response);
+    });
+    signal?.addEventListener('abort', withdraw, { once: true });
     send({ kind: 'prompt', prompt: { ...prompt, id } as PromptRequest });
   });
 }
@@ -143,17 +158,20 @@ const prompter: Prompter = {
     return r.value;
   },
   async confirm(request) {
-    const r = await ask({ kind: 'confirm', message: request.message, detail: request.detail, danger: request.danger, confirmLabel: request.confirmLabel, defaultYes: request.defaultYes });
+    const r = await ask({
+      kind: 'confirm', message: request.message, detail: request.detail, danger: request.danger, confirmLabel: request.confirmLabel,
+      cancelLabel: request.cancelLabel, defaultYes: request.defaultYes, link: request.link, waiting: request.waiting,
+    }, request.signal);
     return r.ok && r.value === true;
   },
   async choose(request) {
-    const r = await ask({ kind: 'choose', message: request.message, items: request.items.map(({ label, hint }) => ({ label, hint })) });
+    const r = await ask({ kind: 'choose', message: request.message, detail: request.detail, items: request.items.map(({ label, hint }) => ({ label, hint })) });
     const item = r.ok && typeof r.value === 'number' ? request.items[r.value] : undefined;
     if (!item) throw new CancelledError();
     return item.value;
   },
   async text(request) {
-    const r = await ask({ kind: 'text', message: request.message, defaultValue: request.defaultValue, placeholder: request.placeholder });
+    const r = await ask({ kind: 'text', message: request.message, defaultValue: request.defaultValue, placeholder: request.placeholder, purpose: request.purpose });
     if (!r.ok || typeof r.value !== 'string') throw new CancelledError();
     return r.value;
   },
@@ -162,6 +180,9 @@ const prompter: Prompter = {
 function contextFor(scope: Scope): EngineContext {
   return { emit: (event) => emit(scope, event), prompter, verbose: settings.verbose };
 }
+
+/** Building on this PC, with no Mac (`capmac wsl …`). */
+const wslHost = createWslHost({ emit, contextFor, newId });
 
 // ─── Macs ──────────────────────────────────────────────────────────────────
 
@@ -310,7 +331,8 @@ interface HostSession {
   id: string;
   mode: 'run' | 'live' | 'ipa';
   projectPath: string;
-  mac: string;
+  /** None when it builds on this PC. */
+  mac: string | null;
   controller: AbortController;
   /** Live reload: an iOS app's, or an Electron app's on the Mac's desktop. */
   live: LiveSession | ElectronLiveSession | null;
@@ -339,6 +361,9 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
   // The app asked for (the toolbar's app picker), else the Mac's desktop as the target, else the one picked for the project.
   const onMac = params.mode !== 'ipa' && runsOnMac(project, { app: 'app' in params ? params.app : undefined, target: 'target' in params && params.target === MAC_TARGET_ID ? 'mac' : undefined });
   if (!onMac) requireIos(project);
+  // An Electron app runs on the Mac's desktop; the iOS app builds where the project builds.
+  if (params.mode !== 'ipa' && !onMac && ((params.backend ?? (await backendOf(project))) === 'wsl')) return startPcSession(params, project);
+  if (params.mode === 'build') throw new UserError(t.host.buildOnPcOnly, t.host.buildOnPcOnlyHint);
   const mac = params.mac ?? project.config.host ?? (await defaultMacName());
   const id = newId('s');
   const scope: Scope = { sessionId: id, projectPath: project.capDir, mac };
@@ -395,6 +420,29 @@ async function startSession(params: MethodParams<'sessions.start'> | (MethodPara
       end();
     }, end);
   }
+  return { sessionId: id };
+}
+
+/** Run, live or build on this PC: no Mac, the iPhone plugged into this PC. */
+function startPcSession(params: MethodParams<'sessions.start'>, project: ProjectInfo): { sessionId: string } {
+  const id = newId('s');
+  const scope: Scope = { sessionId: id, projectPath: project.capDir };
+  const ctx = contextFor(scope);
+  const controller = new AbortController();
+  const started = Date.now();
+  // A build here makes the .ipa: it shows like the Mac's IPA builds.
+  const mode = params.mode === 'build' ? 'ipa' : params.mode;
+  const target = params.target && params.target !== MAC_TARGET_ID ? params.target : undefined;
+  emit(scope, { type: 'session-started', mode, projectPath: project.capDir, mac: null, target: target ?? null, backend: 'wsl' });
+  const end = (err?: unknown) => {
+    sessions.delete(id);
+    const info = err === undefined ? undefined : toErrorInfo(err);
+    const cancelled = Boolean(info?.cancelled) || controller.signal.aborted;
+    emit(scope, { type: 'session-ended', mode, ok: err === undefined || cancelled, cancelled, error: cancelled ? undefined : info, ms: Date.now() - started });
+  };
+  const session: HostSession = { id, mode, projectPath: project.capDir, mac: null, controller, live: null, done: Promise.resolve() };
+  sessions.set(id, session);
+  session.done = wslHost.session(params.mode, project, target, ctx, controller.signal, (file, size) => emit(scope, { type: 'ipa-ready', file, size }), { clean: params.options?.clean }).then(() => end(), end);
   return { sessionId: id };
 }
 
@@ -853,6 +901,16 @@ const handlers: Handlers = {
   },
   'macs.remote.revoke': async ({ name, key }) => revokeRemotePc(await link(name).session(), key, contextFor({ mac: name })),
   'macs.remote.test': async ({ name }) => testRemote(await hostConfig(name)),
+  'projects.setBackend': async ({ path: dir, backend }) => {
+    const project = await loadProject(dir);
+    await chooseBackend(project, backend);
+    return summarizeProject(project);
+  },
+  'wsl.status': ({ projectPath }) => wslHost.status(projectPath),
+  'wsl.setup': async ({ projectPath, appleLogin }) => wslHost.setup(projectPath, appleLogin),
+  'wsl.stopSetup': ({ setupId }) => wslHost.stopSetup(setupId),
+  'wsl.doctor': ({ projectPath }) => wslHost.doctor(projectPath),
+  'wsl.devices': ({ projectPath }) => wslHost.devices(projectPath),
 };
 
 async function handleCall(id: number, method: EngineMethod, params: unknown): Promise<void> {
@@ -882,7 +940,7 @@ async function shutdown(): Promise<void> {
   for (const watchEntry of watches.values()) watchEntry.watch.dispose();
   for (const id of [...screens.keys()]) closeScreen(id);
   await Promise.race([
-    Promise.all([...sessions.keys()].map((id) => stopSession(id))),
+    Promise.all([...[...sessions.keys()].map((id) => stopSession(id)), wslHost.shutdown()]),
     new Promise((resolve) => setTimeout(resolve, 4000)),
   ]);
   for (const l of links.values()) l.close();

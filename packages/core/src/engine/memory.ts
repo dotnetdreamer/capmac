@@ -5,7 +5,7 @@ import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isSoundMode, type SoundMode } from '../shared/electron.js';
 import { capmacDir } from './config.js';
-import type { RunnableApp } from './project.js';
+import type { BuildBackend, RunnableApp } from './project.js';
 
 /** Small per-project memory on the Windows side (last target used, etc), shared by the CLI and CapMac Studio. */
 export interface ProjectMemory {
@@ -15,6 +15,8 @@ export interface ProjectMemory {
   sound?: SoundMode;
   /** The app CapMac works on, when the project has more than one (see apps.ts). */
   app?: RunnableApp;
+  /** Where the iOS app builds: a paired Mac (the default), or this PC (see backend.ts). */
+  backend?: BuildBackend;
 }
 
 const file = () => path.join(capmacDir(), 'projects.json');

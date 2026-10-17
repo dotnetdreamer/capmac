@@ -3,9 +3,10 @@ import { t } from '../../shared/i18n';
 import { useApp } from '../state/app';
 import type { RunnableApp } from '../../shared/contract';
 import { appGlyph, appKind, canRun } from '../lib/apps';
-import { appOf, forgetProject, macFor, openInXcode, openProject, pickProject, projectPrefs, rebuild, relaunch, setApp, startSession, stopSession } from '../state/actions';
+import { appOf, forgetProject, macFor, openInXcode, openProject, pickProject, projectPrefs, rebuild, relaunch, setApp, setBackend, startSession, stopSession } from '../state/actions';
 import { call } from '../state/engine';
 import { resolveMac, useMacs } from '../state/macs';
+import { usePc } from '../state/pc';
 import { projectKey, useProjects } from '../state/projects';
 import { setOptions, testConnection, turnOn, useRemote } from '../state/remote';
 import { isActive, useRuns } from '../state/runs';
@@ -77,6 +78,10 @@ export function buildCommands(): Command[] {
 
   if (path) {
     const live = run?.mode === 'live' && active;
+    // Where the iOS app builds: this PC (no Mac), or a Mac. The Electron app always runs on the Mac.
+    const summary = useProjects.getState().byKey[projectKey(path)]?.summary;
+    const iosApp = Boolean(summary?.kind === 'capacitor' && appOf(summary, projectPrefs(path)) !== 'electron');
+    const onPc = iosApp && summary?.backend === 'wsl';
     commands.push(
       { id: 'live', title: live ? t.commands.restartLive : t.commands.startLive, group: 'Session', icon: 'flash', shortcut: 'F5', keywords: 'dev hmr watch', run: () => void startSession(path, 'live') },
       { id: 'run', title: active && run?.mode === 'run' ? t.commands.runAgain : t.commands.run, group: 'Session', icon: 'play', shortcut: 'Ctrl+F5', keywords: 'build launch start', run: () => void startSession(path, 'run') },
@@ -85,8 +90,15 @@ export function buildCommands(): Command[] {
       { id: 'clean-rebuild', title: t.commands.cleanRebuild, group: 'Session', icon: 'eraser', keywords: 'derived data', run: () => void rebuild(path, true) },
       { id: 'relaunch', title: t.commands.restartApp, group: 'Session', icon: 'refresh', enabled: live, run: () => void relaunch(path) },
       { id: 'build-ipa', title: t.commands.buildIpa, group: 'Project', icon: 'box', keywords: 'archive export testflight', run: () => emitWorkspace('build-ipa') },
-      { id: 'xcode', title: t.commands.openXcode, group: 'Project', icon: 'code', run: () => void openInXcode(path) },
-      { id: 'pick-target', title: t.commands.chooseTarget, group: 'Project', icon: 'phone', keywords: 'target iphone', run: () => app.openPalette('target') },
+      { id: 'xcode', title: t.commands.openXcode, group: 'Project', icon: 'code', enabled: !onPc, run: () => void openInXcode(path) },
+      // On this PC the toolbar's picker lists the iPhones plugged in here.
+      { id: 'pick-target', title: t.commands.chooseTarget, group: 'Project', icon: 'phone', keywords: 'target iphone', enabled: !onPc, run: () => app.openPalette('target') },
+      { id: 'backend', title: onPc ? t.commands.buildOnMac : t.commands.buildOnPc, group: 'Project', icon: onPc ? 'mac' : 'desktop', keywords: 'wsl windows no mac backend', enabled: iosApp, run: () => void setBackend(path, onPc ? 'mac' : 'wsl') },
+      { id: 'pc-setup', title: t.commands.setUpPc, group: 'Project', icon: 'wrench', keywords: 'wsl apple sign in signing xcode download', enabled: onPc, run: () => usePc.getState().showSetup(path, true) },
+      { id: 'pc-check', title: t.commands.checkPc, group: 'Project', icon: 'health', keywords: 'doctor wsl', enabled: onPc, run: () => {
+        usePc.getState().showSetup(path, true);
+        void usePc.getState().check(path);
+      } },
       ...switchAppCommands(path, active),
       { id: 'pick-mac', title: t.commands.chooseMac, group: 'Project', icon: 'mac', enabled: macs.length > 1, run: () => app.openPalette('mac') },
       { id: 'build-log', title: t.commands.buildLog, group: 'Project', icon: 'document', enabled: Boolean(run?.buildLogPath), run: () => emitWorkspace('show-build-log') },

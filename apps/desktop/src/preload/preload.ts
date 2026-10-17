@@ -50,6 +50,7 @@ const api: CapmacApi = {
   call: (method, params) => ipcRenderer.invoke('app:engine-call', { method, params }),
   onEvents: (listener) => subscribe('engine:events', listener),
   onPrompt: (listener) => subscribe('engine:prompt', listener),
+  onPromptWithdraw: (listener) => subscribe('engine:prompt-withdraw', listener),
   onEngineStatus: (listener) => subscribe('engine:status', listener),
   onSettings: (listener) => subscribe('app:settings', listener),
   onCommand: (listener) => subscribe('app:command', listener),

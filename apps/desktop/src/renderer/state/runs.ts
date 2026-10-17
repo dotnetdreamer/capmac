@@ -14,10 +14,14 @@ export const IPA_PHASES: TimelinePhase[] = ['web', 'sync', 'deps', 'cap', 'archi
 /** An Electron app on the Mac's desktop; Capacitor's adds its web build and `cap copy`. */
 export const ELECTRON_PHASES: TimelinePhase[] = ['sync', 'deps', 'electron', 'build', 'launch'];
 export const CAP_ELECTRON_PHASES: TimelinePhase[] = ['web', 'sync', 'deps', 'electron', 'cap', 'build', 'launch'];
+/** Built on this PC: no copy to a Mac, no cap sync, no simulator. */
+export const PC_PHASES: TimelinePhase[] = ['web', 'deps', 'build', 'install', 'launch'];
+export const PC_IPA_PHASES: TimelinePhase[] = ['web', 'deps', 'build'];
 export const PHASE_LABELS: Record<TimelinePhase, string> = t.phases;
 
-/** A step's name: some read differently for an Electron app ("Build", not "Xcode build"). */
-export function phaseLabel(phase: TimelinePhase, onMac: boolean): string {
+/** A step's name: some read differently for an Electron app ("Build", not "Xcode build"), or on this PC. */
+export function phaseLabel(phase: TimelinePhase, onMac: boolean, pc = false): string {
+  if (pc) return (t.pc.phases as Partial<Record<TimelinePhase, string>>)[phase] ?? PHASE_LABELS[phase];
   return (onMac ? (t.phasesMac as Partial<Record<TimelinePhase, string>>)[phase] : undefined) ?? PHASE_LABELS[phase];
 }
 
@@ -66,6 +70,8 @@ export interface RunState {
   endedAt: number | null;
   phases: Partial<Record<TimelinePhase, PhaseState>>;
   stepPhase: Record<string, TimelinePhase>;
+  /** Before its first build step: what the run does, like checking this PC's build tools. */
+  preparing: { id: string; title: string } | null;
   diagnostics: Diagnostic[];
   error: ErrorInfo | null;
   notes: Note[];
@@ -73,6 +79,8 @@ export interface RunState {
   target: Target | null;
   /** The app runs on the Mac's desktop (an Electron app). */
   onMac: boolean;
+  /** Where it builds: the Mac, or this PC (and the iPhone plugged into it). */
+  backend: 'mac' | 'wsl';
   mac: string | null;
   live: LiveState | null;
   buildLogPath: string | null;
@@ -92,12 +100,14 @@ export function emptyRun(path: string): RunState {
     endedAt: null,
     phases: {},
     stepPhase: {},
+    preparing: null,
     diagnostics: [],
     error: null,
     notes: [],
     app: null,
     target: null,
     onMac: false,
+    backend: 'mac',
     mac: null,
     live: null,
     buildLogPath: null,
@@ -130,6 +140,7 @@ function newRun(run: RunState, mode: RunState['mode']): RunState {
     endedAt: null,
     phases: {},
     stepPhase: {},
+    preparing: null,
     diagnostics: [],
     error: null,
     notes: [],
@@ -152,7 +163,7 @@ function reduce(run: RunState, event: HostEvent, sessionId: string | undefined, 
   const now = Date.now();
   switch (event.type) {
     case 'session-started': {
-      const next = newRun({ ...run, sessionId: sessionId ?? null, mac: event.mac, app: null, onMac: event.target === MAC_TARGET_ID }, event.mode === 'build' ? 'run' : event.mode);
+      const next = newRun({ ...run, sessionId: sessionId ?? null, mac: event.mac, app: null, onMac: event.target === MAC_TARGET_ID, backend: event.backend ?? 'mac' }, event.mode === 'build' ? 'run' : event.mode);
       next.status = 'starting';
       next.live = event.mode === 'live'
         ? { devServerUrl: null, external: false, command: null, tunnel: 'pending', liveUrl: null, localUrl: null, hmr: 'waiting', hmrUpdatedAt: null, lastNativeChange: null }
@@ -186,10 +197,11 @@ function reduce(run: RunState, event: HostEvent, sessionId: string | undefined, 
       return next;
     }
     case 'step': {
-      if (!TIMELINE.has(event.phase)) return run;
+      if (!TIMELINE.has(event.phase)) return run.status === 'starting' ? { ...run, preparing: { id: event.id, title: event.title } } : run;
       const phase = event.phase as TimelinePhase;
       return {
         ...run,
+        preparing: null,
         status: run.status === 'starting' || run.status === 'idle' || run.status === 'running' ? 'building' : run.status,
         phases: { ...run.phases, [phase]: { status: 'running', title: event.title, startedAt: now } },
         stepPhase: { ...run.stepPhase, [event.id]: phase },
@@ -204,6 +216,7 @@ function reduce(run: RunState, event: HostEvent, sessionId: string | undefined, 
     case 'step-end': {
       const phase = run.stepPhase[event.id];
       const state = phase && run.phases[phase];
+      if (run.preparing?.id === event.id) return { ...run, preparing: null };
       if (!phase || !state) return run;
       const status: PhaseState['status'] = event.status === 'ok' ? 'done' : event.status;
       return { ...run, phases: { ...run.phases, [phase]: { ...state, status, ms: event.ms || (state.startedAt ? now - state.startedAt : undefined), detail: event.detail, progress: undefined } } };

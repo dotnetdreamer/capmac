@@ -32,6 +32,7 @@ export function bundles({ production }) {
     bundle: true,
     platform: 'node',
     target: 'node24',
+    loader: { '.rb': 'text' },
     external,
     define,
     sourcemap: production ? false : 'linked',

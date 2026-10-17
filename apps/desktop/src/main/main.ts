@@ -200,7 +200,16 @@ function onEnginePrompt(prompt: PromptRequest): void {
   }
   pendingPrompts.push(prompt);
   send('engine:prompt', prompt);
-  askForAttention(prompt.message);
+  // A question that waits on something else (a sign-in in the browser) needs no answer to go on.
+  if (!(prompt.kind === 'confirm' && prompt.waiting)) askForAttention(prompt.message);
+}
+
+function onEnginePromptWithdraw(id: string): void {
+  const index = pendingPrompts.findIndex((p) => p.id === id);
+  if (index < 0) return;
+  pendingPrompts.splice(index, 1);
+  send('engine:prompt-withdraw', id);
+  if (!pendingPrompts.length && win && !win.isDestroyed()) win.flashFrame(false);
 }
 
 /**
@@ -452,6 +461,7 @@ app.whenReady().then(async () => {
   }), {
     onEvents: onEngineEvents,
     onPrompt: onEnginePrompt,
+    onPromptWithdraw: onEnginePromptWithdraw,
     onStatus: (status) => {
       engineStatus = status;
       if (status.state === 'crashed') {

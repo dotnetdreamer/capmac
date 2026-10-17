@@ -26,6 +26,10 @@ export type ProjectKind = 'capacitor' | 'electron';
 export type RunnableApp = 'ios' | 'electron';
 export const isRunnableApp = (value: unknown): value is RunnableApp => value === 'ios' || value === 'electron';
 
+/** Where a project's iOS app builds: on a paired Mac, or on this PC in WSL with no Mac (see backend.ts). */
+export type BuildBackend = 'mac' | 'wsl';
+export const isBuildBackend = (value: unknown): value is BuildBackend => value === 'mac' || value === 'wsl';
+
 export interface ProjectInfo {
   kind: ProjectKind;
   /** The project folder: the one with capacitor.config.*, or the Electron app's. */

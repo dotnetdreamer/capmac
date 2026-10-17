@@ -11,6 +11,17 @@ const target = { kind: 'simulator', udid: 'A1B2C3D4-0000-0000-0000-000000000000'
 beforeEach(() => useRuns.setState({ byKey: {} }));
 
 describe('the run timeline', () => {
+  it('says what a run does before its first build step', () => {
+    apply({ type: 'session-started', mode: 'run', projectPath, mac: null, target: null, backend: 'wsl' });
+    apply({ type: 'step', id: 'check', title: 'Checking this PC’s build tools', phase: 'other' });
+    expect(run().preparing).toEqual({ id: 'check', title: 'Checking this PC’s build tools' });
+    apply({ type: 'step-end', id: 'check', status: 'ok', ms: 60_000 });
+    expect(run().preparing).toBeNull();
+    apply({ type: 'step', id: 'other', title: 'Something else', phase: 'other' }, { type: 'step', id: 'web', title: 'Building the web app', phase: 'web' });
+    expect(run().preparing).toBeNull();
+    expect(run().phases.web).toMatchObject({ status: 'running' });
+  });
+
   it('follows a successful run from start to the app running', () => {
     apply({ type: 'session-started', mode: 'run', projectPath, mac: 'ik-s-m1', target: null });
     expect(run().status).toBe('starting');

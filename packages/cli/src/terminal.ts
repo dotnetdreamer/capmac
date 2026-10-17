@@ -3,7 +3,7 @@
  * (spinner steps, app logs, `file:line:col: error:` diagnostics) and answers
  * the engine's questions with readline prompts.
  */
-import type { AppLogEntry, EngineContext, EngineEvent, Phase, Prompter } from '@capmac/core/engine';
+import type { AppLogEntry, ChooseRequest, ConfirmRequest, EngineContext, EngineEvent, Phase, Prompter } from '@capmac/core/engine';
 import { describeTarget } from '@capmac/core/engine';
 import type { AppDialog, AppDialogAnswer } from '@capmac/core/shared/electron';
 import type { Diagnostic } from '@capmac/core/shared/protocol';
@@ -366,11 +366,25 @@ export class TerminalPrompter implements Prompter {
     return password(request.message);
   }
 
-  confirm(request: { message: string; defaultYes?: boolean }): Promise<boolean> {
-    return confirm(request.message, request.defaultYes ?? true);
+  async confirm(request: ConfirmRequest): Promise<boolean> {
+    // The detail lists what a "yes" will do, so it is shown before the question.
+    if (request.detail) for (const line of request.detail.split('\n')) log.line(`  ${pc.dim(line)}`);
+    if (!request.waiting && !request.signal) return confirm(request.message, request.defaultYes ?? true);
+    // CapMac may take this question back: it goes on by itself once what it waits for happens.
+    if (request.waiting) log.line(`  ${pc.cyan('…')} ${request.waiting}`);
+    const choices = pc.dim(`(y: ${request.confirmLabel ?? 'yes'}, n: ${request.cancelLabel ?? 'no'})`);
+    for (;;) {
+      const reply = await askUnless(`${request.message} ${choices}`, request.signal ?? new AbortController().signal);
+      if (reply === null) return false;
+      const answer = reply.toLowerCase();
+      if (answer === 'y' || answer === 'yes') return true;
+      if (answer === 'n' || answer === 'no') return false;
+      if (!answer && !request.waiting) return request.defaultYes ?? true;
+    }
   }
 
-  choose<T>(request: { message: string; items: Array<{ label: string; value: T; hint?: string }> }): Promise<T> {
+  choose<T>(request: ChooseRequest<T>): Promise<T> {
+    if (request.detail) for (const line of request.detail.split('\n')) log.line(`  ${pc.dim(line)}`);
     return select(request.message, request.items);
   }
 

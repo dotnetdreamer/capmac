@@ -34,7 +34,11 @@ function LiveCard({ path, run, mac }: { path: string; run: RunState; mac: MacSum
   const live = run.live!;
   const now = useTick(15_000, Boolean(live.hmrUpdatedAt));
   const busy = isBusy(run);
-  const hmrText = live.hmr === 'connected' ? (live.hmrUpdatedAt ? t.session.updatedAt(clockTime(live.hmrUpdatedAt)) : t.session.updatesReady) : live.hmr === 'disconnected' ? t.session.appNotConnected : t.session.waitingForApp;
+  // On this PC the iPhone loads the dev server through a relay on this PC's network: linked once it is up.
+  const pc = run.backend === 'wsl';
+  const linked = pc ? Boolean(live.devServerUrl) : live.tunnel === 'up';
+  const hmrText = pc ? t.pc.liveHint : live.hmr === 'connected' ? (live.hmrUpdatedAt ? t.session.updatedAt(clockTime(live.hmrUpdatedAt)) : t.session.updatesReady) : live.hmr === 'disconnected' ? t.session.appNotConnected : t.session.waitingForApp;
+  const hmrTone = pc ? (run.app?.state === 'running' ? 'live' : 'idle') : live.hmr === 'connected' ? 'live' : live.hmr === 'disconnected' ? 'warn' : 'idle';
   return (
     <div className="session-bar session-bar--live" role="status" aria-label={t.session.liveLabel}>
       <span className="session-bar__mode">
@@ -47,19 +51,19 @@ function LiveCard({ path, run, mac }: { path: string; run: RunState; mac: MacSum
             {live.devServerUrl ? hostOf(live.devServerUrl) : <Spinner size={12} />}
           </span>
         </Tooltip>
-        <span className={`session-bar__link${live.tunnel === 'up' ? ' is-up' : ''}`} aria-label={live.tunnel === 'up' ? t.session.linkUp : t.session.linkDown}>
+        <span className={`session-bar__link${linked ? ' is-up' : ''}`} aria-label={pc ? (linked ? t.pc.linkUp : t.pc.linkDown) : linked ? t.session.linkUp : t.session.linkDown}>
           <span className="session-bar__line" />
           <span className="session-bar__tunnel">{t.session.link}</span>
           <span className="session-bar__line" />
         </span>
         <span className="session-bar__chip">
-          <Icon name="mac" size={14} />
-          {mac?.label ?? t.session.mac}
+          <Icon name={pc ? 'phone' : 'mac'} size={14} />
+          {pc ? run.target?.name ?? t.pc.device : mac?.label ?? t.session.mac}
         </span>
       </span>
       <span className="session-bar__sep" />
       <span className="session-bar__hmr" title={live.hmrUpdatedAt ? t.session.lastUpdate(timeAgo(live.hmrUpdatedAt, now)) : undefined}>
-        <StatusDot tone={live.hmr === 'connected' ? 'live' : live.hmr === 'disconnected' ? 'warn' : 'idle'} pulse={live.hmr === 'connected'} />
+        <StatusDot tone={hmrTone} pulse={hmrTone === 'live'} />
         {hmrText}
       </span>
       {live.lastNativeChange && busy && (
@@ -180,7 +184,7 @@ function FailureCard({ path, run }: { path: string; run: RunState }) {
                 {t.session.buildLog}
               </Button>
             )}
-            <Button size="sm" variant="subtle" icon="refresh" onClick={() => void startSession(path, run.mode === 'live' ? 'live' : 'run')}>
+            <Button size="sm" variant="subtle" icon="refresh" onClick={() => void startSession(path, run.mode === 'live' ? 'live' : run.mode === 'ipa' && run.backend === 'wsl' ? 'build' : 'run')}>
               {t.common.tryAgain}
             </Button>
           </>

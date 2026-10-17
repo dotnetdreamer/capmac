@@ -1,5 +1,6 @@
 import { Command, Option } from 'commander';
 import { appsCommand, appsUseCommand } from './commands/apps.js';
+import { backendCommand, commandBackend } from './commands/backend.js';
 import { buildCommand } from './commands/build.js';
 import { capCommand } from './commands/cap.js';
 import { devCommand } from './commands/dev.js';
@@ -16,6 +17,7 @@ import {
   remoteTestCommand,
 } from './commands/remote.js';
 import { runCommand } from './commands/run.js';
+import { wslBuildCommand, wslDevCommand, wslDoctorCommand, wslRunCommand, wslSetupCommand, wslTargetsCommand, type WslCommandOptions } from './commands/wsl.js';
 import { dialogCommand } from './commands/dialog.js';
 import { screenshotCommand } from './commands/screenshot.js';
 import { skillAddCommand, skillRemoveCommand, skillShowCommand, skillStatusCommand } from './commands/skill.js';
@@ -53,10 +55,18 @@ function wrap<A extends unknown[]>(fn: (...args: A) => Promise<void>): (...args:
   };
 }
 
+/** --backend, else the project's pick (`capmac backend`, or CapMac Studio), else the Mac. */
+function backendAction<T>(
+  macCommand: (options: T) => Promise<void>,
+  wslCommand: (options: WslCommandOptions) => Promise<void>,
+): (options: T & WslCommandOptions) => Promise<void> {
+  return wrap(async (options: T & WslCommandOptions) => (await commandBackend(options.backend, options.app)) === 'wsl' ? wslCommand(options) : macCommand(options));
+}
+
 const program = new Command();
 program
   .name('capmac')
-  .description('Pair to Mac for Capacitor and Electron: build, run, live-reload and see your iOS app, or your Electron app, on a Mac, from Windows.')
+  .description('Build, run and live-reload apps from Windows: use a paired Mac, or build iOS apps locally with the experimental WSL backend.')
   .version(VERSION, '-V, --version')
   .option('-v, --verbose', 'show full tool output')
   .showHelpAfterError()
@@ -66,7 +76,11 @@ program
     const route = action.opts().route as RouteChoice | undefined;
     if (route && !(action.name() === 'set' && action.parent?.name() === 'remote')) setRouteOverride(route);
     // Takeover is on by default: the first capmac command (usually `capmac pair`) turns it on.
-    if (action.name() !== 'takeover') await takeoverByDefault();
+    // Commands that build on this PC never turn on the Mac's.
+    const backendCommands = ['doctor', 'run', 'dev', 'build'];
+    const wsl = action.parent?.name() === 'wsl' || action.name() === 'backend'
+      || (action.parent === program && backendCommands.includes(action.name()) && (await commandBackend(action.opts().backend, action.opts().app)) === 'wsl');
+    if (action.name() !== 'takeover' && !wsl) await takeoverByDefault();
   });
 
 const mac = () => new Option('--mac <name>', 'which paired Mac to use');
@@ -75,6 +89,36 @@ const soundOption = () => new Option('--sound <where>', "an Electron app's sound
 const streamOption = () => new Option('--stream <how>', 'how the screen viewer streams: smooth (video, far less data) or compatible (pictures); remembered, and CapMac Studio uses it too (default smooth)').choices(['smooth', 'compatible']);
 
 const appOption = () => new Option('-a, --app <app>', "which of the project's apps: ios or electron (see `capmac apps`; default: the one picked with `capmac apps use` or in CapMac Studio)");
+
+function wslOptions(cmd: Command): Command {
+  return cmd
+    .option('--distro <name>', 'WSL distribution to use (default: your WSL default)')
+    .option('--sdk <path>', 'iPhoneOS SDK directory you provide')
+    .option('--swift <path>', 'Swift compiler in WSL (default: swiftc)')
+    .option('--swift-resources <path>', 'matching Darwin Swift modules and runtime resources, when separate from the compiler')
+    .option('--clang <path>', 'C/Objective-C/C++ compiler in WSL (default: next to swiftc)')
+    .option('--archive <path>', 'LLVM archive tool in WSL (default: llvm-ar)')
+    .option('--lipo <path>', 'LLVM Mach-O architecture tool in WSL (auto-detected)')
+    .option('--strip <path>', 'LLVM Mach-O symbol stripping tool in WSL (auto-detected)')
+    .option('--ruby <path>', 'Ruby executable in WSL for CocoaPods project export')
+    .option('--pod <path>', 'CocoaPods executable in WSL (default: pod)')
+    .option('--actool <path>', 'asset catalog compiler in WSL')
+    .option('--ibtool <path>', 'storyboard and XIB compiler in WSL')
+    .option('--momc <path>', 'Core Data model compiler in WSL')
+    .option('--xcstrings <path>', 'string catalog compiler in WSL')
+    .option('--xcode-version <version>', 'Xcode version matching the supplied Apple SDK, for build-script metadata')
+    .option('--linker <path>', 'Mach-O linker in WSL (default: ld64.lld)')
+    .option('--signer <path>', 'zsign executable in WSL (default: zsign)')
+    .option('--python <path>', 'your own Windows Python with pymobiledevice3 (default: the one CapMac sets up)')
+    .option('--certificate <file>', 'Apple signing certificate and private key (.p12)')
+    .option('--profile <file>', 'development provisioning profile for your app and iPhone (.mobileprovision)')
+    .option('--extension-profile <bundle-id=path...>', 'provisioning profiles for embedded application extensions')
+    .option('--password-env <name>', 'environment variable containing the .p12 password (never a command-line password)');
+}
+
+function backendOptions(cmd: Command): Command {
+  return wslOptions(cmd.addOption(new Option('--backend <name>', 'build on a paired Mac, or on this PC with WSL (experimental); default: the project\'s pick, see `capmac backend`').choices(['mac', 'wsl'])));
+}
 
 function targetOptions(cmd: Command): Command {
   return cmd
@@ -117,20 +161,22 @@ program.command('macs').description('list paired Macs').action(wrap(macsCommand)
 program.command('use <name>').description('make a paired Mac the default').action(wrap(setDefaultCommand));
 program.command('unpair <name>').description('forget a paired Mac').action(wrap(unpairCommand));
 
-program
+backendOptions(program
   .command('doctor')
-  .description('check this PC, the connection and the Mac (Xcode, simulators, Node, CocoaPods…)')
+  .description('check this PC and the Mac, or the local iOS toolchain with --backend wsl')
   .addOption(mac()).addOption(routeOption())
   .option('--fix', 'fix what can be fixed (license, Node.js, iOS platform, AXe…)')
   .option('-y, --yes', 'do not ask before fixing')
-  .action(wrap(doctorCommand));
+  .option('--json', 'machine-readable WSL readiness report (--backend wsl)'))
+  .action(backendAction(doctorCommand, wslDoctorCommand));
 
-buildOptions(targetOptions(
+backendOptions(buildOptions(targetOptions(
   program
     .command('run')
     .description("build the web app, sync, build on the Mac and launch on a simulator or device (an Electron app: on the Mac's desktop)")
     .addOption(mac()).addOption(routeOption())
     .option('--release', 'shortcut for --configuration Release')
+    .option('--unsigned', 'with --backend wsl, compile and package without signing or installing')
     .option('--no-web-build', 'do not run the web build first (use the existing web dir)')
     .option('--no-logs', 'launch and return instead of streaming app logs')
     .option('--for <seconds>', "stream the app's console for this long, then stop (scripts, AI agents)")
@@ -138,15 +184,16 @@ buildOptions(targetOptions(
     .option('--os-logs', 'also show NSLog/os_log output, like Xcode\'s console')
     .option('--bridge', 'show Capacitor bridge traffic in the logs')
     .addOption(soundOption()),
-)).action(wrap(runCommand));
+))).action(backendAction(runCommand, wslRunCommand));
 
-buildOptions(targetOptions(
+backendOptions(buildOptions(targetOptions(
   program
     .command('dev')
     .description('live reload: your dev server runs here, the app on the Mac loads it through an SSH tunnel (an Electron app reloads on the Mac as you save)')
     .addOption(mac()).addOption(routeOption())
     .option('--url <url>', 'use an already running dev server (e.g. http://localhost:5173)')
     .option('--dev-command <cmd>', 'command that starts the dev server (default: the "dev"/"start" script)')
+    .option('--live-host <host>', 'with --backend wsl, PC address reachable by the iPhone')
     .option('--screen', 'open the remote simulator screen in your browser')
     .option('--no-watch', 'do not rebuild automatically when native files change')
     .option('--show-simulator', 'also open the Simulator window on the Mac\'s screen')
@@ -154,9 +201,9 @@ buildOptions(targetOptions(
     .option('--bridge', 'show Capacitor bridge traffic in the logs')
     .addOption(soundOption())
     .addOption(streamOption()),
-)).action(wrap(devCommand));
+))).action(backendAction(devCommand, wslDevCommand));
 
-buildOptions(targetOptions(
+backendOptions(buildOptions(targetOptions(
   program
     .command('build')
     .description('build on the Mac without launching; --ipa exports a signed .ipa to this PC')
@@ -167,7 +214,48 @@ buildOptions(targetOptions(
     .option('--export <type>', 'export type: development | ad-hoc | app-store | enterprise')
     .option('--upload', 'archive and upload to App Store Connect / TestFlight')
     .option('-o, --out <dir>', 'where to save the .ipa (default: build/ios)'),
-)).action(wrap(buildCommand));
+))).action(backendAction(buildCommand, wslBuildCommand));
+
+const wsl = program
+  .command('wsl')
+  .description('experimental iOS builds on Windows through WSL, with no Mac connection: setup | doctor | targets | build | run | dev');
+wslOptions(wsl.command('setup').description('set up the WSL toolchain and sign in to Apple for the iPhone SDK'))
+  .option('--apple-login', 'sign in to Apple again in this terminal')
+  .option('--xcode <file.xip>', 'import the SDK from an official Xcode archive already downloaded')
+  .option('--install-resources', 'install pinned open-source asset/storyboard/model/string compilers in WSL')
+  .action(wrap(wslSetupCommand));
+wslOptions(wsl.command('doctor').description('check WSL, the iOS toolchain, SDK and signing inputs'))
+  .option('--json', 'machine-readable readiness report')
+  .action(wrap(wslDoctorCommand));
+wslOptions(wsl.command('targets').description('list iPhones connected to this PC (no SDK or Mac needed)'))
+  .option('--json', 'machine-readable device list')
+  .action(wrap(wslTargetsCommand));
+
+function wslProjectOptions(cmd: Command): Command {
+  return wslOptions(cmd)
+    .option('--scheme <name>', 'native application scheme (default: detected application)')
+    .option('-c, --configuration <name>', 'native build configuration (default: Debug)')
+    .option('--unsigned', 'compile and package without signing or installing')
+    .option('--release', 'build an optimized application')
+    .option('--no-web-build', 'use the existing web build output')
+    .option('--clean', 'rebuild native products from scratch')
+    .option('-o, --out <dir>', 'where to save the app and IPA');
+}
+
+wslProjectOptions(wsl.command('build').description('build and sign an iPhone app locally; save the app and IPA'))
+  .action(wrap(wslBuildCommand));
+wslProjectOptions(wsl.command('run').description('build, sign, install and launch on a USB-connected iPhone'))
+  .option('-t, --target <udid>', 'which connected iPhone to use')
+  .option('--no-logs', 'launch and return instead of streaming device logs')
+  .action(wrap(wslRunCommand));
+wslProjectOptions(wsl.command('dev').description('run on your iPhone with live reload from your Windows dev server'))
+  .option('-t, --target <udid>', 'which connected iPhone to use')
+  .option('--url <url>', 'dev-server URL reachable by your iPhone, e.g. http://192.168.1.20:5173')
+  .option('--dev-command <cmd>', 'command that starts the dev server')
+  .option('--live-host <host>', 'PC address reachable by the iPhone when starting a dev server')
+  .option('--no-watch', 'do not rebuild automatically when native files change')
+  .option('--no-logs', 'keep the development session running without streaming device logs')
+  .action(wrap(wslDevCommand));
 
 const apps = program
   .command('apps')
@@ -181,6 +269,12 @@ apps
   .command('use <app>')
   .description('work on this app from now on (ios or electron): capmac run, capmac dev and CapMac Studio use it')
   .action(wrap((app: string) => appsUseCommand(app)));
+
+program
+  .command('backend [where]')
+  .description('where this project builds its iOS app: mac (a paired Mac) or wsl (this PC, no Mac); run, dev, build, doctor and CapMac Studio use it')
+  .option('--json', 'machine-readable output')
+  .action(wrap((where: string | undefined, options: { json?: boolean }) => backendCommand(where, options)));
 
 program
   .command('info')
