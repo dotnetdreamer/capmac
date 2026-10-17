@@ -2,7 +2,7 @@
   "name": "capmac-vscode",
   "displayName": "CapMac",
   "description": "%description%",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "capmac",
   "license": "MIT",
   "private": true,
@@ -1359,7 +1359,7 @@
     "test:integration": "node scripts/build.mjs && node scripts/build-tests.mjs && vscode-test"
   },
   "devDependencies": {
-    "@capmac/core": "0.1.1",
+    "@capmac/core": "0.1.2",
     "@types/mocha": "^10.0.10",
     "@types/vscode": "1.100.0",
     "@vscode/codicons": "0.0.46-24",

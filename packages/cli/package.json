@@ -1,6 +1,6 @@
 {
   "name": "capmac",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Build iPhone apps on Windows, with your Mac or with no Mac at all. Capacitor, Ionic, Flutter, React Native and Electron.",
   "license": "MIT",
   "repository": {
@@ -51,7 +51,7 @@
     "ssh2": "^1.17.0"
   },
   "devDependencies": {
-    "@capmac/core": "0.1.1"
+    "@capmac/core": "0.1.2"
   },
   "optionalDependencies": {
     "node-datachannel": "0.33.4"
