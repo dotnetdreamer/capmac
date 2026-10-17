@@ -1,0 +1,7 @@
+# react-native-windows and NuGet write these with Windows line endings on every build:
+# kept that way here, so a build doesn't leave them changed.
+*.g.cpp eol=crlf
+*.g.h eol=crlf
+*.g.props eol=crlf
+*.g.targets eol=crlf
+packages.lock.json eol=crlf
