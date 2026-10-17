@@ -16,6 +16,10 @@ import { JsonTree } from './JsonTree';
 const IOS_SOURCES: ConsoleSource[] = ['js', 'cap', 'native', 'bridge', 'web', 'capmac'];
 const ELECTRON_SOURCES: ConsoleSource[] = ['js', 'main', 'electron', 'web', 'capmac'];
 const BOTH_SOURCES: ConsoleSource[] = ['js', 'cap', 'native', 'bridge', 'main', 'electron', 'web', 'capmac'];
+/** A Flutter app: Dart's print() and debugPrint() (the 'js' lines), the engine's and plugins' native logs, CapMac's. */
+const FLUTTER_SOURCES: ConsoleSource[] = ['js', 'native', 'capmac'];
+const sourceTag = (source: ConsoleSource, dart: boolean) => (dart && source === 'js' ? t.console.dartTag : dart && source === 'native' ? t.console.flutterNativeTag : SOURCE_TAGS[source]);
+const sourceLabel = (source: ConsoleSource, dart: boolean) => (dart && source === 'js' ? t.console.dart : SOURCE_LABELS[source]);
 const LEVELS: Array<{ level: ConsoleLevel; label: string }> = (['error', 'warn', 'info', 'log', 'debug'] as const).map((level) => ({ level, label: t.console.levels[level] }));
 const FILTER_KEY = 'capmac.consoleFilter';
 
@@ -45,17 +49,17 @@ function useHighlighter(query: string) {
   }, [query]);
 }
 
-function lineText(line: ConsoleLine): string {
-  return `${clockTime(line.ts, true)} ${SOURCE_TAGS[line.source].padEnd(3)} ${line.level === 'error' ? 'ERROR ' : line.level === 'warn' ? 'WARN ' : ''}${line.text}`;
+function lineText(line: ConsoleLine, dart = false): string {
+  return `${clockTime(line.ts, true)} ${sourceTag(line.source, dart).padEnd(3)} ${line.level === 'error' ? 'ERROR ' : line.level === 'warn' ? 'WARN ' : ''}${line.text}`;
 }
 
-const Row = memo(function Row({ line, timestamps, highlight, current }: { line: ConsoleLine; timestamps: boolean; highlight: (text: string) => ReactNode; current: boolean }) {
+const Row = memo(function Row({ line, timestamps, highlight, current, dart }: { line: ConsoleLine; timestamps: boolean; highlight: (text: string) => ReactNode; current: boolean; dart: boolean }) {
   const json = line.source === 'js' || line.source === 'cap' || line.source === 'main' ? jsonPayload(line) : null;
   return (
     <div className={`cl-row cl-row--${line.level} cl-row--${line.source}${current ? ' is-current' : ''}`}>
       {timestamps && <span className="cl-time tabular">{clockTime(line.ts, true)}</span>}
-      <span className={`cl-src cl-src--${line.source}`} title={SOURCE_LABELS[line.source]}>
-        {SOURCE_TAGS[line.source]}
+      <span className={`cl-src cl-src--${line.source}`} title={sourceLabel(line.source, dart)}>
+        {sourceTag(line.source, dart)}
       </span>
       <span className="cl-level">
         {line.level === 'error' ? <Icon name="errorCircle" size={12} filled label={t.console.error} /> : line.level === 'warn' ? <Icon name="warning" size={12} filled label={t.console.warning} /> : null}
@@ -69,7 +73,8 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
   const buffer = consoleFor(path);
   // The sources this project's app can log from: iOS, Electron, or both.
   const summary = useProject(path).summary;
-  const sources = !summary?.electron ? IOS_SOURCES : summary.kind === 'electron' || !summary.hasIos ? ELECTRON_SOURCES : BOTH_SOURCES;
+  const dart = summary?.kind === 'flutter';
+  const sources = dart ? FLUTTER_SOURCES : !summary?.electron ? IOS_SOURCES : summary.kind === 'electron' || !summary.hasIos ? ELECTRON_SOURCES : BOTH_SOURCES;
   const version = useSyncExternalStore(buffer.subscribe, buffer.getVersion);
   const settings = useApp((s) => s.settings);
   const updateSettings = useApp((s) => s.updateSettings);
@@ -183,12 +188,12 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
 
   const visibleLines = () => view.ids.slice(0, count).map((id) => buffer.byId(id)).filter((l): l is ConsoleLine => Boolean(l));
   const copyAll = () => {
-    const text = visibleLines().map(lineText).join('\n');
+    const text = visibleLines().map((line) => lineText(line, dart)).join('\n');
     void navigator.clipboard.writeText(text).then(() => toast({ tone: 'success', title: t.console.copied(count) }));
   };
   const exportLog = async () => {
     const name = `${path.split(/[\\/]/).pop()}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.log`;
-    const saved = await window.capmac.invoke('app:save-text', { text: visibleLines().map(lineText).join('\r\n'), name });
+    const saved = await window.capmac.invoke('app:save-text', { text: visibleLines().map((line) => lineText(line, dart)).join('\r\n'), name });
     if (saved) toast({ tone: 'success', title: t.console.saved, body: saved, action: { label: t.common.showInFolder, run: () => void window.capmac.invoke('app:show-in-folder', { path: saved }) } });
   };
 
@@ -210,7 +215,7 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
               aria-pressed={filter.sources[s]}
               onClick={() => setFilter((f) => ({ ...f, sources: { ...f.sources, [s]: !f.sources[s] } }))}
             >
-              {SOURCE_LABELS[s]}
+              {sourceLabel(s, dart)}
             </button>
           ))}
         </div>
@@ -294,7 +299,7 @@ export function Console({ path, visible }: { path: string; visible: boolean }) {
               if (!line) return null;
               return (
                 <div key={item.key} data-index={item.index} ref={virtualizer.measureElement} className="console__item" style={{ transform: `translateY(${item.start}px)` }}>
-                  <Row line={line} timestamps={timestamps} highlight={highlight} current={line.id === currentLine} />
+                  <Row line={line} timestamps={timestamps} highlight={highlight} current={line.id === currentLine} dart={dart} />
                 </div>
               );
             })}

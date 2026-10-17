@@ -6,6 +6,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { UserError } from './errors.js';
+import { describeFlutterProject } from './flutter/project.js';
 import { recall, remember } from './memory.js';
 import { CAP_CONFIG_FILES, findProjectDir, isBuildBackend, projectIdFor, readCapacitorConfig, type BuildBackend, type ProjectInfo } from './project.js';
 
@@ -18,11 +19,20 @@ export async function backendOf(project: Pick<ProjectInfo, 'projectId'>): Promis
 /**
  * The backend picked for the project in `dir` or a folder above, without
  * loading the project (that runs its Capacitor CLI): the id comes from the
- * config file the way loadProject makes it. Not in a Capacitor app, or its
- * Electron app is the one picked: the Mac, where Electron apps run.
+ * config file the way loadProject makes it. Not in a Capacitor or Flutter
+ * app, or the app picked is one that runs on a desktop: the Mac, where
+ * Electron and Mac apps run (a Flutter app's Windows app runs here anyway).
  */
 export async function backendIn(dir: string): Promise<BuildBackend> {
   const found = findProjectDir(dir);
+  if (found?.kind === 'flutter') {
+    const flutter = describeFlutterProject(found.dir);
+    if (!flutter) return 'mac';
+    const memory = await recall(projectIdFor(flutter.name, found.dir)).catch(() => ({ app: undefined, backend: undefined }));
+    // Only the iOS app builds on this PC.
+    const app = memory.app ?? (flutter.platforms.ios ? 'ios' : undefined);
+    return app === 'ios' && isBuildBackend(memory.backend) ? memory.backend : 'mac';
+  }
   if (found?.kind !== 'capacitor') return 'mac';
   const configFile = CAP_CONFIG_FILES.map((name) => path.join(found.dir, name)).find((file) => existsSync(file));
   if (!configFile) return 'mac';
@@ -36,7 +46,10 @@ export async function chooseBackend(project: ProjectInfo, backend: string): Prom
   if (!isBuildBackend(backend)) throw new UserError(`Unknown backend "${backend}".`, 'Use `mac` (a paired Mac) or `wsl` (this PC, no Mac).');
   if (backend === 'wsl') {
     if (process.platform !== 'win32') throw new UserError('Building without a Mac needs a Windows PC.', 'Use a paired Mac on this computer.');
-    if (project.kind !== 'capacitor') throw new UserError('Only Capacitor iOS apps build without a Mac so far.', 'Use a paired Mac for this app.');
+    if (project.kind === 'electron') throw new UserError('Electron apps run on the Mac’s desktop, so they need a Mac.', 'Use a paired Mac for this app.');
+    if (project.kind === 'flutter' && !project.hasIos) {
+      throw new UserError('This Flutter app has no iOS app to build on this PC.', 'Add it with `flutter create --platforms ios .`, or run its Windows app here: `capmac run --app windows`.');
+    }
   }
   await remember(project.projectId, { backend });
   return backend;

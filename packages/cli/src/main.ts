@@ -19,6 +19,7 @@ import {
 import { runCommand } from './commands/run.js';
 import { wslBuildCommand, wslDevCommand, wslDoctorCommand, wslRunCommand, wslSetupCommand, wslTargetsCommand, type WslCommandOptions } from './commands/wsl.js';
 import { dialogCommand } from './commands/dialog.js';
+import { flutterInstallCommand } from './commands/flutter.js';
 import { screenshotCommand } from './commands/screenshot.js';
 import { skillAddCommand, skillRemoveCommand, skillShowCommand, skillStatusCommand } from './commands/skill.js';
 import { takeoverByDefault, takeoverCommand } from './commands/takeover.js';
@@ -60,7 +61,7 @@ function backendAction<T>(
   macCommand: (options: T) => Promise<void>,
   wslCommand: (options: WslCommandOptions) => Promise<void>,
 ): (options: T & WslCommandOptions) => Promise<void> {
-  return wrap(async (options: T & WslCommandOptions) => (await commandBackend(options.backend, options.app)) === 'wsl' ? wslCommand(options) : macCommand(options));
+  return wrap(async (options: T & WslCommandOptions) => (await commandBackend(options.backend, options.app, (options as { target?: string }).target)) === 'wsl' ? wslCommand(options) : macCommand(options));
 }
 
 const program = new Command();
@@ -79,7 +80,7 @@ program
     // Commands that build on this PC never turn on the Mac's.
     const backendCommands = ['doctor', 'run', 'dev', 'build'];
     const wsl = action.parent?.name() === 'wsl' || action.name() === 'backend'
-      || (action.parent === program && backendCommands.includes(action.name()) && (await commandBackend(action.opts().backend, action.opts().app)) === 'wsl');
+      || (action.parent === program && backendCommands.includes(action.name()) && (await commandBackend(action.opts().backend, action.opts().app, action.opts().target)) === 'wsl');
     if (action.name() !== 'takeover' && !wsl) await takeoverByDefault();
   });
 
@@ -88,7 +89,7 @@ const routeOption = () => new Option('--route <how>', 'how to reach the Mac this
 const soundOption = () => new Option('--sound <where>', "an Electron app's sound: off, on the mac, or on this pc (in the window viewer); remembered for the project (default off)").choices(['off', 'mac', 'pc']);
 const streamOption = () => new Option('--stream <how>', 'how the screen viewer streams: smooth (video, far less data) or compatible (pictures); remembered, and CapMac Studio uses it too (default smooth)').choices(['smooth', 'compatible']);
 
-const appOption = () => new Option('-a, --app <app>', "which of the project's apps: ios or electron (see `capmac apps`; default: the one picked with `capmac apps use` or in CapMac Studio)");
+const appOption = () => new Option('-a, --app <app>', "which of the project's apps: ios, electron, or a Flutter app's macos or windows (see `capmac apps`; default: the one picked with `capmac apps use` or in CapMac Studio)");
 
 function wslOptions(cmd: Command): Command {
   return cmd
@@ -123,14 +124,23 @@ function backendOptions(cmd: Command): Command {
 function targetOptions(cmd: Command): Command {
   return cmd
     .addOption(appOption())
-    .option('-t, --target <name|udid>', 'simulator or device to use (see `capmac targets`); "mac" for the Electron app')
+    .option('-t, --target <name|udid>', 'simulator or device to use (see `capmac targets`); "mac" for the Mac desktop app (Electron, or a Flutter app’s), "pc" for a Flutter app’s Windows app')
     .option('-d, --device', 'run on a connected iPhone/iPad instead of a simulator')
     .option('-s, --simulator', 'only consider simulators')
     .option('-e, --electron', "the Electron app, on the Mac's desktop (a Capacitor app with iOS too)");
 }
 
-function buildOptions(cmd: Command): Command {
+/** Flutter apps: the build mode, flavor, entry point and --dart-define values (capmac.json's flutter section holds defaults). */
+function flutterOptions(cmd: Command): Command {
   return cmd
+    .addOption(new Option('--mode <mode>', 'Flutter: debug (the default for run and dev, with hot reload), profile, or release (--release)').choices(['debug', 'profile', 'release']))
+    .option('--flavor <name>', 'Flutter: the flavor (an Xcode scheme for the iOS and Mac apps)')
+    .option('--main <file>', 'Flutter: the Dart entry point (default lib/main.dart)')
+    .option('--dart-define <KEY=VALUE>', 'Flutter: a compile-time value for the Dart code (repeatable)', collect);
+}
+
+function buildOptions(cmd: Command): Command {
+  return flutterOptions(cmd)
     .option('-c, --configuration <name>', 'Xcode build configuration (Debug, Release, …)')
     .option('--scheme <name>', 'Xcode scheme (default: App)')
     .option('--team <id>', 'Apple Developer Team ID for signing (device builds)')
@@ -257,6 +267,16 @@ wslProjectOptions(wsl.command('dev').description('run on your iPhone with live r
   .option('--no-logs', 'keep the development session running without streaming device logs')
   .action(wrap(wslDevCommand));
 
+const flutter = program
+  .command('flutter')
+  .description('Flutter on the paired Mac or on this PC: install');
+flutter
+  .command('install [version]')
+  .description('install Flutter on the paired Mac (or this PC with --pc): the version the project pins, else this PC’s, else the latest stable')
+  .addOption(mac())
+  .option('--pc', 'on this PC instead (it builds a Flutter app’s Windows app)')
+  .action(wrap((version: string | undefined, options: { mac?: string; pc?: boolean }) => flutterInstallCommand({ ...options, version })));
+
 const apps = program
   .command('apps')
   .description('the apps in this folder (an iOS app and an Electron app, or the projects of a monorepo) and which one CapMac works on: list | use');
@@ -293,7 +313,7 @@ program
 
 program
   .command('screen')
-  .description("show the Mac's simulator in your browser, with touch and keyboard input (a plugged-in iPhone: its screen; an Electron app: its window)")
+  .description("show the Mac's simulator in your browser, with touch and keyboard input (a plugged-in iPhone: its screen; an Electron app or a Flutter app's Mac app, with --app mac: its window)")
   .addOption(mac()).addOption(routeOption())
   .addOption(appOption())
   .option('-t, --target <name|udid>', 'simulator or device to show')
@@ -307,7 +327,7 @@ program
 
 program
   .command('screenshot [file]')
-  .description("save a PNG of the running simulator's screen, a plugged-in iPhone's, or the Electron app's window (default: a temp file; the path is printed)")
+  .description("save a PNG of the running simulator's screen, a plugged-in iPhone's, or a Mac app's window: the Electron app's, or a Flutter app's with --app mac (default: a temp file; the path is printed)")
   .addOption(mac()).addOption(routeOption())
   .addOption(appOption())
   .option('-t, --target <name|udid>', 'simulator or device (default: the booted simulator this app last ran on)')

@@ -33,7 +33,12 @@ describe('IPC validation', () => {
     expect(engineMethods['projects.detect'].safeParse({ path: 'C:\\apps' }).success).toBe(true);
     const start = engineMethods['sessions.start'];
     expect(start.safeParse({ projectPath: 'C:\\apps\\ludo', mode: 'run', app: 'electron' }).success).toBe(true);
-    expect(start.safeParse({ projectPath: 'C:\\apps\\ludo', mode: 'run', app: 'macos' }).success).toBe(false);
+    // A Flutter app's Mac and Windows apps, and its build modes.
+    expect(start.safeParse({ projectPath: 'C:\\apps\\ludo', mode: 'run', app: 'macos' }).success).toBe(true);
+    expect(start.safeParse({ projectPath: 'C:\\apps\\ludo', mode: 'live', app: 'windows', options: { flutterMode: 'profile' } }).success).toBe(true);
+    expect(start.safeParse({ projectPath: 'C:\\apps\\ludo', mode: 'run', app: 'android' }).success).toBe(false);
+    expect(start.safeParse({ projectPath: 'C:\\apps\\ludo', mode: 'run', options: { flutterMode: 'jit' } }).success).toBe(false);
+    expect(engineMethods['projects.createSample'].safeParse({ kind: 'flutter' }).success).toBe(true);
   });
 
   it('keeps simulator input in range', () => {

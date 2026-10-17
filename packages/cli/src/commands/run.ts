@@ -2,6 +2,7 @@ import type { SoundMode } from '@capmac/core/shared/electron';
 import { answerAppDialog, appFor, loadApiKey, loadProject, MacLink, requireElectron, requireIos, runApp, runElectronApp, UserError, type ProjectInfo } from '@capmac/core/engine';
 import { cancelOnSigint } from '../cli-context.js';
 import { announceApp } from './apps.js';
+import { flutterRunCommand, type FlutterCommandOptions } from './flutter.js';
 import { terminalContext } from '../terminal.js';
 import { log } from '../ui.js';
 
@@ -43,8 +44,9 @@ function parseSeconds(value: string | undefined): number | undefined {
   return seconds;
 }
 
-export async function runCommand(options: RunOptions): Promise<void> {
+export async function runCommand(options: RunOptions & FlutterCommandOptions): Promise<void> {
   const project = await loadProject(process.cwd());
+  if (project.kind === 'flutter') return flutterRunCommand(project, options);
   const app = appFor(project, options);
   await announceApp(project, app);
   if (app === 'electron') return runOnMac(project, options);

@@ -96,7 +96,24 @@ export async function infoCommand(options: { files?: boolean; live?: boolean }):
         ['Live reload', plan.dev ? plan.dev.command : electron.flavor === 'capacitor' ? 'your dev server, through a tunnel' : pc.dim('CapMac reloads the windows, or restarts the app')],
       ]
     : [];
-  const rows: Array<[string, string]> = project.kind === 'electron'
+  const flutter = project.flutter;
+  const apple = (app: { bundleId: string | null; plugins: string } | null, folder: string) => (app ? `${folder}/Runner.xcodeproj · ${app.bundleId ?? pc.dim('no bundle id')} · plugins: ${app.plugins}` : pc.dim('not added'));
+  const rows: Array<[string, string]> = project.kind === 'flutter' && flutter
+    ? [
+        ['App', `${project.appName} (${project.appId})`],
+        ...appsRows,
+        ['Flutter project', project.capDir],
+        ['Synced folder', project.syncRoot + (project.projectRel ? pc.dim(`  (app in ${project.projectRel}/)`) : '')],
+        ['Flutter', flutter.wantsFlutter.exact ? `${flutter.wantsFlutter.exact} ${pc.dim('(pinned)')}` : flutter.wantsFlutter.constraint ?? pc.dim('any')],
+        ['Entry point', flutter.target + (flutter.options.flavor ? pc.dim(`  (flavor ${flutter.options.flavor})`) : '')],
+        ['iOS app', apple(flutter.ios, 'ios')],
+        ['Mac app', apple(flutter.macos, 'macos')],
+        ['Windows app', flutter.platforms.windows ? `windows/ · ${flutter.windowsBinary ?? 'runner'}.exe` : pc.dim('not added')],
+        ...(flutter.platforms.ios ? ([['Team ID', project.config.ios?.team ?? project.teamId ?? pc.dim('not set (only needed for devices)')]] as Array<[string, string]>) : []),
+        ['Mac', project.config.host ?? pc.dim('default')],
+        ['Project id on the Mac', project.projectId],
+      ]
+    : project.kind === 'electron'
     ? [
         ['App', `${project.appName} (${project.appId})`],
         ['Project', project.capDir],

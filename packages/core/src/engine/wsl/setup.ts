@@ -77,10 +77,15 @@ export async function wslSetupState(cwd: string): Promise<WslSetupState> {
   const options = await loadWslOptions({}, cwd).catch(() => ({} as WslOptions));
   const ready = setupNeeds(options, cwd);
   const partial = ready.sdk ? undefined : await partialXcodeDownload();
-  return { status: await readWslSetupStatus(cwd), ...ready, inApp: project?.kind === 'capacitor', partialDownload: partial ? { bytes: partial } : null };
+  return { status: await readWslSetupStatus(cwd), ...ready, inApp: hasIosApp(project), partialDownload: partial ? { bytes: partial } : null };
 }
 
 const gigabytes = (bytes: number) => (bytes / 1_000_000_000).toFixed(1);
+
+/** An app with an iPhone app to sign here: a Capacitor app, or a Flutter app with its iOS app. */
+function hasIosApp(project: ProjectInfo | undefined): project is ProjectInfo {
+  return project?.kind === 'capacitor' || (project?.kind === 'flutter' && Boolean(project.flutter?.platforms.ios));
+}
 
 export async function guidedWslSetup(input: WslOptions, cwd: string, ctx: EngineContext, signal: AbortSignal): Promise<void> {
   if (!ctx.prompter.interactive) throw new UserError('Setup needs someone to answer its questions.', 'Run `capmac wsl setup` in PowerShell, or set up this PC in CapMac Studio.');
@@ -111,7 +116,7 @@ export async function guidedWslSetup(input: WslOptions, cwd: string, ctx: Engine
   }
   let project: ProjectInfo | undefined;
   try { project = await loadProject(cwd); } catch { /* Outside an app, setup prepares only the tools. */ }
-  if (project?.kind !== 'capacitor') project = undefined;
+  if (!hasIosApp(project)) project = undefined;
   const ready = setupNeeds(options, cwd);
   let archive = input.xcode ? path.resolve(cwd, input.xcode) : !ready.sdk ? await findDownloadedXcode() : undefined;
   const needsDownload = !ready.sdk && !archive;

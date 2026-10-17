@@ -6,6 +6,7 @@
 //   remote/<arch>/           node-datachannel, WebRTC for remote access (native, so outside app.asar)
 //   sample/                  the "Run the sample app" project, with prebuilt web assets
 //   sample-electron/         the Electron sample ("Try the Electron sample")
+//   sample-flutter/          the Flutter sample: its iOS, Mac and Windows apps
 import { spawnSync } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
@@ -51,5 +52,10 @@ await fs.cp(sampleSrc, out('sample'), {
 // The Electron sample: plain Electron, nothing to build (the Mac installs Electron for itself).
 const electronSampleSrc = path.join(repoDir, 'examples', 'hello-electron');
 await fs.cp(electronSampleSrc, out('sample-electron'), { recursive: true, filter: (src) => !['node_modules', '.git', 'out', 'dist', '.capmac'].includes(path.basename(src)) });
+
+// The Flutter sample: source only (Flutter builds it where it runs).
+// (What Flutter makes on each machine stays out: it holds that machine's paths.)
+const FLUTTER_SKIP = new Set(['build', '.dart_tool', '.git', '.capmac', '.idea', 'ephemeral', 'Pods', '.symlinks', '.flutter-plugins', '.flutter-plugins-dependencies', 'xcuserdata', 'Generated.xcconfig', 'flutter_export_environment.sh', 'GeneratedPluginRegistrant.h', 'GeneratedPluginRegistrant.m']);
+await fs.cp(path.join(repoDir, 'examples', 'hello-flutter'), out('sample-flutter'), { recursive: true, filter: (src) => !FLUTTER_SKIP.has(path.basename(src)) && !src.endsWith('.iml') });
 
 console.log(`CapMac Studio ${pkg.version}: built out/ in ${((Date.now() - started) / 1000).toFixed(1)} s`);

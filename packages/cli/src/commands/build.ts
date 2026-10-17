@@ -2,6 +2,7 @@ import { appFor, buildApp, loadApiKey, loadProject, MacLink, requireIos, UserErr
 import { cancelOnSigint } from '../cli-context.js';
 import { terminalContext } from '../terminal.js';
 import { log, pc } from '../ui.js';
+import { flutterBuildCommand, type FlutterCommandOptions } from './flutter.js';
 
 export interface BuildCommandOptions {
   mac?: string;
@@ -27,8 +28,9 @@ export interface BuildCommandOptions {
   apiIssuer?: string;
 }
 
-export async function buildCommand(options: BuildCommandOptions): Promise<void> {
+export async function buildCommand(options: BuildCommandOptions & FlutterCommandOptions): Promise<void> {
   const project = await loadProject(process.cwd());
+  if (project.kind === 'flutter') return flutterBuildCommand(project, options);
   // `capmac build` makes the iOS app, whichever app the project works on.
   if (options.app && appFor(project, { app: options.app }) === 'electron') {
     throw new UserError('`capmac build` builds the iOS app.', 'Run the Electron app with `capmac run --app electron`, and package it with its own tools (electron-builder, Forge).');

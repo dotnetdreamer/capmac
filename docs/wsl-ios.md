@@ -8,6 +8,8 @@ CapMac creates a writable copy of the workspace under `.capmac/wsl/pods-inputs`,
 
 For **SPM projects**, CapMac imports the original Xcode application and extension targets. Linux Swift evaluates each `Package.swift`; remote sources use the exact revisions in `Package.resolved`, and binary XCFramework archives must match their manifest checksums. Local plugins, transitive Swift/Objective-C/C/C++ targets, and package resources remain part of the graph. CapMac does not replace your application with a generated host or impose a Capacitor 8 version requirement.
 
+For **Flutter apps**, CapMac builds the iOS app's Runner project the same way, after doing in WSL what Flutter's Xcode scripts do on a Mac (see [Flutter apps](#flutter-apps)).
+
 This remains an experimental build backend, not a guarantee that every Xcode feature or Capacitor plugin works. See the compatibility limits below before choosing it for a project.
 
 ## Start here
@@ -198,13 +200,43 @@ Use `--live-host YOUR_PC_ADDRESS` if automatic address selection picks the wrong
 
 The live URL and local-network settings are applied to the isolated development app. Your source Capacitor configuration stays suitable for packaged builds. Stop the session with Ctrl+C.
 
+## Flutter apps
+
+A Flutter app's iOS app builds on this PC with the same setup and the same commands:
+
+```powershell
+cd my_flutter_app
+capmac wsl setup        # signing for the app's bundle ID, once
+capmac backend wsl
+capmac run              # release build on the iPhone plugged into this PC
+capmac run --mode profile
+capmac dev              # rebuilds and reopens the app each time you save
+```
+
+The first build gets three things into CapMac's WSL distro and keeps them for later builds:
+
+- Flutter's Linux release of the version your project uses (the one it pins with FVM or `capmac.json`, else this PC's, else the latest stable), from Flutter's own archive, checked against Flutter's published SHA-256.
+- Dart's iPhone compiler (`gen_snapshot`). Google ships it only for Macs, so CapMac builds it from Dart's source at the revision Flutter's engine pins. It takes about 5 minutes, once per Dart version. The build uses Apple's `qsort`, so the compiler makes byte-for-byte the same app code as Flutter's on a Mac.
+- Flutter's iPhone engine (`Flutter.xcframework`) for the build mode, from Google's download.
+
+Each build then works in a copy of the project in WSL (`~/.cache/capmac/flutter-builds`), leaving your source folder as it is:
+
+1. `flutter pub get`, then the files Flutter writes only on a Mac: `ios/Flutter/Generated.xcconfig` and the plugins' Swift packages (`FlutterGeneratedPluginSwiftPackage`).
+2. Flutter compiles the Dart code to kernel and makes the asset bundle, with unused icons left out of the icon font. The shaders are compiled for Metal, as on a Mac.
+3. Dart's iPhone compiler makes `App.framework`, next to Google's `Flutter.framework`.
+4. The Runner project is imported without Flutter's two Xcode scripts, whose work is done, then compiled, signed and packaged like any app.
+
+On a real iPhone, a Flutter app runs release or profile builds here. Debug builds need Xcode's debugger to run on an iPhone, so hot reload stays with a paired Mac. `capmac dev` here rebuilds the app and opens it again on every save. The app's `print` lines show in the console as Dart output.
+
+Plugins must come as Swift packages, which Flutter uses by default. A plugin that has only a CocoaPods podspec stops the build with its name: update it, or build the app on a Mac.
+
 ## Compatibility limits
 
 CocoaPods support means using CocoaPods' real resolver and generated projects; it does not reproduce every Apple build tool. The portable resource compilers support specific resource features. Unsupported assets or Interface Builder features fail with diagnostics rather than being silently omitted. Metal shader sources, Core ML model/package compilation, Core Data mapping models, and Rez phases currently need additional compiler support. Objective-C Core Data automatic class generation needs manual classes or a compatible generator.
 
 Application extensions are imported; other unsupported product types are rejected. Scripts and pod `prepare_command` hooks that require macOS executables or unavailable Linux tools need a Linux-compatible implementation. Build phases are not skipped to make a build appear successful. Existing custom native code is preserved, but it still has to compile with the supplied cross-compilation toolchain.
 
-Flutter, importing arbitrary native projects as a separate project type, and iOS simulators remain future work. The existing Mac backend remains available for projects that depend on Xcode-only behavior.
+Importing arbitrary native projects as a separate project type, and iOS simulators, remain future work. Flutter plugins that have only CocoaPods podspecs need a Mac. The existing Mac backend remains available for projects that depend on Xcode-only behavior.
 
 ## What validation means
 

@@ -22,9 +22,9 @@ import { isListed, Problems } from './Problems';
 import { SessionBar } from './SessionBar';
 import { AppWindowPane } from './AppWindow';
 import { SimulatorPane } from './Simulator';
-import { automaticTarget, macDesktopTarget } from './TargetPicker';
+import { automaticTarget, macDesktopTarget, thisPcTarget } from './TargetPicker';
 import { MAC_TARGET_ID } from '../../state/runs';
-import { PcBanner, PcDevicePane, PcSetupDialog } from './PcSetup';
+import { PcBanner, PcDevicePane, PcSetupDialog, WindowsAppPane } from './PcSetup';
 import { Timeline } from './Timeline';
 import { Toolbar } from './Toolbar';
 import './workspace.css';
@@ -96,18 +96,22 @@ export function Workspace({ path }: { path: string }) {
   const deviceFrame = useApp((s) => s.settings?.deviceFrame ?? true);
   const mac = resolveMac(macs, prefs?.mac ?? entry.summary?.host);
   const electron = entry.summary?.electron ?? null;
-  // The app Run and Live use: the Electron app only runs on the Mac's desktop, the iOS app in simulators and on devices.
+  const flutter = entry.summary?.kind === 'flutter';
+  // The app Run and Live use: the Electron app and a Flutter app's Mac app run on the Mac's desktop, the iOS app in simulators and on devices.
   const app = appOf(entry.summary, prefs ?? {}) ?? 'ios';
-  const onlyMac = Boolean(electron && app === 'electron');
+  const onlyMac = Boolean((electron && app === 'electron') || (flutter && app === 'macos'));
+  // A Flutter app's Windows app runs on this PC, in its own window: no Mac and no other target.
+  const pcDesktop = flutter && app === 'windows';
   // Without a Mac yet, still the Mac's desktop: the pane then says how to pair one.
-  const macDesktop = useMemo(() => (onlyMac ? macDesktopTarget(mac?.label ?? t.targets.macGroup, mac?.macos ?? null) : null), [mac, onlyMac]);
+  const macDesktop = useMemo(() => (onlyMac ? macDesktopTarget(mac?.label ?? (flutter ? t.targets.macGroupFlutter : t.targets.macGroup), mac?.macos ?? null) : null), [mac, onlyMac, flutter]);
+  const pcDesktopTarget = useMemo(() => (pcDesktop ? thisPcTarget() : null), [pcDesktop]);
   // On this PC (no Mac): the iPhones plugged in here, and this PC's setup.
-  const pcMode = entry.summary?.backend === 'wsl' && app !== 'electron';
+  const pcMode = entry.summary?.backend === 'wsl' && app === 'ios';
   usePcWatch(path, pcMode);
   const pcEntry = usePcEntry(path);
   const pcState = pcEntry.running ? 'running' : pcReady(pcEntry.status) ? 'ready' : 'setup';
   const pcTargets = useMemo((): TargetsResult | null => (pcEntry.devices ? { simulators: [], devices: pcEntry.devices.devices, deviceSupport: true } : null), [pcEntry.devices]);
-  useWatchTargets(onlyMac || pcMode ? null : mac?.name);
+  useWatchTargets(onlyMac || pcMode || pcDesktop ? null : mac?.name);
   const targetsEntry = useTargets((s) => (mac ? s.byMac[mac.name] : undefined));
   const targets = pcMode ? pcTargets : targetsEntry?.targets ?? null;
 
@@ -148,8 +152,9 @@ export function Workspace({ path }: { path: string }) {
 
   // The target: the toolbar pick, else the last run's, else what `capmac run` would choose. Always with live state.
   const { target, auto } = useMemo((): { target: Target | null; auto: boolean } => {
-    // The Electron app runs on the Mac's desktop, and only there.
+    // The Electron app (or a Flutter app's Mac app) runs on the Mac's desktop, and only there; a Flutter app's Windows app on this PC.
     if (macDesktop) return { target: macDesktop, auto: false };
+    if (pcDesktopTarget) return { target: pcDesktopTarget, auto: false };
     // On this PC: the iPhone picked when it is plugged in, else the one that is.
     if (pcMode) {
       const plugged = pcTargets?.devices ?? [];
@@ -164,7 +169,7 @@ export function Workspace({ path }: { path: string }) {
     // A Mac target left over from an Electron run is not for the iOS app (only it reaches here): ignore it.
     if (run?.target && run.target.kind !== 'mac') return { target: all.find((item) => item.udid === run.target!.udid) ?? run.target, auto: true };
     return { target: automaticTarget(targets), auto: true };
-  }, [targets, prefs?.target, run?.target, run?.backend, macDesktop, pcMode, pcTargets]);
+  }, [targets, prefs?.target, run?.target, run?.backend, macDesktop, pcDesktopTarget, pcMode, pcTargets]);
 
   const errors = run?.diagnostics.filter((d) => d.severity === 'error').length ?? 0;
   // The tab counts what the Problems list shows, not the dependency warnings folded away.
@@ -248,18 +253,18 @@ export function Workspace({ path }: { path: string }) {
   const onMacTarget = target?.kind === 'mac';
   return (
     <div className="workspace">
-      <Toolbar path={path} summary={summary} icon={entry.icon} run={run} macs={macs} mac={mac} targets={targets} target={target} autoTarget={auto} targetsLoading={pcMode ? !pcEntry.devices : Boolean(mac) && !targets && !targetsEntry?.error} macDesktop={macDesktop} onlyMac={onlyMac} app={app} pc={pcMode} pcState={pcState} />
-      <SessionBar path={path} run={run} mac={mac} electron={electronKind} />
+      <Toolbar path={path} summary={summary} icon={entry.icon} run={run} macs={macs} mac={mac} targets={targets} target={target} autoTarget={auto} targetsLoading={pcMode ? !pcEntry.devices : !pcDesktop && Boolean(mac) && !targets && !targetsEntry?.error} macDesktop={macDesktop} onlyMac={onlyMac} pcDesktop={pcDesktop} app={app} pc={pcMode} pcState={pcState} />
+      <SessionBar path={path} run={run} mac={mac} electron={electronKind} flutter={flutter} />
       {app === 'ios' && !summary.hasIos && (
         <div className="session-banner">
           <InfoBar tone="caution" title={t.workspace.noIosTitle}>
-            <Rich text={t.workspace.noIosBody} />
+            <Rich text={flutter ? t.workspace.noIosBodyFlutter : t.workspace.noIosBody} />
           </InfoBar>
         </div>
       )}
       {(summary.hasIos || summary.electron?.flavor === 'capacitor') && !summary.hasNodeModules && summary.devCommand && <DepsBanner path={path} packageManager={summary.packageManager} onInstalled={() => void inspect(path, true)} />}
       {pcMode && <PcBanner path={path} entry={pcEntry} />}
-      {!pcMode && macs.length === 0 && (
+      {!pcMode && !pcDesktop && macs.length === 0 && (
         <div className="session-banner">
           <InfoBar
             tone="info"
@@ -269,7 +274,7 @@ export function Workspace({ path }: { path: string }) {
                 <Button size="sm" variant="accent" onClick={() => useApp.getState().navigate({ name: 'onboarding' })}>
                   {t.common.pairMac}
                 </Button>
-                {app === 'ios' && summary.kind === 'capacitor' && (
+                {app === 'ios' && (summary.kind === 'capacitor' || summary.kind === 'flutter') && (
                   <Button size="sm" icon="desktop" onClick={() => void setBackend(path, 'wsl')}>
                     {t.pc.noMacBanner}
                   </Button>
@@ -289,20 +294,20 @@ export function Workspace({ path }: { path: string }) {
       >
         <Panel id="simulator" panelRef={simPanel} collapsible collapsedSize={0} minSize={240} defaultSize={onMacTarget ? '50%' : '31%'} className="ws-panel">
           <Pane
-            title={onMacTarget ? t.workspace.macApp : pcMode ? t.pc.device : target?.kind === 'device' ? t.workspace.device : t.workspace.simulator}
+            title={onMacTarget ? t.workspace.macApp : pcDesktop ? t.workspace.windowsApp : pcMode ? t.pc.device : target?.kind === 'device' ? t.workspace.device : t.workspace.simulator}
             labelledBy="pane-sim"
             sub={target ? `${target.name} · ${target.os}` : undefined}
             className={onMacTarget ? 'pane--sim pane--mac' : 'pane--sim'}
             actions={
               onMacTarget ? (
                 <IconButton icon="desktop" size="sm" label={deviceFrame ? t.workspace.hideWindowFrame : t.workspace.showWindowFrame} pressed={deviceFrame} onClick={() => void updateSettings({ deviceFrame: !deviceFrame })} />
-              ) : pcMode ? undefined : (
+              ) : pcMode || pcDesktop ? undefined : (
                 <IconButton icon="phone" size="sm" label={deviceFrame ? t.workspace.hideFrame : t.workspace.showFrame} pressed={deviceFrame} onClick={() => void updateSettings({ deviceFrame: !deviceFrame })} />
               )
             }
           >
             <ErrorBoundary label={t.crash.parts.simulator} compact>
-              {onMacTarget ? <AppWindowPane mac={mac} path={path} run={run} frame={deviceFrame} /> : pcMode ? <PcDevicePane target={target} run={run} entry={pcEntry} /> : <SimulatorPane mac={mac} target={target} />}
+              {onMacTarget ? <AppWindowPane mac={mac} path={path} run={run} frame={deviceFrame} /> : pcDesktop ? <WindowsAppPane run={run} name={summary.appName} /> : pcMode ? <PcDevicePane target={target} run={run} entry={pcEntry} /> : <SimulatorPane mac={mac} target={target} />}
             </ErrorBoundary>
           </Pane>
         </Panel>
@@ -312,7 +317,7 @@ export function Workspace({ path }: { path: string }) {
             <Panel id="timeline" panelRef={timelinePanel} collapsible collapsedSize={0} minSize={124} defaultSize={168} className="ws-panel">
               <Pane title={t.workspace.timeline} labelledBy="pane-timeline">
                 <ErrorBoundary label={t.crash.parts.timeline} compact>
-                  <Timeline run={run} electron={electronKind} macSelected={onMacTarget} pcSelected={pcMode} />
+                  <Timeline run={run} electron={electronKind} macSelected={onMacTarget} pcSelected={pcMode} flutter={flutter} pcDesktopSelected={pcDesktop} />
                 </ErrorBoundary>
               </Pane>
             </Panel>

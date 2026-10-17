@@ -25,7 +25,7 @@ export function cliOptions({ outfile, standalone = false, version = pkg.version 
     platform: 'node',
     format: 'esm',
     target: 'node20',
-    loader: { '.rb': 'text' },
+    loader: { '.rb': 'text', '.sh': 'text', '.py': 'text', '.c': 'text' },
     // node-datachannel is native: npm installs it with the CLI; CapMac Studio ships it next to its copy.
     external: standalone ? ['cpu-features', '*.node', 'node-datachannel'] : [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.optionalDependencies ?? {})],
     // Bundled CommonJS dependencies (ssh2, …) call require and read __dirname.
