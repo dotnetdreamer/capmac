@@ -13,7 +13,7 @@ export default defineConfig({
     },
   ],
   test: {
-    include: ['test/unit/**/*.test.ts', 'apps/desktop/test/**/*.test.ts'],
+    include: ['test/unit/**/*.test.ts', 'apps/desktop/test/**/*.test.ts', 'apps/vscode/test/unit/**/*.test.ts'],
     testTimeout: 30_000,
     pool: 'forks',
   },

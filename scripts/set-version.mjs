@@ -1,4 +1,4 @@
-// Keep the CLI, desktop, shared engine and signaling service on one release.
+// Keep the CLI, desktop, VS Code extension, shared engine and signaling service on one release.
 // Prints only the resulting version so a workflow can capture it.
 // Usage: node scripts/set-version.mjs <major|minor|patch|X.Y.Z> [--dry-run]
 
@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const packages = ['', 'packages/core', 'packages/cli', 'apps/desktop', 'services/signal'];
+const packages = ['', 'packages/core', 'packages/cli', 'apps/desktop', 'apps/vscode', 'services/signal'];
 const dependencyGroups = ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies'];
 const stableVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 

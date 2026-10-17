@@ -154,6 +154,26 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: ${{ runner.temp }}/capmac-${{ needs.version.outputs.version }}.tgz
+      # The VS Code extension: the same engine and agent, packaged as a .vsix.
+      - name: Build the VS Code extension
+        run: npm run vscode:package
+        env:
+          CAPMAC_RELEASE_NOTES_URL: ${{ vars.CAPMAC_RELEASE_NOTES_URL || format('https://github.com/{0}/releases/tag/v{{version}}', github.repository) }}
+          CAPMAC_DEFAULT_SIGNAL_URL: ${{ vars.CAPMAC_DEFAULT_SIGNAL_URL }}
+      - name: Check the VS Code extension
+        run: |
+          $vsix = "apps/vscode/capmac-vscode-$env:RELEASE_VERSION.vsix"
+          if (-not (Test-Path -LiteralPath $vsix -PathType Leaf)) {
+            throw "Missing release asset: $vsix"
+          }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vscode-extension
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          path: apps/vscode/capmac-vscode-${{ needs.version.outputs.version }}.vsix
 
   release:
     needs: [version, build]
@@ -179,6 +199,10 @@ jobs:
         with:
           name: npm-tarball
           path: assets
+      - uses: actions/download-artifact@v8
+        with:
+          name: vscode-extension
+          path: assets
       - name: Commit version, tag and publish release
         id: release
         shell: bash
@@ -192,7 +216,7 @@ jobs:
           node scripts/set-version.mjs "$VERSION"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add package.json package-lock.json packages/core/package.json packages/cli/package.json apps/desktop/package.json services/signal/package.json
+          git add package.json package-lock.json packages/core/package.json packages/cli/package.json apps/desktop/package.json apps/vscode/package.json services/signal/package.json
           tag="v${VERSION}"
           existing=$(git ls-remote --tags origin "refs/tags/$tag")
           if [[ -n "$existing" ]]; then
@@ -213,6 +237,8 @@ jobs:
           CapMac Studio ${VERSION} for Windows: choose the x64 or arm64 setup executable to install, or the portable executable to run without installing.
 
           Install the capmac CLI tarball with: npm install -g ./capmac-${VERSION}.tgz
+
+          Install CapMac for VS Code with: code --install-extension capmac-vscode-${VERSION}.vsix (or Extensions › … › Install from VSIX)
 
           The update feed and installer blockmaps are included for installed copies of Studio. Builds are unsigned unless repository signing settings are configured.
           EOF

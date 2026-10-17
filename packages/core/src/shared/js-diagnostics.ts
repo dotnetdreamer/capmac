@@ -1,6 +1,6 @@
 /**
- * Compiler errors in JavaScript build output (TypeScript, esbuild and Vite,
- * and anything that prints `file:line:col: error: message`), as diagnostics
+ * Compiler errors in JavaScript build output (TypeScript, esbuild, Vite and
+ * Rolldown, and anything that prints `file:line:col: error: message`), as diagnostics
  * with absolute paths, so the engine can map them to the PC's files.
  */
 import path from 'node:path';
@@ -14,14 +14,22 @@ const TSC_PRETTY = /^(.+?):(\d+):(\d+) - (error|warning) (TS\d+): (.*)$/;
 const ESBUILD_HEAD = /^\s*(?:✘|X|▲)\s+\[(ERROR|WARNING)\]\s+(.*)$/;
 //     src/main.ts:3:19:
 const ESBUILD_LOCATION = /^\s+(.+?):(\d+):(\d+):\s*$/;
-// file:line:col: error: message
-const GENERIC = /^(.+?):(\d+):(\d+):\s*(error|warning):\s*(.*)$/;
+// [UNRESOLVED_IMPORT] Could not resolve './missing.js' in src/main.ts     (Rolldown, Vite 8; the location is on the next line)
+const ROLLDOWN_HEAD = /^\[([A-Z][A-Z0-9_]*)\]\s+(.*)$/;
+//    ╭─[ src/main.ts:1:8 ]
+const ROLLDOWN_LOCATION = /^\s*╭─\[\s*(.+?):(\d+):(\d+)\s*\]\s*$/;
+// Vite's "error during build:", Rolldown's "Build failed with 1 error:": Rolldown's errors look like its warnings, but follow this.
+const BUILD_FAILED = /^(?:error during build:|Build failed with \d+ errors?:)/;
+// file:line:col: error: message     (Vite 7 prints esbuild's as "file:line:col: ERROR: message")
+const GENERIC = /^(.+?):(\d+):(\d+):\s*(error|warning):\s*(.*)$/i;
 
 const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
 
 /** Turns build output into diagnostics, line by line. Paths are resolved against `cwd` (the folder the tool ran in, on the Mac). */
 export class JsDiagnosticParser {
   private esbuild: { severity: 'error' | 'warning'; message: string; lines: number } | null = null;
+  private rolldown: { message: string } | null = null;
+  private failed = false;
 
   constructor(private readonly cwd: string, private readonly projectRoot: string = cwd) {}
 
@@ -49,6 +57,20 @@ export class JsDiagnosticParser {
       }
       return null;
     }
+    if (this.rolldown) {
+      const location = line.match(ROLLDOWN_LOCATION);
+      if (location) {
+        const pending = this.rolldown;
+        this.rolldown = null;
+        return this.located(location[1]!, location[2]!, location[3]!, this.failed ? 'error' : 'warning', pending.message);
+      }
+      // One without a location right after (a note about the build itself) is not about the code.
+      this.rolldown = null;
+    }
+    if (BUILD_FAILED.test(line)) {
+      this.failed = true;
+      return null;
+    }
     const tsc = line.match(TSC_PLAIN) ?? line.match(TSC_PRETTY);
     if (tsc) return this.located(tsc[1]!, tsc[2]!, tsc[3]!, tsc[4] as 'error' | 'warning', `${tsc[6]} (${tsc[5]})`);
     const head = line.match(ESBUILD_HEAD);
@@ -56,8 +78,13 @@ export class JsDiagnosticParser {
       this.esbuild = { severity: head[1] === 'ERROR' ? 'error' : 'warning', message: head[2]!, lines: 0 };
       return null;
     }
+    const rolldown = line.match(ROLLDOWN_HEAD);
+    if (rolldown) {
+      this.rolldown = { message: rolldown[2]! };
+      return null;
+    }
     const generic = line.match(GENERIC);
-    if (generic && !/^https?$/.test(generic[1]!)) return this.located(generic[1]!, generic[2]!, generic[3]!, generic[4] as 'error' | 'warning', generic[5]!);
+    if (generic && !/^https?$/i.test(generic[1]!)) return this.located(generic[1]!, generic[2]!, generic[3]!, generic[4]!.toLowerCase() as 'error' | 'warning', generic[5]!);
     return null;
   }
 }

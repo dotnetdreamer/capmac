@@ -1,0 +1,15 @@
+# What goes in the .vsix: dist/ (bundles, agent, CLI, webview, samples), media/ (icons, walkthrough),
+# the manifest and its strings, README, CHANGELOG, LICENSE. Everything else stays out.
+src/**
+test/**
+scripts/**
+out/**
+.vscode-test/**
+.vscode-test.mjs
+tsconfig*.json
+.gitignore
+node_modules/**
+**/*.map
+media/screenshots/**
+dist/samples/**/node_modules/**
+.vscode/**
