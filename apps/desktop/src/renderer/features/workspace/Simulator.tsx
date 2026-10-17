@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type PointerEvent, type WheelEvent } from 'react';
 import { keystrokeForChar, keystrokeForKey } from '@capmac/core/shared/hid';
+import { MIRROR_RECEIVER_NAME as RECEIVER_NAME } from '@capmac/core/shared/mirror';
 import type { ErrorInfo, InputEvent, MacSummary, ScreenInfo, StreamFallback, Target } from '../../../shared/contract';
 import { t, tidy } from '../../../shared/i18n';
 import { workspaceBus, type WorkspaceAction } from '../../app/commands';
@@ -29,9 +30,9 @@ type StreamState = { kind: 'connecting' } | { kind: 'streaming' } | { kind: 'rec
 const PADDING = 11;
 
 /** A full-size screenshot: simctl's for a simulator, the newest picture for a plugged-in iPhone. */
-async function screenshot(mac: string, target: Target, action: 'save' | 'copy') {
+async function screenshot(source: { mac: string } | { streamId: string }, target: Target, action: 'save' | 'copy') {
   try {
-    const shot = await call('screen.screenshot', { mac, udid: target.udid });
+    const shot = 'streamId' in source ? await call('iphone.screenshot', { streamId: source.streamId }) : await call('screen.screenshot', { mac: source.mac, udid: target.udid });
     if (action === 'copy') {
       await window.capmac.invoke('app:copy-image', { data: shot.png });
       toast({ tone: 'success', title: t.simulator.shotCopied, body: shot.width ? `${shot.width} × ${shot.height}` : undefined });
@@ -90,15 +91,22 @@ export function CompatibleNote({ fallback, onRetry, onRestart }: { fallback: Str
   );
 }
 
+/** An iPhone mirroring to this PC over Wi-Fi while none is plugged in or paired: its picture, no touch. */
+export const MIRROR_TARGET: Target = { kind: 'device', udid: 'wifi-mirror', name: 'iPhone', os: '', osVersion: '', state: 'available', available: true };
+
 /**
- * The live screen of a simulator, or of an iPhone plugged into the Mac: a
- * canvas fed by a worker that decodes frames off the main thread.
+ * The live screen of a simulator, of an iPhone plugged into the Mac, or of an iPhone mirroring to
+ * this PC: a canvas fed by a worker that decodes frames off the main thread.
  */
-function Screen({ mac, macLabel, target, frame }: { mac: string; macLabel: string; target: Target; frame: boolean }) {
+export function Screen({ mac, macLabel, target, frame, backend, projectPath }: { mac?: string; macLabel?: string; target: Target; frame: boolean; backend?: 'wsl'; projectPath?: string }) {
+  const pc = backend === 'wsl';
+  // No iPhone found at this PC, only one mirroring to it: no touch to set up.
+  const mirrorOnly = pc && target.udid === MIRROR_TARGET.udid;
   const device = target.kind === 'device';
-  const macRoute = useMacs((s) => s.macs.find((m) => m.name === mac)?.route ?? null);
+  const streamIdRef = useRef<string | null>(null);
+  const macRoute = useMacs((s) => (mac ? s.macs.find((m) => m.name === mac)?.route ?? null : null));
   const [targetBitrate, setTargetBitrate] = useState<number | null>(null);
-  const macRtt = useMacs((s) => s.macs.find((m) => m.name === mac)?.rttMs ?? null);
+  const macRtt = useMacs((s) => (mac ? s.macs.find((m) => m.name === mac)?.rttMs ?? null : null));
   const stageRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -108,8 +116,11 @@ function Screen({ mac, macLabel, target, frame }: { mac: string; macLabel: strin
   const [codec, setCodec] = useState<'h264' | 'jpeg' | null>(null);
   const [fallback, setFallback] = useState<StreamFallback | null>(null);
   const [preparing, setPreparing] = useState<{ stage: 'building' | 'starting'; xcode?: string } | null>(null);
-  // A plugged-in iPhone: waiting for its cable, or for Allow on the Mac.
-  const [wait, setWait] = useState<'device' | 'permission' | null>(null);
+  // A plugged-in iPhone: waiting for its cable, or for Allow on the Mac. An iPhone at this PC:
+  // waiting for it to start mirroring (or, when it mirrors since too long ago, to start again).
+  const [wait, setWait] = useState<'device' | 'permission' | 'mirror' | 'restart-mirroring' | 'firewall' | null>(null);
+  // An iPhone at this PC: which one mirrors now.
+  const [mirroring, setMirroring] = useState<string | null>(null);
   // A plugged-in iPhone sends nothing while its screen is off: say so after a moment.
   const [slowPicture, setSlowPicture] = useState(false);
   const [frameSize, setFrameSize] = useState<{ width: number; height: number } | null>(null);
@@ -125,7 +136,7 @@ function Screen({ mac, macLabel, target, frame }: { mac: string; macLabel: strin
   const canvasPixels = useRef(0);
   const fixAxe = useCallback(async () => {
     try {
-      await call('macs.fix', { name: mac, fix: 'install-axe' });
+      await call('macs.fix', { name: mac!, fix: 'install-axe' });
       toast({ tone: 'success', title: t.simulator.axeInstalled, body: t.simulator.axeInstalledBody });
       setEpoch((e) => e + 1);
     } catch (err) {
@@ -149,9 +160,14 @@ function Screen({ mac, macLabel, target, frame }: { mac: string; macLabel: strin
     workerRef.current = worker;
     const offscreen = canvas.transferControlToOffscreen();
     worker.postMessage({ type: 'canvas', canvas: offscreen }, [offscreen]);
+    // A mirrored iPhone sends a keyframe only when mirroring starts: never skip frames to wait for one.
+    if (pc) worker.postMessage({ type: 'keyframes', onRequest: false });
     worker.onmessage = (e) => {
       const m = e.data;
       if (m.type === 'frame-size') setFrameSize({ width: m.width, height: m.height });
+      else if (m.type === 'mirror-client') setMirroring(m.name);
+      // Without keyframes on request, a broken picture comes back only when mirroring starts again.
+      else if (m.type === 'decoder-error' && pc) setWait('restart-mirroring');
       else if (m.type === 'first-frame') {
         setHasFrame(true);
         setPreparing(null);
@@ -170,12 +186,16 @@ function Screen({ mac, macLabel, target, frame }: { mac: string; macLabel: strin
     setHasFrame(false);
     setPreparing(null);
     setWait(null);
+    setMirroring(null);
     setFallback(null);
     (async () => {
       try {
         const maxSize = canvasPixels.current ? videoSizeFor(canvasPixels.current, null) : undefined;
-        const opened = await window.capmac.invoke('app:screen-open', { mac, udid: target.udid, maxSize, device: device ? { name: target.name } : undefined });
+        const opened = await window.capmac.invoke('app:screen-open', pc
+          ? { udid: target.udid, maxSize, backend: 'wsl', projectPath }
+          : { mac, udid: target.udid, maxSize, device: device ? { name: target.name } : undefined });
         streamId = opened.streamId;
+        streamIdRef.current = opened.streamId;
         const port = await claimScreenPort(opened.streamId);
         if (disposed) {
           port.close();
@@ -191,9 +211,10 @@ function Screen({ mac, macLabel, target, frame }: { mac: string; macLabel: strin
       worker.terminate();
       canvas.remove();
       workerRef.current = null;
+      streamIdRef.current = null;
       if (streamId) void call('screen.stop', { streamId }).catch(() => undefined);
     };
-  }, [mac, target.udid, target.name, device, epoch, prefer]);
+  }, [mac, target.udid, target.name, device, epoch, prefer, pc, projectPath]);
 
   // The iPhone's screen is up but no picture came: its screen is probably off.
   useEffect(() => {
@@ -437,11 +458,27 @@ function Screen({ mac, macLabel, target, frame }: { mac: string; macLabel: strin
     setFallback(null);
     workerRef.current?.postMessage({ type: 'retry-smooth' });
   }, []);
+  // This PC iPhone: sign and install WebDriverAgent so the screen takes taps (one Apple sign-in).
+  const [settingUpTouch, setSettingUpTouch] = useState(false);
+  const setUpTouch = useCallback(async () => {
+    if (!projectPath) return;
+    setSettingUpTouch(true);
+    try {
+      await call('iphone.setUpTouch', { projectPath, udid: target.udid });
+      toast({ tone: 'success', title: t.pc.screen.touchOn });
+      setEpoch((e) => e + 1);
+    } catch (err) {
+      const e = errorInfo(err);
+      if (!e.cancelled) toast({ tone: 'critical', title: t.pc.screen.touchFailed, body: both(e) });
+    } finally {
+      setSettingUpTouch(false);
+    }
+  }, [projectPath, target.udid]);
   const restartSimulator = useCallback(async () => {
     try {
       toast({ tone: 'info', title: t.simulator.restarting(target.name), body: t.simulator.restartingBody });
-      await call('simulators.shutdown', { mac, udid: target.udid });
-      await call('simulators.boot', { mac, udid: target.udid });
+      await call('simulators.shutdown', { mac: mac!, udid: target.udid });
+      await call('simulators.boot', { mac: mac!, udid: target.udid });
       setEpoch((n) => n + 1);
     } catch (err) {
       toast({ tone: 'critical', title: t.simulator.restartFailed(target.name), body: tidy(errorInfo(err).hint ?? errorInfo(err).message) });
@@ -451,7 +488,7 @@ function Screen({ mac, macLabel, target, frame }: { mac: string; macLabel: strin
   // Workspace command: Ctrl+Shift+S
   useEffect(() => {
     const onAction = (e: Event) => {
-      if ((e as CustomEvent<WorkspaceAction>).detail === 'screenshot') void screenshot(mac, target, 'save');
+      if ((e as CustomEvent<WorkspaceAction>).detail === 'screenshot') void screenshot(pc && streamIdRef.current ? { streamId: streamIdRef.current } : { mac: mac! }, target, 'save');
     };
     workspaceBus.addEventListener('action', onAction);
     return () => workspaceBus.removeEventListener('action', onAction);
@@ -475,7 +512,7 @@ function Screen({ mac, macLabel, target, frame }: { mac: string; macLabel: strin
   const streamName = codec === 'h264' ? t.simulator.streamSmooth : codec === 'jpeg' ? t.simulator.streamCompatible : t.simulator.stream;
   const overInternet = macRoute === 'direct' || macRoute === 'relay';
   const statsTip = [
-    streamName,
+    pc && mirroring ? t.pc.screen.mirroring(mirroring) : streamName,
     overInternet ? t.simulator.overInternetRoute(macRoute, macRtt) : null,
     codec === 'h264' && targetBitrate ? t.simulator.upTo(formatRate(Math.round(targetBitrate / 1000))) : null,
     stats && codec === 'h264' && stats.latencyMs !== null ? t.simulator.delay(Math.round(stats.latencyMs), Math.round(stats.latencyP95Ms ?? stats.latencyMs)) : null,
@@ -483,7 +520,7 @@ function Screen({ mac, macLabel, target, frame }: { mac: string; macLabel: strin
     stats?.inputMs != null ? t.simulator.touch(Math.round(stats.inputMs)) : null,
     codec === 'h264' && stats?.fps === 0 ? t.simulator.still : null,
   ].filter(Boolean).join(' · ');
-  const viewOnlyReason = device ? t.simulator.deviceViewOnly : tidy(info?.inputReason) ?? t.simulator.viewOnlyWhy;
+  const viewOnlyReason = mirrorOnly ? t.pc.screen.touchPlugIn : pc ? tidy(info?.inputReason) ?? t.pc.screen.touchOffWhy : device ? t.simulator.deviceViewOnly : tidy(info?.inputReason) ?? t.simulator.viewOnlyWhy;
   const inputHelp = mode === 'touch' ? t.simulator.helpTouch : t.simulator.helpBasic;
   return (
     <div className="sim">
@@ -523,10 +560,16 @@ function Screen({ mac, macLabel, target, frame }: { mac: string; macLabel: strin
                       {device ? t.simulator.tryAgain : t.simulator.reconnect}
                     </Button>
                   </>
+                ) : waiting && !reconnecting && pc ? (
+                  <>
+                    <Icon name={wait === 'firewall' ? 'wifiOff' : 'wifi'} size={20} />
+                    <span>{wait === 'firewall' ? t.pc.screen.firewallTitle : wait === 'restart-mirroring' ? t.pc.screen.mirrorAgainTitle : t.pc.screen.mirrorTitle}</span>
+                    <span className="faint">{wait === 'firewall' ? t.pc.screen.firewallBody : wait === 'restart-mirroring' ? t.pc.screen.mirrorAgainBody(RECEIVER_NAME) : t.pc.screen.mirrorBody(RECEIVER_NAME)}</span>
+                  </>
                 ) : waiting && !reconnecting ? (
                   <>
                     <Icon name={wait === 'device' ? 'usb' : 'shield'} size={20} />
-                    <span>{wait === 'device' ? t.simulator.plugIn(target.name, macLabel) : t.simulator.allowOnMac(macLabel)}</span>
+                    <span>{wait === 'device' ? t.simulator.plugIn(target.name, macLabel ?? '') : t.simulator.allowOnMac(macLabel ?? '')}</span>
                     <span className="faint">{wait === 'device' ? t.simulator.plugInBody : t.simulator.allowOnMacBody}</span>
                   </>
                 ) : (
@@ -543,7 +586,7 @@ function Screen({ mac, macLabel, target, frame }: { mac: string; macLabel: strin
         </div>
       </div>
       <div className="sim__toolbar" role="toolbar" aria-label={device ? t.simulator.deviceControls : t.simulator.controls}>
-        {(info && !info.input) || device ? (
+        {(info && !info.input) || (device && !pc) ? (
           <span className="sim__viewonly">
             <Tooltip content={viewOnlyReason}>
               <span className="sim__viewonly-label" tabIndex={0}>
@@ -551,11 +594,15 @@ function Screen({ mac, macLabel, target, frame }: { mac: string; macLabel: strin
                 {t.simulator.viewOnly}
               </span>
             </Tooltip>
-            {!device && (
+            {mirrorOnly ? null : pc ? (
+              <Button size="sm" variant="ghost" icon="phone" busy={settingUpTouch} onClick={() => void setUpTouch()}>
+                {t.pc.screen.turnOnTouch}
+              </Button>
+            ) : !device ? (
               <Button size="sm" variant="ghost" onClick={() => void fixAxe()}>
                 {t.simulator.installAxe}
               </Button>
-            )}
+            ) : null}
           </span>
         ) : (
           <>
@@ -592,8 +639,8 @@ function Screen({ mac, macLabel, target, frame }: { mac: string; macLabel: strin
           label={t.simulator.screenshot}
           placement="top-start"
           items={[
-            { id: 'save', label: t.simulator.saveShot, icon: 'download', shortcut: 'Ctrl+Shift+S', onSelect: () => void screenshot(mac, target, 'save') },
-            { id: 'copy', label: t.simulator.copyShot, icon: 'copy', onSelect: () => void screenshot(mac, target, 'copy') },
+            { id: 'save', label: t.simulator.saveShot, icon: 'download', shortcut: 'Ctrl+Shift+S', onSelect: () => void screenshot(pc && streamIdRef.current ? { streamId: streamIdRef.current } : { mac: mac! }, target, 'save') },
+            { id: 'copy', label: t.simulator.copyShot, icon: 'copy', onSelect: () => void screenshot(pc && streamIdRef.current ? { streamId: streamIdRef.current } : { mac: mac! }, target, 'copy') },
           ]}
         />
         <span className="sim__spacer" />

@@ -1383,6 +1383,21 @@ export const en = {
     },
     /** An iPhone that doesn't trust this PC yet. */
     trust: { title: 'Trust this PC', body: 'Unlock your iPhone and tap Trust when it asks' },
+    /** The live iPhone screen at this PC, mirrored over Wi-Fi (no Mac). */
+    screen: {
+      mirrorTitle: 'Mirror your iPhone here',
+      mirrorBody: (name: string) => `On your iPhone, open Control Center, tap Screen Mirroring, then choose ${name}. Your iPhone needs to be on the same Wi-Fi as this PC`,
+      mirrorAgainTitle: 'Start mirroring again to see it here',
+      mirrorAgainBody: (name: string) => `On your iPhone, open Control Center, tap Screen Mirroring, tap Stop Mirroring, then choose ${name} again`,
+      firewallTitle: 'Windows Firewall is blocking the screen receiver',
+      firewallBody: 'Open Windows Security, go to Firewall & network protection, choose Allow an app through firewall, then tick uxplay.exe for this network. Then try again',
+      mirroring: (name: string) => `${name} is mirroring`,
+      touchPlugIn: 'To tap and type from here, plug in your iPhone with a cable, then turn on touch',
+      turnOnTouch: 'Turn on touch',
+      touchOn: 'Touch is on for this iPhone',
+      touchFailed: 'Couldn’t turn on touch',
+      touchOffWhy: 'Turn on touch to tap and type from here. It needs Developer Mode and signs a small helper onto your iPhone',
+    },
     trustHint: 'Unlock it and tap Trust',
     noPhone: 'Plug in your iPhone with a USB cable, unlock it and tap Trust. After its first run, it also connects over Wi-Fi',
     noAppleDevices: 'Install Apple Devices to reach your iPhone. Setup offers it',

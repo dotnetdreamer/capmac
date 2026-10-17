@@ -21,7 +21,7 @@ export type WslBootstrapPatch = Required<Pick<WslOptions, 'distro' | 'swift' | '
 function checkCancelled(signal?: AbortSignal): void { if (signal?.aborted) throw new CancelledError(); }
 
 /** argv-only Windows commands; no PowerShell, elevation, or visible windows. */
-function hostRun(executable: string, argv: string[], hooks: Hooks = {}, timeoutMs = 120_000): Promise<WslCommandResult> {
+export function hostRun(executable: string, argv: string[], hooks: Hooks = {}, timeoutMs = 120_000): Promise<WslCommandResult> {
   checkCancelled(hooks.signal);
   return new Promise((resolve, reject) => {
     const child = spawn(executable, argv, { windowsHide: true, shell: false, stdio: ['ignore', 'pipe', 'pipe'] });

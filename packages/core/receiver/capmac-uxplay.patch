@@ -1,0 +1,65 @@
+diff --git a/renderers/audio_renderer.c b/renderers/audio_renderer.c
+index c33a0ce..0b994d4 100644
+--- a/renderers/audio_renderer.c
++++ b/renderers/audio_renderer.c
+@@ -68,11 +68,16 @@ static const char aac_lc_caps[] ="audio/mpeg,mpegversion=(int)4,channels=(int)2,
+ /* ct = 8; codec_data from MPEG v4 ISO 14996-3 Section 1.6.2.1: AAC_ELD 44100/2  spf = 480 */
+ static const char aac_eld_caps[] ="audio/mpeg,mpegversion=(int)4,channels=(int)2,rate=(int)44100,stream-format=raw,codec_data=(buffer)f8e85000";
+ 
+-static gboolean check_plugins (void)
++static gboolean check_plugins (gboolean rtp_video_only)
+ {
+     GstRegistry *registry = NULL;
+-    const gchar *needed[] = { "app", "libav", "playback", "autodetect", "videoparsersbad",  NULL};
+-    const gchar *gst[] = {"plugins-base", "libav", "plugins-base", "plugins-good", "plugins-bad", NULL};
++    const gchar *needed_all[] = { "app", "libav", "playback", "autodetect", "videoparsersbad",  NULL};
++    const gchar *gst_all[] = {"plugins-base", "libav", "plugins-base", "plugins-good", "plugins-bad", NULL};
++    /* video forwarded as RTP (-vrtp) with audio off renders and decodes nothing: it needs appsrc and rtph26xpay only */
++    const gchar *needed_rtp[] = { "app", "rtp", NULL};
++    const gchar *gst_rtp[] = {"plugins-base", "plugins-good", NULL};
++    const gchar **needed = rtp_video_only ? needed_rtp : needed_all;
++    const gchar **gst = rtp_video_only ? gst_rtp : gst_all;
+     registry = gst_registry_get ();
+     gboolean ret = TRUE;
+     for (int i = 0; i < g_strv_length ((gchar **) needed); i++) {
+@@ -121,9 +126,9 @@ static gboolean check_plugin_feature (const gchar *needed_feature)
+     return ret;
+ }
+ 
+-bool gstreamer_init(){
+-    gst_init(NULL,NULL);    
+-    return (bool) check_plugins ();
++bool gstreamer_init(bool rtp_video_only){
++    gst_init(NULL,NULL);
++    return (bool) check_plugins (rtp_video_only);
+ }
+ 
+ void audio_renderer_init(logger_t *render_logger, const char* audiosink, const bool* audio_sync, const bool* video_sync, const char *artp_pipeline) {
+diff --git a/renderers/audio_renderer.h b/renderers/audio_renderer.h
+index df31661..8e7f606 100644
+--- a/renderers/audio_renderer.h
++++ b/renderers/audio_renderer.h
+@@ -32,7 +32,7 @@ extern "C" {
+ #include <stdbool.h>
+ #include "../lib/logger.h"
+ 
+-bool gstreamer_init();
++bool gstreamer_init(bool rtp_video_only);
+ void audio_renderer_init(logger_t *logger, const char* audiosink, const bool *audio_sync, const bool *video_sync, const char *artp_pipeline);
+ void audio_renderer_start(unsigned char* compression_type);
+ void audio_renderer_stop();
+diff --git a/uxplay.cpp b/uxplay.cpp
+index be41031..c7cff53 100644
+--- a/uxplay.cpp
++++ b/uxplay.cpp
+@@ -3564,7 +3564,9 @@ int main (int argc, char *argv[]) {
+         append_hostname(server_name);
+     }
+ 
+-    if (!gstreamer_init()) {
++    /* forwarding video as RTP with a parser other than the "bad" h264parse, audio off, no HLS: nothing is decoded or shown */
++    bool rtp_video_only = !use_audio && !rtp_pipeline.empty() && !hls_support && video_parser.find("parse") == std::string::npos;
++    if (!gstreamer_init(rtp_video_only)) {
+         LOGE ("stopping");
+         exit (1);
+     }

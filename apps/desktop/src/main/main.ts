@@ -315,11 +315,11 @@ function registerIpc(): void {
     await fs.writeFile(result.filePath, text);
     return result.filePath;
   });
-  handle('app:screen-open', async ({ mac, udid, maxSize, projectPath, device }, event) => {
+  handle('app:screen-open', async ({ mac, udid, maxSize, projectPath, device, backend }, event) => {
     const streamId = `scr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const prefer = await sharedStream();
     const { port1, port2 } = new MessageChannelMain();
-    engine.openScreen(streamId, mac, udid, port1, { prefer, maxSize, projectPath, device });
+    engine.openScreen(streamId, mac, udid, port1, { prefer, maxSize, projectPath, device, backend });
     event.sender.postMessage('screen-port', { streamId }, [port2]);
     return { streamId };
   });

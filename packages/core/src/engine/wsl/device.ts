@@ -336,6 +336,12 @@ async function requirePython(options: WslDeviceOptions): Promise<PythonCommand> 
   return pythonCommand(tools.python);
 }
 
+/** How to start a long-running iPhone helper script: CapMac's Python, its arguments before the script, and the clean environment. */
+export async function deviceHelperCommand(options: WslDeviceOptions = {}, udid?: string): Promise<{ executable: string; prefix: string[]; env: NodeJS.ProcessEnv }> {
+  const python = await requirePython(options);
+  return { executable: python.executable, prefix: python.prefix, env: deviceEnvironment(udid) };
+}
+
 /** A Wi-Fi tunnel the iPhone dropped: locked or asleep in the middle of a command. */
 const DROPPED = /terminated abruptly|transport closed|ConnectionResetError|ConnectionTerminatedError|did not come back on this Wi-Fi/i;
 
@@ -541,12 +547,19 @@ const launchedProcesses = new Map<string, number>();
  * Mounts developer services and waits for a confirmed launch; there is no manual-open success fallback.
  * `onLocked`: the iPhone is locked, and the app opens once it is unlocked (Stop ends the wait).
  */
+/** Mounts the developer services (Apple's developer disk image) that launching apps and tests needs; needs Developer Mode. */
+export async function mountWslDeveloperImage(device: WslDevice, options: WslDeviceOptions = {}): Promise<void> {
+  validateUdid(device.udid);
+  const wifi = device.connection === 'network';
+  await runDevice(['mounter', 'auto-mount', ...reach(device), '--udid', device.udid], options, { udid: device.udid, timeoutMs: wifi ? 600_000 : 180_000, wifi });
+}
+
 export async function launchWslApp(bundleId: string, device: WslDevice, options: WslDeviceOptions & { args?: string[] } = {}): Promise<void> {
   validateUdid(device.udid);
   validateBundleId(bundleId);
   const wifi = device.connection === 'network';
   const transport = wifi ? [] : developerTransport(device);
-  await runDevice(['mounter', 'auto-mount', ...reach(device), '--udid', device.udid], options, { udid: device.udid, timeoutMs: wifi ? 600_000 : 180_000, wifi });
+  await mountWslDeveloperImage(device, options);
   if (wifi || atLeast(device.productVersion!, '17.4.0')) {
     const python = await requirePython(options);
     const onLog = (line: string) => {

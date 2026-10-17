@@ -21,7 +21,7 @@ import { BuildIpaDialog, BuildLogDialog } from './Dialogs';
 import { isListed, Problems } from './Problems';
 import { SessionBar } from './SessionBar';
 import { AppWindowPane } from './AppWindow';
-import { SimulatorPane } from './Simulator';
+import { MIRROR_TARGET, Screen, SimulatorPane } from './Simulator';
 import { automaticTarget, macDesktopTarget, thisPcTarget } from './TargetPicker';
 import { MAC_TARGET_ID } from '../../state/runs';
 import { PcBanner, PcDevicePane, PcSetupDialog, WindowsAppPane } from './PcSetup';
@@ -317,7 +317,12 @@ export function Workspace({ path }: { path: string }) {
             }
           >
             <ErrorBoundary label={t.crash.parts.simulator} compact>
-              {onMacTarget ? <AppWindowPane mac={mac} path={path} run={run} frame={deviceFrame} /> : pcDesktop ? <WindowsAppPane run={run} name={summary.appName} reactNative={reactNative} /> : pcMode ? <PcDevicePane target={target} run={run} entry={pcEntry} /> : <SimulatorPane mac={mac} target={target} />}
+              {onMacTarget ? <AppWindowPane mac={mac} path={path} run={run} frame={deviceFrame} /> : pcDesktop ? <WindowsAppPane run={run} name={summary.appName} reactNative={reactNative} /> : pcMode ? (
+                target?.paired === false
+                  ? <PcDevicePane target={target} run={run} entry={pcEntry} />
+                  // Mirroring needs no cable and no pairing: with no iPhone found, the pane still shows one mirrored over Wi-Fi.
+                  : <Screen key={`pc-${target?.udid ?? MIRROR_TARGET.udid}`} target={target ?? MIRROR_TARGET} frame={deviceFrame} backend="wsl" projectPath={path} />
+              ) : <SimulatorPane mac={mac} target={target} />}
             </ErrorBoundary>
           </Pane>
         </Panel>

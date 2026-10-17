@@ -21,6 +21,8 @@ type InMessage =
   | { type: 'video-size'; maxSize: number }
   | { type: 'window'; window: number | null }
   | { type: 'window-action'; window: number; action: 'close' | 'minimize' | 'zoom' }
+  /** false: the source cannot send a keyframe when asked (a mirrored iPhone), so never skip frames to wait for one. */
+  | { type: 'keyframes'; onRequest: boolean }
   /** An app's dialogs and sound: a command for the engine, as it is. */
   | { type: 'dialog'; command: Extract<ScreenPortCommand, { type: 'dialog-answer' | 'dialog-list' | 'dialog-mkdir' | 'sound' }> };
 
@@ -120,11 +122,13 @@ let latestFrame: VideoFrame | null = null;
 /** Deltas are useless until the next keyframe (after a reset, a drop, a new config). */
 let waitingForKey = true;
 let keyAskedAt = 0;
+let keyframesOnRequest = true;
 let clockOffsetUs: number | null = null;
 /** When each chunk was handed to the decoder, by its timestamp (the capture time). */
 const submitted = new Map<number, number>();
 
 function askForKeyframe(): void {
+  if (!keyframesOnRequest) return;
   const now = performance.now();
   if (now - keyAskedAt < 500) return;
   keyAskedAt = now;
@@ -203,8 +207,9 @@ function onVideo(message: Extract<ScreenPortMessage, { type: 'video' }>): void {
     return;
   }
   if (!message.key) {
-    // Waiting for a keyframe, or falling behind: skip deltas up to the next keyframe.
-    if (waitingForKey || decoder.decodeQueueSize > 3) {
+    // Waiting for a keyframe, or falling behind: skip deltas up to the next keyframe (only when
+    // the source sends one on request; otherwise a skipped frame would freeze the picture).
+    if (waitingForKey || (keyframesOnRequest && decoder.decodeQueueSize > 3)) {
       if (!waitingForKey) dropped += 1;
       waitingForKey = true;
       askForKeyframe();
@@ -287,6 +292,12 @@ scope.onmessage = (e) => {
     case 'canvas':
       canvas = message.canvas;
       ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
+      // A new canvas for a decoder that already has a picture: show it at once.
+      if (latestFrame) drawFrame();
+      else drawBitmap();
+      break;
+    case 'keyframes':
+      keyframesOnRequest = message.onRequest;
       break;
     case 'port':
       port = message.port;
