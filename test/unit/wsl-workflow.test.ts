@@ -61,6 +61,11 @@ vi.mock('../../packages/core/src/engine/wsl/device.js', async (importOriginal) =
   streamWslDeviceLogs: boundary.logs, stopWslApp: boundary.stopApp,
   ensureWslWifiPairing: async () => false,
 }));
+// Apple's device server on this PC: CI runners have no Apple Devices app.
+vi.mock('../../packages/core/src/engine/wsl/apple-devices.js', () => ({
+  inspectAppleDeviceServer: async () => 'running', startAppleDeviceServer: async () => 'running',
+  requireAppleDeviceServer: async () => undefined, installAppleDevices: async () => undefined,
+}));
 vi.mock('../../packages/core/src/engine/devserver.js', () => ({ startDevServer: boundary.startServer }));
 vi.mock('../../packages/core/src/engine/wsl/live.js', () => ({
   chooseLiveHost: boundary.chooseHost, startWslLiveRelay: boundary.startRelay,

@@ -218,7 +218,11 @@ function deviceToolsRoot(): string | undefined {
   return base && path.isAbsolute(base) ? path.join(base, 'CapMac', 'device-tools') : undefined;
 }
 
-const inside = (folder: string, file: string) => !path.relative(folder, path.resolve(file)).startsWith('..');
+// On another drive, path.relative returns an absolute path: that file is outside too.
+const inside = (folder: string, file: string) => {
+  const rel = path.relative(folder, path.resolve(file));
+  return !rel.startsWith('..') && !path.isAbsolute(rel);
+};
 
 /** Where CapMac's own Python lives (Windows), with the iPhone tools installed in it. */
 export function privatePythonPath(root = deviceToolsRoot()): string | undefined {

@@ -28,11 +28,16 @@ describe('WSL CLI routing', () => {
         setup(builder) {
           builder.onResolve({ filter: /^@capmac\/core\/engine\/wsl\/index$/ }, () => ({ path: 'wsl', namespace: 'test' }));
           builder.onResolve({ filter: /^@capmac\/core\/engine\/wsl\/device$/ }, () => ({ path: 'device', namespace: 'test' }));
+          builder.onResolve({ filter: /^@capmac\/core\/engine\/wsl\/apple-devices$/ }, () => ({ path: 'apple-devices', namespace: 'test' }));
           builder.onResolve({ filter: /^\.\/commands\/takeover\.js$/ }, () => ({ path: 'takeover', namespace: 'test' }));
           builder.onResolve({ filter: /^\.\/commands\/build\.js$/ }, () => ({ path: 'mac-build', namespace: 'test' }));
           builder.onLoad({ filter: /.*/, namespace: 'test' }, (args) => {
             if (args.path === 'device') return { contents: `
               exports.listWslDevices = async () => [{udid:'000081-phone',name:'My iPhone',productVersion:'18.0'}];
+            ` };
+            // CI runners have no Apple Devices app.
+            if (args.path === 'apple-devices') return { contents: `
+              exports.requireAppleDeviceServer = async () => {};
             ` };
             if (args.path === 'takeover') return { contents: `
               exports.takeoverByDefault = async () => { throw new Error('MAC_TAKEOVER_FORBIDDEN'); };

@@ -13,7 +13,13 @@ vi.mock('../../packages/core/src/engine/wsl/signer-tools.js', () => ({ ensureWsl
 vi.mock('../../packages/core/src/engine/wsl/resources.js', () => ({ installWslResourceTools: boundary.resources }));
 const linux = { swift: '/opt/swift/usr/bin/swiftc', clang: '/usr/bin/clang', linker: '/usr/bin/ld64.lld-18', archive: '/usr/bin/llvm-ar', lipo: '/usr/bin/llvm-lipo-18', strip: '/usr/bin/llvm-strip', ruby: '/usr/bin/ruby', pod: '/usr/local/bin/pod' };
 
-beforeEach(() => {
+let toolsHome: string;
+beforeEach(async () => {
+  // Never the developer's own iPhone tools or the internet: a wrong path check would replace CapMac's Python.
+  toolsHome = await mkdtemp(path.join(os.tmpdir(), 'capmac-tools-home-'));
+  vi.stubEnv('LOCALAPPDATA', toolsHome);
+  vi.stubEnv('XDG_DATA_HOME', toolsHome);
+  vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('tests stay offline'); }));
   boundary.replies = [];
   boundary.spawn.mockReset();
   boundary.signer.mockReset().mockResolvedValue('/home/test/capmac-zsign');
@@ -30,7 +36,7 @@ beforeEach(() => {
     return child;
   });
 });
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
+afterEach(async () => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); await rm(toolsHome, { recursive: true, force: true }); });
 
 describe('managed dependency setup', () => {
   it.runIf(process.platform === 'win32')('reuses CapMac-Ubuntu without changing the default distribution', async () => {
@@ -80,6 +86,8 @@ describe('managed dependency setup', () => {
     // Which Python setup keeps: its own and someone's chosen one, not one an earlier CapMac set up.
     expect(devicePythonCurrent(own)).toBe(true);
     expect(devicePythonCurrent('C:\\Python313\\python.exe')).toBe(true);
+    // One on another drive is outside CapMac's folder too (path.relative gives an absolute path there).
+    expect(devicePythonCurrent(`${base[0]!.toUpperCase() === 'Z' ? 'Y' : 'Z'}:\\Python313\\python.exe`)).toBe(true);
     expect(devicePythonCurrent(path.join(base, 'CapMac', 'device-tools', '11.32.0', 'Scripts', 'python.exe'))).toBe(false);
     expect(devicePythonCurrent(undefined)).toBe(true);
     await rm(base, { recursive: true, force: true });
