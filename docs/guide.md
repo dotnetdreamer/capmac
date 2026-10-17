@@ -89,7 +89,7 @@ CapMac finds the apps in the workspace (Capacitor, Flutter, React Native, Electr
 - AI agents in VS Code get tools to run the app, read its console and look at its screen
 - CapMac adds its [skill](#ai-coding-agents) to each project with an app, for the coding agents it finds
 
-Install the `.vsix` from [GitHub Releases](https://github.com/dotnetdreamer/capmac/releases/latest) with `code --install-extension capmac-vscode-<version>.vsix`.
+Install it from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=capmac.capmac-vscode), or search for **CapMac** in VS Code's Extensions view. The `.vsix` is also on [GitHub Releases](https://github.com/dotnetdreamer/capmac/releases/latest), for `code --install-extension capmac-vscode-<version>.vsix`
 There's more in [apps/vscode/README.md](../apps/vscode/README.md) and the [design notes](vscode-extension.md)
 
 ## Your Capacitor and Ionic commands

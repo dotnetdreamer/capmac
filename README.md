@@ -11,10 +11,11 @@ CapMac builds your app and runs it on the iOS Simulator or your own iPhone<br>Yo
 **Capacitor · Ionic · Flutter · React Native · Electron**
 
 [![Latest release](https://img.shields.io/github/v/release/dotnetdreamer/capmac?label=release&color=5B4BF0)](https://github.com/dotnetdreamer/capmac/releases/latest)
+[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/capmac.capmac-vscode?label=VS%20Code&color=5B4BF0)](https://marketplace.visualstudio.com/items?itemName=capmac.capmac-vscode)
 [![MIT license](https://img.shields.io/badge/license-MIT-5B4BF0)](LICENSE)
 [![Windows x64 and Arm64](https://img.shields.io/badge/Windows-x64%20%7C%20Arm64-5B4BF0)](https://github.com/dotnetdreamer/capmac/releases/latest)
 
-[**Download CapMac Studio**](https://github.com/dotnetdreamer/capmac/releases/latest) · [**CapMac for VS Code**](apps/vscode/README.md)
+[**Download CapMac Studio**](https://github.com/dotnetdreamer/capmac/releases/latest) · [**CapMac for VS Code**](https://marketplace.visualstudio.com/items?itemName=capmac.capmac-vscode)
 
 [Quick start](#quick-start) · [No Mac?](#no-mac-at-all) · [FAQ](#faq) · [Guide](docs/guide.md)
 
@@ -64,7 +65,7 @@ CapMac lets you stay on your PC. It uses a Mac you already have, even an old one
 **1. Get CapMac.** All three share one engine and one set of settings, so you can switch any time
 
 - [**CapMac Studio**](https://github.com/dotnetdreamer/capmac/releases/latest), the Windows app, as an installer or a portable app
-- [**CapMac for VS Code**](apps/vscode/README.md): `code --install-extension capmac-vscode-<version>.vsix`, from the same release
+- [**CapMac for VS Code**](https://marketplace.visualstudio.com/items?itemName=capmac.capmac-vscode), from the VS Code Marketplace: search for **CapMac** in VS Code's Extensions view
 - **The CLI:** `npm install -g capmac` (needs Node.js 20.10 or newer)
 
 **2. Run your app with a Mac.** On the Mac, install Xcode, open it once and add an iOS simulator when it asks. In System Settings, open General, then Sharing, and turn on **Remote Login**. Stay logged in on the Mac, because the simulator runs on its desktop. Then, on your PC:
