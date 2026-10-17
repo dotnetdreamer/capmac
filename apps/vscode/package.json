@@ -1,0 +1,1331 @@
+{
+  "name": "capmac-vscode",
+  "displayName": "CapMac",
+  "description": "%description%",
+  "version": "0.1.1",
+  "publisher": "capmac",
+  "license": "MIT",
+  "private": true,
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#3B2BC4",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dotnetdreamer/capmac.git",
+    "directory": "apps/vscode"
+  },
+  "homepage": "https://github.com/dotnetdreamer/capmac#readme",
+  "bugs": {
+    "url": "https://github.com/dotnetdreamer/capmac/issues"
+  },
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Debuggers",
+    "Other"
+  ],
+  "keywords": [
+    "capacitor",
+    "flutter",
+    "electron",
+    "ios",
+    "iphone",
+    "simulator",
+    "xcode",
+    "pair to mac",
+    "live reload",
+    "hot reload",
+    "windows",
+    "mac"
+  ],
+  "type": "module",
+  "main": "./dist/extension.cjs",
+  "activationEvents": [
+    "workspaceContains:capacitor.config.json",
+    "workspaceContains:capacitor.config.ts",
+    "workspaceContains:capacitor.config.js",
+    "workspaceContains:*/capacitor.config.{json,ts,js}",
+    "workspaceContains:pubspec.yaml",
+    "workspaceContains:*/pubspec.yaml",
+    "workspaceContains:capmac.json",
+    "workspaceContains:metro.config.*",
+    "workspaceContains:*/metro.config.*",
+    "workspaceContains:app.config.js",
+    "workspaceContains:app.config.ts",
+    "workspaceContains:eas.json",
+    "onDebugDynamicConfigurations:capmac",
+    "onDebugResolve:capmac",
+    "onWebviewPanel:capmac.screen"
+  ],
+  "capabilities": {
+    "virtualWorkspaces": false,
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "%untrusted%"
+    }
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "capmac",
+          "title": "CapMac",
+          "icon": "media/capmac.svg"
+        }
+      ]
+    },
+    "views": {
+      "capmac": [
+        {
+          "id": "capmac.run",
+          "name": "%view.run%",
+          "icon": "media/capmac.svg",
+          "contextualTitle": "CapMac"
+        },
+        {
+          "id": "capmac.apps",
+          "name": "%view.apps%",
+          "icon": "media/capmac.svg",
+          "contextualTitle": "CapMac",
+          "visibility": "visible"
+        },
+        {
+          "id": "capmac.devices",
+          "name": "%view.devices%",
+          "icon": "media/capmac.svg",
+          "contextualTitle": "CapMac"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "capmac.run",
+        "contents": "%welcome.starting%",
+        "when": "!capmac.engineReady && !capmac.engineFailed"
+      },
+      {
+        "view": "capmac.run",
+        "contents": "%welcome.engineFailed%",
+        "when": "capmac.engineFailed"
+      },
+      {
+        "view": "capmac.run",
+        "contents": "%welcome.noFolder%",
+        "when": "capmac.engineReady && workbenchState == empty"
+      },
+      {
+        "view": "capmac.run",
+        "contents": "%welcome.noApp%",
+        "when": "capmac.engineReady && workbenchState != empty && !capmac.hasApp"
+      },
+      {
+        "view": "capmac.apps",
+        "contents": "%welcome.apps%",
+        "when": "capmac.engineReady && !capmac.hasAnyApp"
+      },
+      {
+        "view": "capmac.devices",
+        "contents": "%welcome.devices%",
+        "when": "capmac.engineReady && !capmac.hasMac && !capmac.pcPossible"
+      }
+    ],
+    "commands": [
+      {
+        "command": "capmac.run",
+        "title": "%cmd.run%",
+        "category": "CapMac",
+        "icon": "$(play)",
+        "enablement": "capmac.hasApp"
+      },
+      {
+        "command": "capmac.live",
+        "title": "%cmd.live%",
+        "shortTitle": "%cmd.live.short%",
+        "category": "CapMac",
+        "icon": "$(zap)",
+        "enablement": "capmac.hasApp"
+      },
+      {
+        "command": "capmac.stop",
+        "title": "%cmd.stop%",
+        "category": "CapMac",
+        "icon": "$(debug-stop)",
+        "enablement": "capmac.running"
+      },
+      {
+        "command": "capmac.runWithoutBuilding",
+        "title": "%cmd.runWithoutBuilding%",
+        "category": "CapMac",
+        "icon": "$(run-below)",
+        "enablement": "capmac.canSkipWebBuild"
+      },
+      {
+        "command": "capmac.sync",
+        "title": "%cmd.sync%",
+        "category": "CapMac",
+        "icon": "$(sync)",
+        "enablement": "capmac.canSync"
+      },
+      {
+        "command": "capmac.runInMode",
+        "title": "%cmd.runInMode%",
+        "category": "CapMac",
+        "icon": "$(rocket)",
+        "enablement": "capmac.framework == flutter"
+      },
+      {
+        "command": "capmac.buildIpa",
+        "title": "%cmd.buildIpa%",
+        "category": "CapMac",
+        "icon": "$(package)",
+        "enablement": "capmac.canIpa"
+      },
+      {
+        "command": "capmac.reload",
+        "title": "%cmd.reload%",
+        "category": "CapMac",
+        "icon": "$(refresh)",
+        "enablement": "capmac.canReload"
+      },
+      {
+        "command": "capmac.hotRestart",
+        "title": "%cmd.hotRestart%",
+        "category": "CapMac",
+        "icon": "$(debug-restart)",
+        "enablement": "capmac.canHotRestart"
+      },
+      {
+        "command": "capmac.rebuild",
+        "title": "%cmd.rebuild%",
+        "category": "CapMac",
+        "icon": "$(tools)",
+        "enablement": "capmac.canRebuild"
+      },
+      {
+        "command": "capmac.devtools",
+        "title": "%cmd.devtools%",
+        "category": "CapMac",
+        "icon": "$(code)",
+        "enablement": "capmac.canDevTools"
+      },
+      {
+        "command": "capmac.runRelease",
+        "title": "%cmd.runRelease%",
+        "category": "CapMac",
+        "icon": "$(rocket)",
+        "enablement": "capmac.reactNative && !capmac.running"
+      },
+      {
+        "command": "capmac.cleanRebuild",
+        "title": "%cmd.cleanRebuild%",
+        "category": "CapMac",
+        "icon": "$(clear-all)",
+        "enablement": "capmac.canRebuild"
+      },
+      {
+        "command": "capmac.relaunch",
+        "title": "%cmd.relaunch%",
+        "category": "CapMac",
+        "icon": "$(debug-restart)",
+        "enablement": "capmac.canRelaunch"
+      },
+      {
+        "command": "capmac.showScreen",
+        "title": "%cmd.showScreen%",
+        "category": "CapMac",
+        "icon": "$(device-mobile)",
+        "enablement": "capmac.canShowScreen"
+      },
+      {
+        "command": "capmac.screenshot",
+        "title": "%cmd.screenshot%",
+        "category": "CapMac",
+        "icon": "$(device-camera)",
+        "enablement": "capmac.canShowScreen"
+      },
+      {
+        "command": "capmac.openInXcode",
+        "title": "%cmd.openInXcode%",
+        "category": "CapMac",
+        "icon": "$(link-external)",
+        "enablement": "capmac.canXcode"
+      },
+      {
+        "command": "capmac.showBuildLog",
+        "title": "%cmd.showBuildLog%",
+        "category": "CapMac",
+        "icon": "$(output)",
+        "enablement": "capmac.hasBuildLog"
+      },
+      {
+        "command": "capmac.showLog",
+        "title": "%cmd.showLog%",
+        "category": "CapMac",
+        "icon": "$(output)"
+      },
+      {
+        "command": "capmac.pickApp",
+        "title": "%cmd.pickApp%",
+        "category": "CapMac",
+        "icon": "$(package)",
+        "enablement": "capmac.hasApp"
+      },
+      {
+        "command": "capmac.pickTarget",
+        "title": "%cmd.pickTarget%",
+        "category": "CapMac",
+        "icon": "$(device-mobile)",
+        "enablement": "capmac.hasApp"
+      },
+      {
+        "command": "capmac.pickBackend",
+        "title": "%cmd.pickBackend%",
+        "category": "CapMac",
+        "icon": "$(server-environment)",
+        "enablement": "capmac.canPickBackend"
+      },
+      {
+        "command": "capmac.useApp",
+        "title": "%cmd.useApp%",
+        "category": "CapMac",
+        "icon": "$(check)"
+      },
+      {
+        "command": "capmac.runApp",
+        "title": "%cmd.run%",
+        "category": "CapMac",
+        "icon": "$(play)"
+      },
+      {
+        "command": "capmac.liveApp",
+        "title": "%cmd.live%",
+        "category": "CapMac",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "capmac.useTarget",
+        "title": "%cmd.useTarget%",
+        "category": "CapMac",
+        "icon": "$(target)"
+      },
+      {
+        "command": "capmac.runOnTarget",
+        "title": "%cmd.runOnTarget%",
+        "category": "CapMac",
+        "icon": "$(play)"
+      },
+      {
+        "command": "capmac.showTargetScreen",
+        "title": "%cmd.showScreen%",
+        "category": "CapMac",
+        "icon": "$(device-mobile)"
+      },
+      {
+        "command": "capmac.bootSimulator",
+        "title": "%cmd.bootSimulator%",
+        "category": "CapMac",
+        "icon": "$(debug-start)"
+      },
+      {
+        "command": "capmac.shutdownSimulator",
+        "title": "%cmd.shutdownSimulator%",
+        "category": "CapMac",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "capmac.pairMac",
+        "title": "%cmd.pairMac%",
+        "category": "CapMac",
+        "icon": "$(add)"
+      },
+      {
+        "command": "capmac.unpairMac",
+        "title": "%cmd.unpairMac%",
+        "category": "CapMac",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "capmac.setDefaultMac",
+        "title": "%cmd.setDefaultMac%",
+        "category": "CapMac",
+        "icon": "$(star-empty)"
+      },
+      {
+        "command": "capmac.connectMac",
+        "title": "%cmd.connectMac%",
+        "category": "CapMac",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "capmac.checkMac",
+        "title": "%cmd.checkMac%",
+        "category": "CapMac",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "capmac.fix",
+        "title": "%cmd.fix%",
+        "category": "CapMac",
+        "icon": "$(wrench)"
+      },
+      {
+        "command": "capmac.unlockKeychain",
+        "title": "%cmd.unlockKeychain%",
+        "category": "CapMac",
+        "icon": "$(unlock)"
+      },
+      {
+        "command": "capmac.remoteOn",
+        "title": "%cmd.remoteOn%",
+        "category": "CapMac",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "capmac.remoteOff",
+        "title": "%cmd.remoteOff%",
+        "category": "CapMac",
+        "icon": "$(circle-slash)"
+      },
+      {
+        "command": "capmac.setupPc",
+        "title": "%cmd.setupPc%",
+        "category": "CapMac",
+        "icon": "$(desktop-download)"
+      },
+      {
+        "command": "capmac.stopPcSetup",
+        "title": "%cmd.stopPcSetup%",
+        "category": "CapMac",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "capmac.checkPc",
+        "title": "%cmd.checkPc%",
+        "category": "CapMac",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "capmac.installDependencies",
+        "title": "%cmd.installDependencies%",
+        "category": "CapMac",
+        "icon": "$(cloud-download)",
+        "enablement": "capmac.hasApp"
+      },
+      {
+        "command": "capmac.trySample",
+        "title": "%cmd.trySample%",
+        "category": "CapMac",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "capmac.refresh",
+        "title": "%cmd.refresh%",
+        "category": "CapMac",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "capmac.openProblems",
+        "title": "%cmd.openProblems%",
+        "category": "CapMac",
+        "icon": "$(warning)"
+      },
+      {
+        "command": "capmac.openIpa",
+        "title": "%cmd.openIpa%",
+        "category": "CapMac",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "capmac.openDevServer",
+        "title": "%cmd.openDevServer%",
+        "category": "CapMac",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "capmac.toggleStream",
+        "title": "%cmd.toggleStream%",
+        "category": "CapMac",
+        "icon": "$(settings)"
+      },
+      {
+        "command": "capmac.getStarted",
+        "title": "%cmd.getStarted%",
+        "category": "CapMac",
+        "icon": "$(rocket)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "capmac.useApp",
+          "when": "false"
+        },
+        {
+          "command": "capmac.runApp",
+          "when": "false"
+        },
+        {
+          "command": "capmac.liveApp",
+          "when": "false"
+        },
+        {
+          "command": "capmac.useTarget",
+          "when": "false"
+        },
+        {
+          "command": "capmac.runOnTarget",
+          "when": "false"
+        },
+        {
+          "command": "capmac.showTargetScreen",
+          "when": "false"
+        },
+        {
+          "command": "capmac.bootSimulator",
+          "when": "false"
+        },
+        {
+          "command": "capmac.shutdownSimulator",
+          "when": "false"
+        },
+        {
+          "command": "capmac.fix",
+          "when": "false"
+        },
+        {
+          "command": "capmac.openProblems",
+          "when": "false"
+        },
+        {
+          "command": "capmac.openIpa",
+          "when": "false"
+        },
+        {
+          "command": "capmac.openDevServer",
+          "when": "false"
+        },
+        {
+          "command": "capmac.connectMac",
+          "when": "capmac.hasMac"
+        },
+        {
+          "command": "capmac.unpairMac",
+          "when": "capmac.hasMac"
+        },
+        {
+          "command": "capmac.setDefaultMac",
+          "when": "capmac.hasMac"
+        },
+        {
+          "command": "capmac.checkMac",
+          "when": "capmac.hasMac"
+        },
+        {
+          "command": "capmac.unlockKeychain",
+          "when": "capmac.hasMac"
+        },
+        {
+          "command": "capmac.remoteOn",
+          "when": "capmac.hasMac"
+        },
+        {
+          "command": "capmac.remoteOff",
+          "when": "capmac.hasMac"
+        },
+        {
+          "command": "capmac.stopPcSetup",
+          "when": "capmac.pcSettingUp"
+        },
+        {
+          "command": "capmac.setupPc",
+          "when": "capmac.pcPossible"
+        },
+        {
+          "command": "capmac.checkPc",
+          "when": "capmac.pcPossible"
+        },
+        {
+          "command": "capmac.sync",
+          "when": "capmac.syncSupported"
+        },
+        {
+          "command": "capmac.devtools",
+          "when": "capmac.canDevTools"
+        },
+        {
+          "command": "capmac.runRelease",
+          "when": "capmac.reactNative"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "capmac.run",
+          "when": "view == capmac.run && !capmac.running",
+          "group": "navigation@1"
+        },
+        {
+          "command": "capmac.live",
+          "when": "view == capmac.run && !capmac.running",
+          "group": "navigation@2"
+        },
+        {
+          "command": "capmac.reload",
+          "when": "view == capmac.run && capmac.canReload",
+          "group": "navigation@1"
+        },
+        {
+          "command": "capmac.hotRestart",
+          "when": "view == capmac.run && capmac.canHotRestart",
+          "group": "navigation@2"
+        },
+        {
+          "command": "capmac.stop",
+          "when": "view == capmac.run && capmac.running",
+          "group": "navigation@3"
+        },
+        {
+          "command": "capmac.showScreen",
+          "when": "view == capmac.run && capmac.canShowScreen",
+          "group": "navigation@4"
+        },
+        {
+          "command": "capmac.devtools",
+          "when": "view == capmac.run && capmac.canDevTools",
+          "group": "navigation@5"
+        },
+        {
+          "command": "capmac.runWithoutBuilding",
+          "when": "view == capmac.run && capmac.canSkipWebBuild",
+          "group": "1_run@1"
+        },
+        {
+          "command": "capmac.runRelease",
+          "when": "view == capmac.run && capmac.reactNative",
+          "group": "1_run@2"
+        },
+        {
+          "command": "capmac.runInMode",
+          "when": "view == capmac.run && capmac.framework == flutter",
+          "group": "1_run@2"
+        },
+        {
+          "command": "capmac.sync",
+          "when": "view == capmac.run && capmac.syncSupported && capmac.canSync",
+          "group": "1_run@3"
+        },
+        {
+          "command": "capmac.buildIpa",
+          "when": "view == capmac.run && capmac.canIpa",
+          "group": "1_run@4"
+        },
+        {
+          "command": "capmac.rebuild",
+          "when": "view == capmac.run && capmac.canRebuild",
+          "group": "2_live@1"
+        },
+        {
+          "command": "capmac.cleanRebuild",
+          "when": "view == capmac.run && capmac.canRebuild",
+          "group": "2_live@2"
+        },
+        {
+          "command": "capmac.relaunch",
+          "when": "view == capmac.run && capmac.canRelaunch && capmac.framework != flutter",
+          "group": "2_live@3"
+        },
+        {
+          "command": "capmac.screenshot",
+          "when": "view == capmac.run && capmac.canShowScreen",
+          "group": "3_tools@1"
+        },
+        {
+          "command": "capmac.openInXcode",
+          "when": "view == capmac.run && capmac.canXcode",
+          "group": "3_tools@2"
+        },
+        {
+          "command": "capmac.installDependencies",
+          "when": "view == capmac.run",
+          "group": "3_tools@3"
+        },
+        {
+          "command": "capmac.pickBackend",
+          "when": "view == capmac.run && capmac.canPickBackend",
+          "group": "3_tools@4"
+        },
+        {
+          "command": "capmac.toggleStream",
+          "when": "view == capmac.run",
+          "group": "4_more@1"
+        },
+        {
+          "command": "capmac.showLog",
+          "when": "view == capmac.run",
+          "group": "4_more@2"
+        },
+        {
+          "command": "capmac.getStarted",
+          "when": "view == capmac.run",
+          "group": "4_more@3"
+        },
+        {
+          "command": "capmac.trySample",
+          "when": "view == capmac.apps",
+          "group": "navigation@1"
+        },
+        {
+          "command": "capmac.refresh",
+          "when": "view == capmac.apps",
+          "group": "navigation@2"
+        },
+        {
+          "command": "capmac.pairMac",
+          "when": "view == capmac.devices",
+          "group": "navigation@1"
+        },
+        {
+          "command": "capmac.refresh",
+          "when": "view == capmac.devices",
+          "group": "navigation@2"
+        },
+        {
+          "command": "capmac.setupPc",
+          "when": "view == capmac.devices && capmac.pcPossible",
+          "group": "1_pc@1"
+        },
+        {
+          "command": "capmac.checkPc",
+          "when": "view == capmac.devices && capmac.pcPossible",
+          "group": "1_pc@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "capmac.runApp",
+          "when": "view == capmac.apps && viewItem =~ /^app\\.ready/",
+          "group": "inline@1"
+        },
+        {
+          "command": "capmac.liveApp",
+          "when": "view == capmac.apps && viewItem =~ /^app\\.ready/",
+          "group": "inline@2"
+        },
+        {
+          "command": "capmac.useApp",
+          "when": "view == capmac.apps && viewItem == app.ready",
+          "group": "1_use@1"
+        },
+        {
+          "command": "capmac.runApp",
+          "when": "view == capmac.apps && viewItem =~ /^app\\.ready/",
+          "group": "2_run@1"
+        },
+        {
+          "command": "capmac.liveApp",
+          "when": "view == capmac.apps && viewItem =~ /^app\\.ready/",
+          "group": "2_run@2"
+        },
+        {
+          "command": "capmac.runOnTarget",
+          "when": "view == capmac.devices && viewItem =~ /^target\\./ && viewItem =~ /\\.runnable/",
+          "group": "inline@1"
+        },
+        {
+          "command": "capmac.showTargetScreen",
+          "when": "view == capmac.devices && viewItem =~ /\\.screen/",
+          "group": "inline@2"
+        },
+        {
+          "command": "capmac.useTarget",
+          "when": "view == capmac.devices && viewItem =~ /^target\\./ && viewItem =~ /\\.runnable/",
+          "group": "1_use@1"
+        },
+        {
+          "command": "capmac.runOnTarget",
+          "when": "view == capmac.devices && viewItem =~ /^target\\./ && viewItem =~ /\\.runnable/",
+          "group": "1_use@2"
+        },
+        {
+          "command": "capmac.showTargetScreen",
+          "when": "view == capmac.devices && viewItem =~ /\\.screen/",
+          "group": "1_use@3"
+        },
+        {
+          "command": "capmac.bootSimulator",
+          "when": "view == capmac.devices && viewItem =~ /^target\\.simulator\\.off/",
+          "group": "2_sim@1"
+        },
+        {
+          "command": "capmac.shutdownSimulator",
+          "when": "view == capmac.devices && viewItem =~ /^target\\.simulator\\.on/",
+          "group": "2_sim@2"
+        },
+        {
+          "command": "capmac.checkMac",
+          "when": "view == capmac.devices && viewItem =~ /^mac\\./",
+          "group": "inline@1"
+        },
+        {
+          "command": "capmac.connectMac",
+          "when": "view == capmac.devices && viewItem =~ /^mac\\..*\\.offline/",
+          "group": "1_mac@1"
+        },
+        {
+          "command": "capmac.checkMac",
+          "when": "view == capmac.devices && viewItem =~ /^mac\\./",
+          "group": "1_mac@2"
+        },
+        {
+          "command": "capmac.setDefaultMac",
+          "when": "view == capmac.devices && viewItem =~ /^mac\\.other/",
+          "group": "1_mac@3"
+        },
+        {
+          "command": "capmac.unlockKeychain",
+          "when": "view == capmac.devices && viewItem =~ /^mac\\./",
+          "group": "2_tools@1"
+        },
+        {
+          "command": "capmac.remoteOn",
+          "when": "view == capmac.devices && viewItem =~ /^mac\\..*\\.remoteoff/",
+          "group": "2_tools@2"
+        },
+        {
+          "command": "capmac.remoteOff",
+          "when": "view == capmac.devices && viewItem =~ /^mac\\..*\\.remoteon/",
+          "group": "2_tools@2"
+        },
+        {
+          "command": "capmac.unpairMac",
+          "when": "view == capmac.devices && viewItem =~ /^mac\\./",
+          "group": "3_danger@1"
+        },
+        {
+          "command": "capmac.fix",
+          "when": "view == capmac.devices && viewItem == check.fixable",
+          "group": "inline@1"
+        },
+        {
+          "command": "capmac.setupPc",
+          "when": "view == capmac.devices && viewItem =~ /^pc\\.needsSetup/",
+          "group": "inline@1"
+        },
+        {
+          "command": "capmac.stopPcSetup",
+          "when": "view == capmac.devices && viewItem =~ /^pc\\.settingUp/",
+          "group": "inline@1"
+        },
+        {
+          "command": "capmac.checkPc",
+          "when": "view == capmac.devices && viewItem =~ /^pc\\./",
+          "group": "1_pc@1"
+        },
+        {
+          "command": "capmac.setupPc",
+          "when": "view == capmac.devices && viewItem =~ /^pc\\./",
+          "group": "1_pc@2"
+        },
+        {
+          "command": "capmac.pickApp",
+          "when": "view == capmac.run && viewItem == run.app",
+          "group": "inline@1"
+        },
+        {
+          "command": "capmac.pickTarget",
+          "when": "view == capmac.run && viewItem == run.target",
+          "group": "inline@1"
+        },
+        {
+          "command": "capmac.showBuildLog",
+          "when": "view == capmac.run && viewItem == run.buildLog",
+          "group": "inline@1"
+        },
+        {
+          "command": "capmac.openIpa",
+          "when": "view == capmac.run && viewItem == run.ipa",
+          "group": "inline@1"
+        },
+        {
+          "command": "capmac.openDevServer",
+          "when": "view == capmac.run && viewItem == run.devServer",
+          "group": "inline@1"
+        }
+      ],
+      "debug/toolBar": [
+        {
+          "command": "capmac.reload",
+          "when": "debugType == capmac && capmac.canReload",
+          "group": "navigation@1"
+        },
+        {
+          "command": "capmac.rebuild",
+          "when": "debugType == capmac && capmac.canRebuild && capmac.framework != flutter",
+          "group": "navigation@2"
+        },
+        {
+          "command": "capmac.showScreen",
+          "when": "debugType == capmac && capmac.canShowScreen",
+          "group": "navigation@3"
+        },
+        {
+          "command": "capmac.devtools",
+          "when": "debugType == capmac && capmac.canDevTools",
+          "group": "navigation@4"
+        }
+      ],
+      "editor/title/run": [
+        {
+          "command": "capmac.run",
+          "when": "capmac.hasApp && resourceFilename =~ /^(capacitor\\.config\\.(json|ts|js)|pubspec\\.yaml|capmac\\.json)$/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "capmac.live",
+          "when": "capmac.hasApp && resourceFilename =~ /^(capacitor\\.config\\.(json|ts|js)|pubspec\\.yaml|capmac\\.json)$/",
+          "group": "navigation@2"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "capmac.run",
+          "when": "capmac.hasApp && resourceFilename =~ /^(capacitor\\.config\\.(json|ts|js)|pubspec\\.yaml)$/",
+          "group": "navigation@90"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "capmac.reload",
+        "key": "ctrl+f5",
+        "mac": "cmd+f5",
+        "when": "capmac.canReload && inDebugMode && debugType == capmac"
+      },
+      {
+        "command": "capmac.hotRestart",
+        "key": "ctrl+shift+f5",
+        "mac": "cmd+shift+f5",
+        "when": "capmac.canHotRestart && inDebugMode && debugType == capmac"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "capmac",
+        "label": "CapMac",
+        "languages": [
+          "typescript",
+          "javascript",
+          "typescriptreact",
+          "javascriptreact",
+          "dart",
+          "vue",
+          "html"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "run",
+                  "live"
+                ],
+                "default": "live",
+                "description": "%debug.mode%",
+                "enumDescriptions": [
+                  "%debug.mode.run%",
+                  "%debug.mode.live%"
+                ]
+              },
+              "projectPath": {
+                "type": "string",
+                "default": "${workspaceFolder}",
+                "description": "%debug.projectPath%"
+              },
+              "app": {
+                "type": "string",
+                "enum": [
+                  "ios",
+                  "electron",
+                  "macos",
+                  "windows"
+                ],
+                "description": "%debug.app%"
+              },
+              "target": {
+                "type": "string",
+                "description": "%debug.target%"
+              },
+              "mac": {
+                "type": "string",
+                "description": "%debug.mac%"
+              },
+              "backend": {
+                "type": "string",
+                "enum": [
+                  "mac",
+                  "wsl"
+                ],
+                "description": "%debug.backend%",
+                "enumDescriptions": [
+                  "%debug.backend.mac%",
+                  "%debug.backend.wsl%"
+                ]
+              },
+              "webBuild": {
+                "type": "boolean",
+                "default": true,
+                "description": "%debug.webBuild%"
+              },
+              "clean": {
+                "type": "boolean",
+                "default": false,
+                "description": "%debug.clean%"
+              },
+              "configuration": {
+                "type": "string",
+                "description": "%debug.configuration%"
+              },
+              "flutterMode": {
+                "type": "string",
+                "enum": [
+                  "debug",
+                  "profile",
+                  "release"
+                ],
+                "description": "%debug.flutterMode%"
+              },
+              "screen": {
+                "type": "boolean",
+                "description": "%debug.screen%"
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "capmac",
+            "request": "launch",
+            "name": "CapMac: Live",
+            "mode": "live"
+          },
+          {
+            "type": "capmac",
+            "request": "launch",
+            "name": "CapMac: Run",
+            "mode": "run"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "CapMac: Live",
+            "description": "%debug.snippet.live%",
+            "body": {
+              "type": "capmac",
+              "request": "launch",
+              "name": "CapMac: Live",
+              "mode": "live"
+            }
+          },
+          {
+            "label": "CapMac: Run",
+            "description": "%debug.snippet.run%",
+            "body": {
+              "type": "capmac",
+              "request": "launch",
+              "name": "CapMac: Run",
+              "mode": "run"
+            }
+          },
+          {
+            "label": "CapMac: Run on a simulator",
+            "description": "%debug.snippet.target%",
+            "body": {
+              "type": "capmac",
+              "request": "launch",
+              "name": "CapMac: ${1:iPhone 17 Pro}",
+              "mode": "live",
+              "app": "ios",
+              "target": "${1:iPhone 17 Pro}"
+            }
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "CapMac",
+      "properties": {
+        "capmac.screen.openOnRun": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "always",
+            "never"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "%cfg.screen.openOnRun.auto%",
+            "%cfg.screen.openOnRun.always%",
+            "%cfg.screen.openOnRun.never%"
+          ],
+          "markdownDescription": "%cfg.screen.openOnRun%"
+        },
+        "capmac.screen.location": {
+          "type": "string",
+          "enum": [
+            "beside",
+            "active",
+            "window"
+          ],
+          "default": "beside",
+          "enumDescriptions": [
+            "%cfg.screen.location.beside%",
+            "%cfg.screen.location.active%",
+            "%cfg.screen.location.window%"
+          ],
+          "markdownDescription": "%cfg.screen.location%"
+        },
+        "capmac.screen.deviceFrame": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%cfg.screen.deviceFrame%"
+        },
+        "capmac.console.buildSteps": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%cfg.console.buildSteps%"
+        },
+        "capmac.console.bridge": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%cfg.console.bridge%"
+        },
+        "capmac.osLogs": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%cfg.osLogs%"
+        },
+        "capmac.verbose": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%cfg.verbose%"
+        },
+        "capmac.codeLens": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%cfg.codeLens%"
+        },
+        "capmac.terminal.capmacCommand": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%cfg.terminal.capmacCommand%"
+        }
+      }
+    },
+    "walkthroughs": [
+      {
+        "id": "capmac.start",
+        "title": "%walk.title%",
+        "description": "%walk.description%",
+        "when": "!isWeb",
+        "steps": [
+          {
+            "id": "where",
+            "title": "%walk.where.title%",
+            "description": "%walk.where.description%",
+            "media": {
+              "markdown": "media/walkthrough/where.md"
+            },
+            "completionEvents": [
+              "onContext:capmac.hasMac",
+              "onContext:capmac.pcReady"
+            ]
+          },
+          {
+            "id": "app",
+            "title": "%walk.app.title%",
+            "description": "%walk.app.description%",
+            "media": {
+              "markdown": "media/walkthrough/app.md"
+            },
+            "completionEvents": [
+              "onContext:capmac.hasApp"
+            ]
+          },
+          {
+            "id": "run",
+            "title": "%walk.run.title%",
+            "description": "%walk.run.description%",
+            "media": {
+              "markdown": "media/walkthrough/run.md"
+            },
+            "completionEvents": [
+              "onCommand:capmac.run",
+              "onCommand:capmac.live",
+              "onContext:capmac.running"
+            ]
+          },
+          {
+            "id": "screen",
+            "title": "%walk.screen.title%",
+            "description": "%walk.screen.description%",
+            "media": {
+              "markdown": "media/walkthrough/screen.md"
+            },
+            "completionEvents": [
+              "onCommand:capmac.showScreen"
+            ]
+          },
+          {
+            "id": "ai",
+            "title": "%walk.ai.title%",
+            "description": "%walk.ai.description%",
+            "media": {
+              "markdown": "media/walkthrough/ai.md"
+            },
+            "completionEvents": [
+              "onLink:https://code.visualstudio.com/docs/copilot/chat/chat-agent-mode"
+            ]
+          }
+        ]
+      }
+    ],
+    "languageModelTools": [
+      {
+        "name": "capmac_status",
+        "toolReferenceName": "capmacStatus",
+        "displayName": "%lm.status.name%",
+        "userDescription": "%lm.status.user%",
+        "modelDescription": "Get the CapMac status of this workspace: the apps CapMac found (Capacitor, Flutter, Electron), the app it runs, where it runs (an iOS simulator or iPhone through a paired Mac, the Mac's desktop, this Windows PC, or an iPhone plugged into this PC with no Mac), whether a run is going on, the steps of the current or last run, and its build problems. Call this first, before capmac_run or capmac_screenshot.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(device-mobile)",
+        "tags": [
+          "capmac",
+          "mobile",
+          "ios",
+          "flutter",
+          "capacitor",
+          "electron"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "capmac_run",
+        "toolReferenceName": "capmacRun",
+        "displayName": "%lm.run.name%",
+        "userDescription": "%lm.run.user%",
+        "modelDescription": "Build and start the workspace's app with CapMac, and wait until it runs or fails. mode 'live' keeps it running and reloads it when files are saved (hot reload for Flutter); mode 'run' builds and launches it once. Returns how it went, with build problems when it fails. Use capmac_status first to see the app and where it runs. Do not call this while a run is already going on unless the user asked to restart it.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(play)",
+        "tags": [
+          "capmac",
+          "mobile"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "run",
+                "live"
+              ],
+              "description": "'live' (default) keeps the app running and reloads on save; 'run' builds and launches once."
+            },
+            "target": {
+              "type": "string",
+              "description": "Optional: where to run it, by the name shown in capmac_status (for example 'iPhone 17 Pro'). Leave out to use the current choice."
+            }
+          }
+        }
+      },
+      {
+        "name": "capmac_stop",
+        "toolReferenceName": "capmacStop",
+        "displayName": "%lm.stop.name%",
+        "userDescription": "%lm.stop.user%",
+        "modelDescription": "Stop the app CapMac is running for this workspace.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(debug-stop)",
+        "tags": [
+          "capmac"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "capmac_screenshot",
+        "toolReferenceName": "capmacScreenshot",
+        "displayName": "%lm.screenshot.name%",
+        "userDescription": "%lm.screenshot.user%",
+        "modelDescription": "Take a screenshot of the running app's screen (the iOS simulator, or the app's window on the Mac) and return it as an image, so you can check what the app looks like. The app must be running (see capmac_status).",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(device-camera)",
+        "tags": [
+          "capmac",
+          "screenshot"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      },
+      {
+        "name": "capmac_logs",
+        "toolReferenceName": "capmacLogs",
+        "displayName": "%lm.logs.name%",
+        "userDescription": "%lm.logs.user%",
+        "modelDescription": "Read the running app's recent console output (console.log from the web view, Dart's print, native and Capacitor lines) and CapMac's messages from the current or last run. Use it to find runtime errors after capmac_run.",
+        "canBeReferencedInPrompt": true,
+        "icon": "$(output)",
+        "tags": [
+          "capmac",
+          "logs"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "lines": {
+              "type": "number",
+              "description": "How many of the latest lines to return (default 100, at most 1000)."
+            },
+            "level": {
+              "type": "string",
+              "enum": [
+                "all",
+                "warn",
+                "error"
+              ],
+              "description": "Only lines at this level or worse (default all)."
+            }
+          }
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json",
+    "package": "node scripts/build.mjs --production --remote && vsce package --no-dependencies",
+    "package:win32-x64": "node scripts/build.mjs --production --remote --target win32-x64 && vsce package --no-dependencies --target win32-x64",
+    "package:win32-arm64": "node scripts/build.mjs --production --remote --target win32-arm64 && vsce package --no-dependencies --target win32-arm64",
+    "test:integration": "node scripts/build.mjs && node scripts/build-tests.mjs && vscode-test"
+  },
+  "devDependencies": {
+    "@capmac/core": "0.1.1",
+    "@types/mocha": "^10.0.10",
+    "@types/vscode": "1.100.0",
+    "@vscode/codicons": "0.0.46-24",
+    "@vscode/test-cli": "0.0.15",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.0.0"
+  }
+}

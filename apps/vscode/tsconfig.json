@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "types": ["node", "vscode", "mocha"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
+    "noEmit": true
+  },
+  "include": ["src", "test", "../../packages/core/src/engine/wsl/assets.d.ts", "../../packages/core/src/agent/helper/assets.d.ts"],
+  // The engine's entry runs CapMac Studio's host, which is typechecked with Studio (it uses Electron's types).
+  // The webview pages are a browser project of their own (tsconfig.web.json).
+  "exclude": ["src/engine/main.ts", "src/webview"]
+}

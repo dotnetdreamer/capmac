@@ -168,6 +168,21 @@ describe('build errors from JavaScript tools', () => {
     expect(parser.push('    src/main.ts:3:19:')).toMatchObject({ severity: 'error', message: 'Could not resolve "./missing"', line: 3, column: 19 });
     expect(parser.push('/p/node_modules/x/index.js:1:1: warning: odd')).toMatchObject({ severity: 'warning', own: false });
     expect(parser.push('http://localhost:5173: error: nope')).toBeNull();
+    // Vite 7 prints esbuild's transform errors in capitals.
+    expect(parser.push('/p/app/src/b.ts:3:19: ERROR: Expected ";" but found "x"')).toMatchObject({ severity: 'error', file: '/p/app/src/b.ts', message: 'Expected ";" but found "x"' });
+  });
+
+  it("reads Rolldown's (Vite 8): warnings until the build fails, errors after", () => {
+    const parser = new JsDiagnosticParser('/p/app');
+    const lines = (text: string) => text.split('\n').map((line) => parser.push(line)).filter(Boolean);
+    expect(lines('[EVAL] Use of direct `eval` function is strongly discouraged.\n   ╭─[ src/extra.js:1:1 ]\n   │\n 1 │ eval("1");')).toEqual([
+      { severity: 'warning', message: 'Use of direct `eval` function is strongly discouraged.', file: '/p/app/src/extra.js', line: 1, column: 1, own: true },
+    ]);
+    // A note about the build itself has no location: not one to show.
+    expect(lines('[PLUGIN_TIMINGS] Warning: Your build spent significant time in plugins.\n  - vite:css (52%)\n  - vite:html (20%)\n    ╭─[ late.js:1:1 ]')).toEqual([]);
+    expect(lines("✗ Build failed in 48ms\nerror during build:\nBuild failed with 1 error:\n\n\x1b[31m[UNRESOLVED_IMPORT] \x1b[0mCould not resolve './missing.js' in src/extra.js\n   \x1b[38;5;246m╭─[\x1b[0m src/extra.js:1:8 \x1b[38;5;246m]\x1b[0m")).toEqual([
+      { severity: 'error', message: "Could not resolve './missing.js' in src/extra.js", file: '/p/app/src/extra.js', line: 1, column: 8, own: true },
+    ]);
   });
 });
 

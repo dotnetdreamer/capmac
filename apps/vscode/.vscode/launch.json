@@ -1,0 +1,22 @@
+{
+  // F5: a VS Code window with this extension in development, on the Capacitor sample.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run CapMac for VS Code",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${workspaceFolder}/../../examples/hello-capacitor"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.cjs"],
+      "preLaunchTask": "Build CapMac for VS Code"
+    },
+    {
+      "name": "Run CapMac for VS Code (Flutter sample)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${workspaceFolder}/../../examples/hello-flutter"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.cjs"],
+      "preLaunchTask": "Build CapMac for VS Code"
+    }
+  ]
+}

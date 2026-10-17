@@ -25,6 +25,7 @@ const workspaceNames = {
   'packages/core': '@capmac/core',
   'packages/cli': 'capmac',
   'apps/desktop': '@capmac/desktop',
+  'apps/vscode': 'capmac-vscode',
   'services/signal': '@capmac/signal',
 };
 const manifestFiles = Object.keys(workspaceNames).map((relative) => join(relative, 'package.json'));
@@ -50,6 +51,7 @@ describe('release version synchronization', () => {
       }
       if (relative === 'packages/cli') manifest.devDependencies = { '@capmac/core': version };
       if (relative === 'apps/desktop') manifest.dependencies!['@capmac/core'] = version;
+      if (relative === 'apps/vscode') manifest.devDependencies = { '@capmac/core': version };
       if (relative === 'services/signal') manifest.peerDependencies = { '@capmac/core': version };
       write(join(relative, 'package.json'), manifest);
       packages[relative] = manifest;
@@ -96,6 +98,7 @@ describe('release version synchronization', () => {
       ['', 'optionalDependencies'],
       ['packages/cli', 'devDependencies'],
       ['apps/desktop', 'dependencies'],
+      ['apps/vscode', 'devDependencies'],
       ['services/signal', 'peerDependencies'],
     ]) {
       expect(read(join(relative!, 'package.json'))[group!]['@capmac/core']).toBe('1.3.0');

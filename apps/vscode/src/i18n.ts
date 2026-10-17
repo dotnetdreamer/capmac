@@ -1,0 +1,393 @@
+/**
+ * The words the VS Code extension shows. CapMac Studio's words (phases,
+ * targets, prompts, setting up this PC…) are used as they are, from Studio's
+ * strings file, so both say the same thing; what only VS Code needs is here.
+ *
+ * How to write here (as in Studio): plain words someone new to iOS builds
+ * understands, no period at the end, "…" only for work in progress and for
+ * commands that open a picker. Write CapMac; `capmac` (the command) stays
+ * lowercase.
+ */
+import { t as studio, tidy } from '../../desktop/src/shared/i18n/index.js';
+
+export { studio, tidy };
+
+const count = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString('en-US')} ${n === 1 ? one : many}`;
+
+export const s = {
+  name: 'CapMac',
+
+  /** Command titles used from code (the manifest has its own copies in package.nls.json). */
+  cmd: {
+    connectMac: 'Connect',
+    useTarget: 'Run here from now on',
+    run: 'Run',
+    live: 'Run with live reload',
+    runRelease: 'Run in release mode',
+    stop: 'Stop',
+    showScreen: 'Show the screen',
+    setupPc: 'Set up this PC…',
+    pairMac: 'Pair a Mac…',
+    checkMac: 'Check the Mac',
+  },
+
+  cmdLabel: {
+    noWebBuild: 'without building',
+  },
+
+  engine: {
+    starting: 'Starting CapMac…',
+    crashed: 'CapMac’s engine stopped. Restarting it…',
+    gaveUp: 'CapMac’s engine keeps stopping',
+    gaveUpHint: 'Open CapMac’s log to see why, then reload the window',
+    showLog: 'Show log',
+    reload: 'Reload window',
+  },
+
+  status: {
+    pairMac: 'Pair a Mac',
+    pairMacTip: 'Pair a Mac to run your app on iPhone simulators, iPhones and the Mac',
+    setUpPc: 'Set up this PC',
+    chooseTarget: 'Choose where it runs',
+    appTip: (app: string, kind: string) => `${app}, the ${kind}. Click to work on another app`,
+    targetTip: (app: string, where: string) => `${app} runs on ${where}. Click to change`,
+    building: (what: string) => `${what}…`,
+    live: (target: string) => `Live on ${target}`,
+    running: (target: string) => `Running on ${target}`,
+    failed: 'Build failed',
+    stopped: 'Stopped',
+    sessionTip: 'Show the run',
+  },
+
+  run: {
+    app: 'App',
+    target: 'Runs on',
+    chooseTarget: 'Choose where it runs…',
+    autoTarget: 'Picked automatically',
+    noTarget: 'Nothing to run on yet',
+    live: 'Live',
+    run: 'Run',
+    ipa: 'IPA build',
+    sync: 'Sync',
+    session: (mode: string, where: string) => `${mode} on ${where}`,
+    hint: '▶ Run, or ⚡ Live to reload on save',
+    elapsed: (time: string) => time,
+    problems: (errors: number, warnings: number) => (errors ? `${count(errors, 'error')}${warnings ? `, ${count(warnings, 'warning')}` : ''}` : count(warnings, 'warning')),
+    problemsTip: 'Show them in the Problems panel',
+    devServer: 'Dev server',
+    devServerTip: (command: string | null) => (command ? `Started with ${command}. Click to open it in your browser` : 'Click to open it in your browser'),
+    ipaReady: 'IPA ready',
+    ipaTip: 'Show the .ipa file',
+    buildLog: 'Build log',
+    buildLogTip: 'The full Xcode build log, from the Mac',
+    hot: (time: string) => `Hot-reloaded at ${time}`,
+    reloaded: (time: string) => `Updated at ${time}`,
+    error: 'What went wrong',
+    preparing: 'Getting ready…',
+    appRunning: 'App running',
+    appStopped: 'App stopped',
+  },
+
+  apps: {
+    current: 'Run and Live use this app',
+    currentShort: 'current',
+    notYet: 'not supported yet',
+    needsSetup: 'needs setup',
+    noApps: 'No apps found in this folder',
+    pickTitle: 'Which app do you want to work on?',
+    pickPlaceholder: 'Run and Live use the app you pick. The capmac command does too',
+    project: (name: string, rel: string) => (rel ? `${name} · ${rel}` : name),
+    switched: (app: string) => `Run and Live use the ${app} now`,
+  },
+
+  devices: {
+    simulators: 'Simulators',
+    devices: 'iPhones and iPads',
+    health: 'Health',
+    checking: 'Checking…',
+    checkHint: 'Check the Mac to see if everything is ready',
+    macDesktop: 'Mac desktop',
+    macDesktopTip: 'Electron and Flutter Mac apps open here, in the background, and show their window in VS Code',
+    thisPc: 'This PC',
+    windowsDesktop: 'Windows desktop',
+    windowsDesktopTip: 'Your Flutter app’s Windows app opens in its own window on this PC',
+    pcIphones: 'iPhones (no Mac)',
+    pcIphonesTip: 'Build on this PC and run on an iPhone plugged in with a cable. No Mac needed',
+    pcNeedsSetup: 'Set up this PC…',
+    pcSettingUp: (step: string) => `Setting up: ${step}`,
+    pcLooking: 'Looking for iPhones…',
+    current: 'current',
+    booted: 'Booted',
+    off: 'Off',
+    defaultMac: 'default',
+    latency: (ms: number) => `${ms} ms`,
+    macTip: (label: string, host: string, detail: string) => `${label} (${host})\n${detail}`,
+    lastSeen: (xcode: string | null, macos: string | null) => [macos ? `macOS ${macos}` : null, xcode ? `Xcode ${xcode}` : null].filter(Boolean).join(' · '),
+    remoteOn: 'Reachable from anywhere',
+    fixIt: 'Fix it',
+  },
+
+  pick: {
+    targetTitle: (app: string) => `Where should ${app} run?`,
+    targetPlaceholder: 'Simulators and iPhones through your Mac, or this PC',
+    auto: 'Pick automatically',
+    autoHint: 'A running iPhone simulator, else the newest one',
+    simulators: (mac: string) => `Simulators on ${mac}`,
+    devices: (mac: string) => `iPhones and iPads on ${mac}`,
+    pcPhones: 'iPhones plugged into this PC (no Mac)',
+    pcSetUp: 'Set up this PC to build without a Mac…',
+    pcSetUpHint: 'Builds here and runs on your iPhone over USB',
+    pairMac: 'Pair a Mac…',
+    pairMacHint: 'For the iPhone and iPad simulators, iPhones through the Mac, and Mac apps',
+    loadingTargets: 'Asking the Mac for its simulators…',
+    macOffline: (mac: string) => `${mac} is offline`,
+    backendTitle: 'Where should this app build?',
+    backendMac: (mac: string) => `On ${mac}`,
+    backendMacHint: 'Simulators, iPhones and iPads through the Mac',
+    backendPc: 'On this PC (no Mac)',
+    backendPcHint: 'Builds here and runs on your iPhone over USB or Wi-Fi',
+    macTitle: 'Which Mac?',
+    flutterModeTitle: 'Run in which mode?',
+    flutterModes: {
+      debug: { label: 'Debug', hint: 'Hot reload, and the Flutter debugger can attach' },
+      profile: { label: 'Profile', hint: 'Close to release speed, with performance tools' },
+      release: { label: 'Release', hint: 'As your users get it. Not on simulators' },
+    },
+    ipaTitle: 'Build an IPA for…',
+    sampleTitle: 'Try a sample app',
+    samples: {
+      ios: { label: 'Capacitor app', hint: 'An iPhone app made with web code' },
+      electron: { label: 'Electron app', hint: 'A Mac desktop app, its window in VS Code' },
+      flutter: { label: 'Flutter app', hint: 'An iPhone, Mac and Windows app from one Dart code base' },
+      'react-native': { label: 'React Native app', hint: 'An iPhone app in JavaScript, reloaded by Metro as you save' },
+    },
+    sampleOpen: 'Open it in a new window?',
+    sampleOpenHere: 'Open here',
+    sampleOpenNew: 'Open in a new window',
+  },
+
+  pair: {
+    looking: 'Looking for Macs on your network…',
+    noneFound: 'No other Macs found on your network',
+    noneFoundHint: 'Turn on Remote Login on the Mac (System Settings › General › Sharing), or type its address below',
+    alreadyPaired: 'Paired already',
+    title: 'Pair a Mac',
+    pickPlaceholder: 'Pick your Mac, or type its address (user@host)',
+    typeAddress: 'Type its address…',
+    typeAddressHint: 'Its name or IP address, like ik@my-mac.local or 192.168.1.20',
+    addressPrompt: 'The Mac’s address',
+    addressPlaceholder: 'user@host, or host',
+    badAddress: 'Type a Mac’s name or address, like ik@my-mac.local',
+    userPrompt: (host: string) => `Your user name on ${host}`,
+    userPlaceholder: 'The name you sign in to the Mac with',
+    passwordPrompt: (user: string, host: string) => `Password for ${user} on ${host}`,
+    passwordWhy: studio.prompts.signInWhy,
+    pairing: (host: string) => `Pairing ${host}…`,
+    paired: (mac: string) => `${mac} is paired`,
+    pairedBody: 'Run your app on its simulators now. CapMac checks the Mac first',
+    failed: 'Couldn’t pair the Mac',
+    remoteLogin: 'Turn on Remote Login on the Mac first: System Settings › General › Sharing › Remote Login',
+    via: { bonjour: 'on your network', tailscale: 'on your Tailscale network' } as Record<string, string>,
+  },
+
+  macs: {
+    unpairConfirm: (mac: string) => `Unpair ${mac}?`,
+    unpairDetail: 'CapMac forgets it on this PC. Your projects stay on the Mac until you remove them',
+    unpair: 'Unpair',
+    unpaired: (mac: string) => `${mac} is unpaired`,
+    defaultSet: (mac: string) => `${mac} is the default Mac now`,
+    connected: (mac: string) => `Connected to ${mac}`,
+    checking: (mac: string) => `Checking ${mac}…`,
+    allGood: (mac: string) => `${mac} is ready`,
+    issues: (mac: string, n: number) => `${mac}: ${count(n, 'thing')} to fix`,
+    showIssues: 'Show',
+    fixing: (label: string) => `${label}…`,
+    fixed: 'Fixed',
+    keychainUnlocked: 'Keychain unlocked',
+    remoteOn: (mac: string) => `${mac} is reachable from anywhere`,
+    remoteOff: (mac: string) => `Remote access is off for ${mac}`,
+    remoteNeedsServer: 'Remote access needs your own signaling server first',
+    remoteServerPrompt: 'Your signaling server (wss://…)',
+    remoteOffConfirm: (mac: string) => `Turn off remote access for ${mac}?`,
+    remoteOffDetail: 'This PC then reaches the Mac only on your network',
+    turnOff: 'Turn off',
+  },
+
+  session: {
+    startFailed: 'Couldn’t start',
+    pairFirst: 'Pair a Mac first, or pick This PC for an iPhone plugged into this PC',
+    pairFirstMac: 'This app runs on a Mac. Pair one first',
+    pcFirst: studio.pc.setupFirst,
+    pcFirstBody: studio.pc.setupFirstBody,
+    noApp: 'CapMac found no app to run in this folder',
+    noAppHint: 'Open the folder with your capacitor.config file, your Flutter app’s pubspec.yaml or your Electron app’s package.json',
+    notRunnable: (what: string) => `CapMac can’t run ${what} yet`,
+    notRunnableHint: 'It runs Capacitor, Ionic, Flutter and Electron apps today',
+    failed: (app: string) => `${app}: the run failed`,
+    ipaFailed: (app: string) => `${app}: the IPA build failed`,
+    syncFailed: (app: string) => `${app}: sync failed`,
+    running: (app: string, target: string) => `${app} is running on ${target}`,
+    ipaReady: (file: string) => `IPA ready: ${file}`,
+    syncing: (mac: string) => `Syncing with ${mac}…`,
+    synced: (mac: string) => `Synced with ${mac}`,
+    syncedBody: 'The Mac has your latest files and plugins',
+    showProblems: 'Show problems',
+    showOutput: 'Show output',
+    tryAgain: 'Try again',
+    stopFirst: (app: string) => `${app} is running. Stop it and start again?`,
+    restart: 'Restart',
+    notLive: 'Start live reload first',
+    noScreen: 'This app has no screen to show here',
+    noScreenWindows: 'Your Windows app opens in its own window on this PC',
+    noScreenPc: 'Your app runs on your iPhone. Look at the iPhone',
+    stopping: 'Stopping…',
+  },
+
+  /** React Native DevTools for the app in live reload (Metro's j). */
+  devtools: {
+    opening: 'Opening React Native DevTools…',
+    failed: 'DevTools didn’t open',
+    failedBody: 'Is the app open and connected to Metro?',
+    needsLive: 'DevTools opens for a React Native app in live reload. Start it with Live first',
+  },
+
+  /** Steps a newer CapMac Studio names (React Native's Metro), until its strings have them; the same words. */
+  phases: { devserver: 'Dev server' },
+  phaseNow: { devserver: 'Starting the dev server' },
+  phasesReactNative: { devserver: 'Metro', deps: 'Packages and pods' },
+
+  ipa: {
+    building: (app: string) => `Building an IPA of ${app}`,
+    done: (name: string) => `IPA ready: ${name}`,
+    reveal: 'Show in folder',
+    copyPath: 'Copy path',
+  },
+
+  pcSetup: {
+    title: 'Setting up this PC',
+    step: (n: number, total: number, title: string) => `${n} of ${total}: ${title}`,
+    ready: studio.pc.setupDone,
+    readyBody: studio.pc.setupDoneBody,
+    failed: studio.pc.setupFailed,
+    stopped: 'Setup stopped. Continue any time, it picks up where it left off',
+    alreadyRunning: 'This PC is already being set up',
+    checkTitle: 'This PC',
+    allGood: 'This PC is ready to build',
+    issues: (n: number) => `This PC: ${count(n, 'thing')} to fix`,
+    windowsOnly: 'Building without a Mac needs Windows',
+  },
+
+  prompts: {
+    title: 'CapMac',
+    waitingCancel: 'Cancel',
+    openLink: (label: string) => label,
+    yes: 'Yes',
+    no: 'No',
+  },
+
+  screen: {
+    title: (name: string) => name,
+    noTarget: 'Nothing to show yet. Run your app first',
+    macOffline: (mac: string) => `${mac} is offline`,
+    saved: (file: string) => `Screenshot saved: ${file}`,
+    copied: 'Screenshot copied',
+    open: 'Open',
+    shotFailed: studio.simulator.shotFailed,
+    stream: (mode: string) => `Screen stream: ${mode}`,
+    smooth: 'Smooth (video)',
+    smoothHint: 'Sharp and fast. Falls back by itself when it can’t',
+    compatible: 'Compatible (pictures)',
+    compatibleHint: 'Works everywhere, uses more data',
+    streamSet: (mode: string) => `Screens use the ${mode} stream now. The CLI and CapMac Studio too`,
+  },
+
+  console: {
+    started: (mode: string, app: string, where: string) => `${mode} ${app} on ${where}`,
+    help: 'Type r to reload, R to restart, b to rebuild, s for a screenshot, q to stop, or help',
+    helpReactNative: 'Type r to reload, j for DevTools, R to restart, b to rebuild, s for a screenshot, q to stop, or help',
+    helpFull: [
+      'Commands you can type here:',
+      '  r        reload (Flutter: hot reload, React Native: reload the JavaScript, Electron: reload the windows)',
+      '  R        restart the app (Flutter: hot restart)',
+      '  b        rebuild the native app and restart it',
+      '  j        open React Native DevTools',
+      '  s        save a screenshot',
+      '  o        show the screen',
+      '  q        stop',
+    ].join('\n'),
+    refreshed: (time: string) => `Refreshed at ${time}`,
+    unknown: (text: string) => `CapMac doesn’t know “${text}”. Type help to see what it does`,
+    skipped: (title: string, reason: string) => `${title}: ${reason}`,
+    ended: (seconds: string) => `Stopped after ${seconds}`,
+    failedAfter: (seconds: string) => `Failed after ${seconds}`,
+    done: (seconds: string) => `Done in ${seconds}`,
+    devServer: (url: string) => `Dev server: ${url}`,
+    linkUp: (live: string) => `Live reload: the app loads ${live}`,
+    nativeChange: (files: string) => `Native files changed (${files}), rebuilding`,
+    reused: 'Native app unchanged, reusing the last build',
+    reconnecting: (mac: string) => `${mac} isn’t responding. CapMac reconnects…`,
+    restored: (mac: string) => `Reconnected to ${mac}`,
+    hint: (text: string) => `  → ${text}`,
+    dialog: (app: string, text: string) => `${app} is waiting for an answer: ${text}`,
+  },
+
+  dialogs: {
+    waiting: (app: string) => studio.appDialog.waiting(app),
+    answer: 'Answer',
+    show: 'Show the window',
+  },
+
+  lm: {
+    runConfirmTitle: 'Run the app with CapMac?',
+    runConfirm: (app: string, where: string, mode: string) => `${mode === 'live' ? 'Starts live reload of' : 'Builds and runs'} ${app} on ${where}`,
+    stopConfirmTitle: 'Stop the app?',
+    runningOn: (app: string, where: string) => `Running ${app} on ${where}`,
+    noApp: 'CapMac found no app it can run in this workspace',
+    notRunning: 'Nothing is running. Start the app with capmac_run first',
+    noScreen: 'The app is not on a screen CapMac can capture (it runs on a real iPhone or in its own window on this PC)',
+    shotSaved: (file: string) => `Screenshot saved to ${file}. This VS Code can’t pass images to the model`,
+    started: (app: string, where: string) => `${app} is running on ${where}`,
+    live: (app: string, where: string) => `${app} is running on ${where} with live reload: saving a file reloads it`,
+    failed: (message: string) => `The run failed: ${message}`,
+    stopped: 'Stopped',
+    timedOut: 'Still building after 15 minutes. Check capmac_status later',
+  },
+
+  codeLens: {
+    run: (where: string) => `▶ Run on ${where}`,
+    live: '⚡ Live',
+    stop: '■ Stop',
+    running: (what: string) => `● ${what}`,
+    screen: 'Show screen',
+  },
+
+  sample: {
+    created: (name: string) => `${name} is ready`,
+  },
+
+  deps: {
+    installing: 'Installing dependencies…',
+    done: 'Dependencies installed',
+    needed: (app: string) => `${app}’s dependencies aren’t installed on this PC`,
+    neededDetail: (manager: string) => `Live reload runs your dev server here, so it needs them. CapMac installs them with ${manager || 'npm'}, then starts`,
+    installAndRun: 'Install and start',
+    failed: 'Couldn’t install the dependencies',
+  },
+
+  time: {
+    seconds: (ms: number) => (ms < 10_000 ? `${(ms / 1000).toFixed(1)} s` : ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`),
+    clock: (ms: number) => {
+      const total = Math.max(0, Math.floor(ms / 1000));
+      const m = Math.floor(total / 60);
+      return `${m}:${String(total % 60).padStart(2, '0')}`;
+    },
+  },
+
+  count: {
+    files: (n: number) => count(n, 'file'),
+    errors: (n: number) => count(n, 'error'),
+    warnings: (n: number) => count(n, 'warning'),
+  },
+};
+
+export type ExtensionStrings = typeof s;

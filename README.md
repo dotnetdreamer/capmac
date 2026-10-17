@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/d55fac9f-92fc-4e6e-953a-574a824a5ecb
 
 </div>
 
-[CapMac Studio](#capmac-studio) | [Capacitor and Ionic commands](#keep-your-capacitor-and-ionic-commands) | [Commands](#commands) | [Flutter apps](#flutter-apps) | [Electron apps](#electron-apps) | [AI coding agents](#ai-coding-agents) | [Remote access](#away-from-the-macs-network) | [Development](#developing-capmac)
+[CapMac Studio](#capmac-studio) | [VS Code](#capmac-for-vs-code) | [Capacitor and Ionic commands](#keep-your-capacitor-and-ionic-commands) | [Commands](#commands) | [Flutter apps](#flutter-apps) | [Electron apps](#electron-apps) | [AI coding agents](#ai-coding-agents) | [Remote access](#away-from-the-macs-network) | [Development](#developing-capmac)
 
 ## Why CapMac
 
@@ -123,6 +123,20 @@ See [signing and updates](docs/signing-and-updates.md) for distribution setup.
 
 Download installers and portable builds from [GitHub Releases](https://github.com/dotnetdreamer/capmac/releases/latest).
 Maintainers can use **Actions → Release CapMac Studio** to build a dry run or publish a new version; see [releasing CapMac](docs/releases.md) for setup.
+
+## CapMac for VS Code
+
+The same engine as a VS Code extension, for the folder you have open: no project to add.
+CapMac finds the apps in the workspace (Capacitor, Flutter, Electron), and **⚡ Live** or **▶ Run** starts the one you work on.
+
+- Every run is a VS Code debug session: Stop, Restart and Hot Reload on the debug toolbar, F5 once you pick *Live: your app* in Run and Debug, and the app's console in the Debug Console.
+- The simulator's screen, an iPhone's, or a Mac app's window streams into a tab beside your code, with touch, typing and screenshots.
+- Xcode, Swift, Dart, TypeScript and Vite errors land in **Problems**; the **Run** view shows each build step; the **Devices** view lists your Macs, simulators, iPhones, health checks and this PC.
+- Building on this PC with no Mac, pairing, remote access and the keychain all work from VS Code.
+- AI agents in VS Code get tools to run the app, read its console and look at its screen.
+
+Install the `.vsix` from [GitHub Releases](https://github.com/dotnetdreamer/capmac/releases/latest) (`code --install-extension capmac-vscode-<version>.vsix`).
+From a development checkout, `npm run vscode:build` builds it and `npm run vscode:package` makes the `.vsix`; open `apps/vscode` in VS Code and press F5 to try it. See [apps/vscode/README.md](apps/vscode/README.md) and the [design notes](docs/vscode-extension.md).
 
 ## Keep your Capacitor and Ionic commands
 
