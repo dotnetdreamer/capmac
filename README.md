@@ -108,8 +108,11 @@ Use `capmac dev --url http://localhost:5173` with a server you already started.
 Build, inspect logs and control the simulator in one Windows workspace.
 Studio uses the same engine as the CLI.
 Pair a Mac, add your project and press **Live** (F5) or **Run** (Ctrl+F5).
+The arrow next to **Run** offers **Run without building**, which uses the web files you already built like `npx cap run ios`, and **Sync**, which runs `cap sync` on the Mac without building or launching the app.
 
 The workspace shows the build timeline, errors that open at the line in your editor, a searchable console with source and level filters, expandable JSON, and an interactive simulator.
+The console stays fast with hundreds of thousands of lines.
+Select text across any number of lines, or press Ctrl+A, then copy it with Ctrl+C or a right-click; the arrow at the bottom right takes you back to the latest line.
 Click, drag, scroll and type from Windows, or use Home, Lock and screenshot controls.
 Pick a real iPhone as the target to see [its screen](#a-real-iphones-screen) in the same place.
 
@@ -163,6 +166,7 @@ It is not enabled automatically by a temporary `npx capmac` copy or when `CI=tru
 | `capmac screenshot [file]` | Save a PNG of a simulator, or of a plugged-in iPhone with `--device`, and print its path |
 | `capmac doctor --fix` | Check setup and repair what it can |
 | `capmac info --files` | Show the detected project and exact sync list without connecting |
+| `capmac sync` | Copy the project to the Mac and run `cap sync` there, without building or launching |
 | `capmac apps` | List the apps in this folder and the selected app; use `capmac apps use <app>` to switch |
 | `capmac exec -- <command>` | Run a command in the Mac's project copy |
 | `capmac pull <path>` | Copy files back from the Mac |
@@ -171,6 +175,7 @@ It is not enabled automatically by a temporary `npx capmac` copy or when `CI=tru
 Use `--target "<name or UDID>"` to select a simulator or device and `--mac <name>` to select a paired Mac.
 For [projects with several apps](#one-folder-several-apps), use `--app ios` or `--app electron` to choose which app to run.
 For scripts, `capmac run --no-logs` returns after launch, while `capmac run --for 20` captures the console for 20 seconds and then stops the app.
+`capmac run --no-web-build` skips the web build and uses the web files you already built.
 
 Build errors use Windows file paths so you can open them from your terminal.
 Add `--os-logs` for NSLog and os_log, `--bridge` for Capacitor plugin traffic, or `--verbose` for full tool output.

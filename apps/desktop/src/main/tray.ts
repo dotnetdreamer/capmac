@@ -6,7 +6,7 @@ import { t } from '../shared/i18n/index.js';
 
 export interface TrayState {
   lastProject: { path: string; name: string } | null;
-  running: Array<{ projectPath: string; name: string; mode: 'run' | 'live' | 'ipa' }>;
+  running: Array<{ projectPath: string; name: string; mode: 'run' | 'live' | 'ipa' | 'sync' }>;
   /** A downloaded update, ready to install. */
   updateReady?: string | null;
 }
@@ -35,7 +35,7 @@ export class AppTray {
     const { lastProject, running } = this.state;
     const items: Electron.MenuItemConstructorOptions[] = [];
     for (const session of running) {
-      items.push({ label: `${session.name} · ${session.mode === 'live' ? t.tray.live : session.mode === 'ipa' ? t.tray.buildingIpa : t.tray.running}`, enabled: false });
+      items.push({ label: `${session.name} · ${session.mode === 'live' ? t.tray.live : session.mode === 'ipa' ? t.tray.buildingIpa : session.mode === 'sync' ? t.tray.syncing : t.tray.running}`, enabled: false });
     }
     if (running.length) items.push({ label: running.length > 1 ? t.tray.stopAll : t.tray.stop(running[0]!.name), click: () => this.actions.command({ type: 'stop' }) }, { type: 'separator' });
     if (lastProject) {

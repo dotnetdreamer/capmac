@@ -85,7 +85,8 @@ export const engineMethods = {
   'projects.installDeps': z.object({ path: fsPath }).strict(),
   'sessions.start': z.object({
     projectPath: fsPath,
-    mode: z.enum(['run', 'live']),
+    /** `sync`: copy the project to the Mac and run `cap sync` there, like `capmac sync` (the iOS app; nothing is built or launched). */
+    mode: z.enum(['run', 'live', 'sync']),
     mac: macName.optional(),
     /** Which of the project's apps (default: the one picked for it). */
     app: runnableApp.optional(),
@@ -259,7 +260,8 @@ export interface Scope {
 /** Engine events plus the host's own bookkeeping. */
 export type HostEvent =
   | EngineEvent
-  | { type: 'session-started'; mode: SessionMode; projectPath: string; mac: string | null; target: string | null }
+  /** `webBuild: false`: a run that keeps the web files built before (Run without building). */
+  | { type: 'session-started'; mode: SessionMode; projectPath: string; mac: string | null; target: string | null; webBuild?: false }
   | { type: 'session-ended'; mode: SessionMode; ok: boolean; cancelled: boolean; error?: ErrorInfo; ms: number }
   | { type: 'screen-info'; info: ScreenInfo }
   | { type: 'screen-ended'; error?: ErrorInfo }

@@ -7,7 +7,7 @@ import { useChooser } from './chooser';
 import { call, errorInfo } from './engine';
 import { resolveMac, useMacs } from './macs';
 import { projectKey, useProjects } from './projects';
-import { emptyRun, isActive, MAC_TARGET_ID, useRuns } from './runs';
+import { emptyRun, isActive, MAC_TARGET_ID, useRuns, type RunState } from './runs';
 
 export function projectPrefs(path: string): { mac?: string; target?: string } {
   return useApp.getState().settings?.projectPrefs[projectKey(path)] ?? {};
@@ -31,10 +31,11 @@ export function both(e: { message: string; hint?: string }): string {
   return e.hint ? `${tidy(e.message)}. ${tidy(e.hint)}` : tidy(e.message);
 }
 
-function failStart(path: string, error: ErrorInfo): void {
+/** A session that couldn't start: shown as failed, with what was asked for (so Try again does it again). */
+function failStart(path: string, error: ErrorInfo, mode: RunState['mode'], keepsWebFiles = false): void {
   const key = projectKey(path);
   const run = useRuns.getState().byKey[key] ?? emptyRun(path);
-  useRuns.setState((s) => ({ byKey: { ...s.byKey, [key]: { ...run, status: 'failed', error, sessionId: null, endedAt: Date.now() } } }));
+  useRuns.setState((s) => ({ byKey: { ...s.byKey, [key]: { ...run, mode, keepsWebFiles, status: 'failed', error, sessionId: null, endedAt: Date.now() } } }));
 }
 
 /** Adds a folder as a project (validates it is a Capacitor app) and opens it; `known`: its summary, just made. */
@@ -109,9 +110,15 @@ export async function setApp(path: string, app: RunnableApp): Promise<ProjectSum
   return summary;
 }
 
-export async function startSession(path: string, mode: 'run' | 'live', options: { clean?: boolean; full?: boolean } = {}): Promise<void> {
+/**
+ * Run, Live, or Sync (the project copied to the Mac and `cap sync` run there,
+ * like `capmac sync`; the iOS app's). `webBuild: false` runs without building
+ * the web app first, like `capmac run --no-web-build` and `npx cap run`.
+ */
+export async function startSession(path: string, mode: 'run' | 'live' | 'sync', options: { clean?: boolean; full?: boolean; webBuild?: boolean } = {}): Promise<void> {
   const prefs = projectPrefs(path);
-  const app = appOf(useProjects.getState().byKey[projectKey(path)]?.summary, prefs);
+  const sync = mode === 'sync';
+  const app = sync ? undefined : appOf(useProjects.getState().byKey[projectKey(path)]?.summary, prefs);
   const mac = macFor(path);
   if (!mac) {
     if (useMacs.getState().macs.length === 0) {
@@ -119,15 +126,21 @@ export async function startSession(path: string, mode: 'run' | 'live', options: 
       toast({ tone: 'info', title: t.actions.pairFirst, body: t.actions.pairFirstBody, action: { label: t.common.pairMac, run: () => useApp.getState().navigate({ name: 'onboarding' }) } });
       return;
     }
-    failStart(path, { message: t.actions.noMacSelected, hint: t.actions.noMacSelectedHint, expected: true });
+    failStart(path, { message: t.actions.noMacSelected, hint: t.actions.noMacSelectedHint, expected: true }, mode, options.webBuild === false);
     return;
   }
   const settings = useApp.getState().settings;
   try {
-    await call('sessions.start', { projectPath: path, mode, mac, app, target: app === 'electron' || prefs.target === MAC_TARGET_ID ? undefined : prefs.target, options: { ...options, osLogs: settings?.osLogs } });
+    await call('sessions.start', { projectPath: path, mode, mac, app, target: sync || app === 'electron' || prefs.target === MAC_TARGET_ID ? undefined : prefs.target, options: { ...options, osLogs: settings?.osLogs } });
   } catch (err) {
-    failStart(path, errorInfo(err));
+    failStart(path, errorInfo(err), mode, options.webBuild === false);
   }
+}
+
+/** Starts a session again the way it was started: Live, Run (with or without the web build) or Sync. */
+export function startAgain(path: string, run: RunState): Promise<void> {
+  if (run.mode === 'live' || run.mode === 'sync') return startSession(path, run.mode);
+  return startSession(path, 'run', run.keepsWebFiles ? { webBuild: false } : {});
 }
 
 export async function stopSession(path: string): Promise<void> {

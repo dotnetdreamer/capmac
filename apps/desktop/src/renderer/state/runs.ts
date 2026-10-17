@@ -11,6 +11,8 @@ export type TimelinePhase = 'web' | 'sync' | 'deps' | 'electron' | 'cap' | 'buil
 
 export const RUN_PHASES: TimelinePhase[] = ['web', 'sync', 'deps', 'cap', 'build', 'boot', 'install', 'launch'];
 export const IPA_PHASES: TimelinePhase[] = ['web', 'sync', 'deps', 'cap', 'archive', 'export', 'download'];
+/** Sync: the project copied to the Mac, then its packages and `cap sync` (nothing built or launched). */
+export const SYNC_PHASES: TimelinePhase[] = ['sync', 'deps', 'cap'];
 /** An Electron app on the Mac's desktop; Capacitor's adds its web build and `cap copy`. */
 export const ELECTRON_PHASES: TimelinePhase[] = ['sync', 'deps', 'electron', 'build', 'launch'];
 export const CAP_ELECTRON_PHASES: TimelinePhase[] = ['web', 'sync', 'deps', 'electron', 'cap', 'build', 'launch'];
@@ -59,7 +61,9 @@ export type RunStatus = 'idle' | 'starting' | 'building' | 'running' | 'stopping
 export interface RunState {
   path: string;
   sessionId: string | null;
-  mode: 'run' | 'live' | 'ipa' | null;
+  mode: 'run' | 'live' | 'ipa' | 'sync' | null;
+  /** A run that keeps the web files built before (Run without building). */
+  keepsWebFiles: boolean;
   status: RunStatus;
   runNumber: number;
   startedAt: number | null;
@@ -78,7 +82,7 @@ export interface RunState {
   buildLogPath: string | null;
   ipa: { file: string; size: number } | null;
   /** The last finished run, shown dimmed until the next one starts. */
-  previous: { runNumber: number; phases: Partial<Record<TimelinePhase, PhaseState>>; ms: number | null; ok: boolean } | null;
+  previous: { runNumber: number; mode: RunState['mode']; phases: Partial<Record<TimelinePhase, PhaseState>>; ms: number | null; ok: boolean } | null;
 }
 
 export function emptyRun(path: string): RunState {
@@ -86,6 +90,7 @@ export function emptyRun(path: string): RunState {
     path,
     sessionId: null,
     mode: null,
+    keepsWebFiles: false,
     status: 'idle',
     runNumber: 0,
     startedAt: null,
@@ -135,7 +140,7 @@ function newRun(run: RunState, mode: RunState['mode']): RunState {
     notes: [],
     buildLogPath: null,
     ipa: null,
-    previous: finished ? { runNumber: run.runNumber, phases: run.phases, ms: run.endedAt && run.startedAt ? run.endedAt - run.startedAt : null, ok: run.status !== 'failed' } : run.previous,
+    previous: finished ? { runNumber: run.runNumber, mode: run.mode, phases: run.phases, ms: run.endedAt && run.startedAt ? run.endedAt - run.startedAt : null, ok: run.status !== 'failed' } : run.previous,
   };
   if (mode === 'live') next.phases.web = { status: 'skipped', detail: 'served by your dev server' };
   if (run.target?.kind === 'device') next.phases.boot = { status: 'skipped', detail: 'not needed on a device' };
@@ -154,6 +159,7 @@ function reduce(run: RunState, event: HostEvent, sessionId: string | undefined, 
     case 'session-started': {
       const next = newRun({ ...run, sessionId: sessionId ?? null, mac: event.mac, app: null, onMac: event.target === MAC_TARGET_ID }, event.mode === 'build' ? 'run' : event.mode);
       next.status = 'starting';
+      next.keepsWebFiles = event.webBuild === false;
       next.live = event.mode === 'live'
         ? { devServerUrl: null, external: false, command: null, tunnel: 'pending', liveUrl: null, localUrl: null, hmr: 'waiting', hmrUpdatedAt: null, lastNativeChange: null }
         : null;
@@ -181,7 +187,7 @@ function reduce(run: RunState, event: HostEvent, sessionId: string | undefined, 
       else if (!event.ok) {
         next.status = 'failed';
         next.error = event.error ?? next.error;
-      } else next.status = run.status === 'failed' ? 'failed' : run.mode === 'ipa' ? 'done' : 'stopped';
+      } else next.status = run.status === 'failed' ? 'failed' : run.mode === 'ipa' || run.mode === 'sync' ? 'done' : 'stopped';
       if (next.app && (next.app.state === 'running' || next.app.state === 'launching')) next.app = { ...next.app, state: 'stopped', at: now };
       return next;
     }

@@ -72,7 +72,8 @@ export interface Check {
 
 export type ConnectionState = 'connecting' | 'connected' | 'lost' | 'reconnecting' | 'restored' | 'offline' | 'closed';
 
-export type SessionMode = 'run' | 'live' | 'build' | 'ipa';
+/** `sync`: the project copied to the Mac and `cap sync` run there, nothing built or launched (Studio's Sync). */
+export type SessionMode = 'run' | 'live' | 'build' | 'ipa' | 'sync';
 
 export type SessionState = 'starting' | 'building' | 'running' | 'idle' | 'stopping' | 'stopped' | 'failed';
 

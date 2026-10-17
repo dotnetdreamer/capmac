@@ -23,7 +23,7 @@ import { HMR_LINE, startDevServer, type DevServer } from './devserver.js';
 import { isCancelled, toErrorInfo, UserError } from './errors.js';
 import type { AppLogEntry } from './events.js';
 import type { MacLink } from './link.js';
-import { buildWeb } from './pipeline.js';
+import { buildWeb, skipWebBuild } from './pipeline.js';
 import { requireElectron, type ProjectInfo } from './project.js';
 import type { MacSession } from './session.js';
 import type { ForwardObserver } from './ssh.js';
@@ -395,7 +395,10 @@ export async function runElectronApp(project: ProjectInfo, link: MacLink, option
   const plan = electronPlan(project);
   const sessionPromise = link.session();
   sessionPromise.catch(() => undefined);
-  if (plan.flavor === 'capacitor' && options.webBuild !== false) await buildWeb(project, ctx, signal);
+  if (plan.flavor === 'capacitor') {
+    if (options.webBuild !== false) await buildWeb(project, ctx, signal);
+    else skipWebBuild(ctx);
+  }
   const session = await sessionPromise;
   const runner = new ElectronRunner(session, project, ctx, plan);
   runner.announceTarget();

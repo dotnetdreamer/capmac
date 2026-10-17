@@ -77,9 +77,16 @@ export function buildCommands(): Command[] {
 
   if (path) {
     const live = run?.mode === 'live' && active;
+    // A Capacitor app also runs without the web build; its iOS app can sync (as the Run button's arrow offers).
+    const summary = useProjects.getState().byKey[projectKey(path)]?.summary;
+    const current = appOf(summary, projectPrefs(path)) ?? 'ios';
+    const ios = current === 'ios' && Boolean(summary?.hasIos);
+    const capacitor = ios || (current === 'electron' && summary?.electron?.flavor === 'capacitor');
     commands.push(
       { id: 'live', title: live ? t.commands.restartLive : t.commands.startLive, group: 'Session', icon: 'flash', shortcut: 'F5', keywords: 'dev hmr watch', run: () => void startSession(path, 'live') },
       { id: 'run', title: active && run?.mode === 'run' ? t.commands.runAgain : t.commands.run, group: 'Session', icon: 'play', shortcut: 'Ctrl+F5', keywords: 'build launch start', run: () => void startSession(path, 'run') },
+      { id: 'run-no-build', title: t.commands.runWithoutBuilding, group: 'Session', icon: 'history', keywords: 'skip web build cap run prebuilt launch', enabled: capacitor, run: () => void startSession(path, 'run', { webBuild: false }) },
+      { id: 'sync', title: t.commands.sync, group: 'Session', icon: 'sync', keywords: 'cap sync copy plugins upload', enabled: ios, run: () => void startSession(path, 'sync') },
       { id: 'stop', title: t.commands.stop, group: 'Session', icon: 'stop', shortcut: 'Shift+F5', enabled: active, run: () => void stopSession(path) },
       { id: 'rebuild', title: t.commands.rebuild, group: 'Session', icon: 'sync', shortcut: 'Ctrl+Shift+F5', run: () => void rebuild(path) },
       { id: 'clean-rebuild', title: t.commands.cleanRebuild, group: 'Session', icon: 'eraser', keywords: 'derived data', run: () => void rebuild(path, true) },

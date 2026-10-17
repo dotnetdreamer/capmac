@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { t, tidy } from '../../../shared/i18n';
 import { formatDuration } from '../../lib/format';
 import { Rich } from '../../ui/Rich';
-import { CAP_ELECTRON_PHASES, ELECTRON_PHASES, IPA_PHASES, isBusy, phaseLabel, RUN_PHASES, type PhaseState, type RunState, type TimelinePhase } from '../../state/runs';
+import { CAP_ELECTRON_PHASES, ELECTRON_PHASES, IPA_PHASES, isBusy, phaseLabel, RUN_PHASES, SYNC_PHASES, type PhaseState, type RunState, type TimelinePhase } from '../../state/runs';
 import { ProgressBar, Spinner } from '../../ui/Feedback';
 import { Icon } from '../../ui/Icon';
 
@@ -16,6 +16,7 @@ const SHORT_DETAIL: Array<[RegExp, string]> = [
   [/not needed on a device/i, t.timeline.short.device],
   [/turned off/i, t.timeline.short.off],
   [/not installed on this PC/i, t.timeline.short.prebuilt],
+  [/already built/i, t.timeline.short.prebuilt],
   [/no build script/i, t.timeline.short.noScript],
   [/app unchanged/i, t.timeline.short.unchanged],
   [/already on the Mac/i, t.timeline.short.upToDate],
@@ -70,7 +71,9 @@ export function Timeline({ run, electron = null, macSelected = false }: { run: R
   const hasCurrent = Boolean(run && Object.keys(run.phases).length > 1);
   const showingPrevious = !hasCurrent && Boolean(run?.previous);
   const phases: Partial<Record<TimelinePhase, PhaseState>> = hasCurrent ? run!.phases : run?.previous?.phases ?? {};
-  const order = run?.mode === 'ipa' ? IPA_PHASES : onMac ? (electron === 'capacitor' ? CAP_ELECTRON_PHASES : ELECTRON_PHASES) : RUN_PHASES;
+  // The steps of the session shown (the last one, dimmed, until the new one has some).
+  const mode = showingPrevious ? run?.previous?.mode : run?.mode;
+  const order = mode === 'ipa' ? IPA_PHASES : mode === 'sync' ? SYNC_PHASES : onMac ? (electron === 'capacitor' ? CAP_ELECTRON_PHASES : ELECTRON_PHASES) : RUN_PHASES;
   const runningPhase = order.find((p) => phases[p]?.status === 'running');
   const running = runningPhase ? phases[runningPhase] : undefined;
   const failed = order.find((p) => phases[p]?.status === 'failed');
@@ -103,7 +106,9 @@ export function Timeline({ run, electron = null, macSelected = false }: { run: R
     <div className={`timeline${showingPrevious ? ' is-previous' : ''}`}>
       <div className="timeline__summary" aria-live="polite">
         <span className="timeline__run">
-          {showingPrevious ? t.timeline.lastRun(run.previous!.runNumber) : t.timeline.run(run.runNumber)}
+          {showingPrevious
+            ? (mode === 'sync' ? t.timeline.lastSync : t.timeline.lastRun)(run.previous!.runNumber)
+            : (mode === 'sync' ? t.timeline.sync : t.timeline.run)(run.runNumber)}
           {run.mode === 'live' && !showingPrevious && <span className="badge badge--success">{t.common.live}</span>}
         </span>
         {elapsed !== null && <span className="timeline__time tabular">{formatDuration(elapsed)}</span>}

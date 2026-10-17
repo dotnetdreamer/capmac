@@ -114,6 +114,47 @@ function AppPicker({ path, summary, app, run }: { path: string; summary: Project
   );
 }
 
+/**
+ * Run, with an arrow for the other ways to run a Capacitor app: without the
+ * web build (like `npx cap run`), or Sync only (like `npx cap sync`, the iOS
+ * app's). Run itself always builds the web app first.
+ */
+function RunButton({ path, run, enabled, hint, capacitor, ios }: { path: string; run: RunState | undefined; enabled: boolean; hint: string | undefined; capacitor: boolean; ios: boolean }) {
+  const menu = usePopover();
+  const busy = isBusy(run);
+  const running = isActive(run) && run?.mode === 'run';
+  const main = (
+    <Tooltip content={hint ?? t.toolbar.runTip} shortcut="Ctrl+F5">
+      <Button icon="play" iconFilled busy={busy && (run?.mode === 'run' || run?.mode === 'sync')} disabled={!enabled} onClick={() => void startSession(path, 'run')} aria-keyshortcuts="Control+F5">
+        {t.common.run}
+        {running && !busy && <StatusDot tone="ok" />}
+      </Button>
+    </Tooltip>
+  );
+  if (!capacitor) return main;
+  return (
+    <div className="split">
+      {main}
+      <Tooltip content={hint ?? t.toolbar.runOptions}>
+        <button type="button" className="btn btn--standard btn--md split__more" aria-label={t.toolbar.runOptions} aria-haspopup="menu" disabled={!enabled} {...menu.triggerProps}>
+          <Icon name="chevronDown" size={12} />
+        </button>
+      </Tooltip>
+      <Menu
+        state={menu}
+        label={t.toolbar.runOptions}
+        placement="bottom-end"
+        width={300}
+        items={[
+          { id: 'run', label: t.toolbar.runFull, description: t.toolbar.runFullHint, icon: 'play', shortcut: 'Ctrl+F5', onSelect: () => void startSession(path, 'run') },
+          { id: 'run-no-build', label: t.toolbar.runNoBuild, description: t.toolbar.runNoBuildHint, icon: 'history', onSelect: () => void startSession(path, 'run', { webBuild: false }) },
+          ...(ios ? [{ id: 'sync', label: t.toolbar.sync, description: t.toolbar.syncHint, icon: 'sync' as const, separatorBefore: true, onSelect: () => void startSession(path, 'sync') }] : []),
+        ]}
+      />
+    </div>
+  );
+}
+
 /** What is happening right now, as a verb ("Building", …). */
 function currentPhase(run: RunState | undefined): string | null {
   if (!run) return null;
@@ -145,7 +186,6 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
   const active = isActive(run);
   const busy = isBusy(run);
   const live = active && run?.mode === 'live';
-  const running = active && run?.mode === 'run';
   const phase = busy ? currentPhase(run) : null;
   const name = summary?.appName ?? path.split(/[\\/]/).pop() ?? path;
   // The app picked must be there to run: an iOS app once iOS is added.
@@ -154,6 +194,9 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
   const runHint = !mac ? t.toolbar.pairFirst : summary && !appReady && app === 'ios' ? t.toolbar.addIosFirst : undefined;
   // IPA builds and Xcode are for the iOS app.
   const canIos = Boolean(summary?.hasIos && mac);
+  // Capacitor apps (iOS, or Capacitor's Electron platform) can also run without the web build; the iOS app can sync.
+  const iosApp = app === 'ios' && Boolean(summary?.hasIos);
+  const capacitorApp = iosApp || (app === 'electron' && summary?.electron?.flavor === 'capacitor');
 
   return (
     <div className="ws-toolbar" role="toolbar" aria-label={t.toolbar.label}>
@@ -188,12 +231,7 @@ export function Toolbar({ path, summary, icon, run, macs, mac, targets, target, 
             {live && !busy && <StatusDot tone="live" pulse />}
           </Button>
         </Tooltip>
-        <Tooltip content={runHint ?? t.toolbar.runTip} shortcut="Ctrl+F5">
-          <Button icon="play" iconFilled busy={busy && run?.mode === 'run'} disabled={!canRun} onClick={() => void startSession(path, 'run')} aria-keyshortcuts="Control+F5">
-            {t.common.run}
-            {running && !busy && <StatusDot tone="ok" />}
-          </Button>
-        </Tooltip>
+        <RunButton path={path} run={run} enabled={canRun} hint={runHint} capacitor={capacitorApp} ios={iosApp} />
         <IconButton icon="stop" filled label={t.common.stop} shortcut="Shift+F5" variant="standard" disabled={!active || run?.status === 'stopping'} onClick={() => void stopSession(path)} />
       </div>
       <div className="ws-toolbar__divider" role="separator" />

@@ -159,7 +159,10 @@ Projects                                                    [▸ Add project  Ct
     - Booted simulators come first, then the rest grouped by runtime, then devices.
     - Each entry shows its state live: Booted, Shut down, or connected by USB / Wi-Fi.
     - Devices that need attention say why: Developer Mode off, locked, not paired.
-  - **Run** (Ctrl+F5) builds and launches with logs attached.
+  - **Run** (Ctrl+F5) builds and launches with logs attached. For Capacitor apps, the arrow next to it offers:
+    - **Run without building**: keeps the web files built before, like `npx cap run ios` and `capmac run --no-web-build`; the timeline shows Web build as *prebuilt*.
+    - **Sync** (the iOS app): copies the project to the Mac and brings its iOS project up to date (dependencies, then `cap sync` or `cap copy` as needed) without building or launching, like `capmac sync`. Its timeline has three steps: Copy to Mac, Packages, cap sync.
+    - Run itself always builds the web app first; Try again repeats whichever of the three failed.
   - **Live** (F5) runs the dev server and reverse tunnel, and rebuilds on native changes.
   - **Stop** (Shift+F5) stops the app and tears the session down.
   - A busy Run or Live button shows a progress ring and the current phase; pressing it again cancels.
@@ -193,15 +196,28 @@ Projects                                                    [▸ Add project  Ct
   - Click, or press Enter, to open it at the line in the editor chosen in Settings (VS Code and Cursor through their `vscode://file/…` and `cursor://file/…` links), or in the default app.
   - Copy (one item, or all as `file:line:col: error: …`), and "Show full build log", which downloads the Mac-side log into a read-only viewer.
   - Warnings from dependencies (Pods, Swift packages, node_modules) are collapsed under "37 warnings from dependencies".
-- **Console**: virtualized (TanStack Virtual), 100k lines by default (Settings: 10k to 1M); old lines drop in chunks.
+- **Console**: 100k lines by default (Settings: 50k to 500k); old lines drop in chunks of 10 %.
+  - Its own virtual list, made for logs (`ConsoleList.tsx`). Only the rows near the view are in the page, between spacers sized from a height index (a Fenwick tree, `lib/heights.ts`): a row's offset, the row at an offset, a size change and each appended row cost O(log n).
+    - Rows sit in normal flow, so when a row's real height differs from its estimate, the browser's scroll anchoring keeps the view still, even mid smooth-scroll.
+    - Rows are estimated from their text (newlines, and characters per line when wrapping), then measured as they appear.
+    - Dropping old lines only cuts the front of the filtered view and of the height index; nothing is filtered or estimated again.
+    - Measured against the previous list (TanStack Virtual) at 500k lines: a scroll step takes 0 ms (p50; 1.2 ms p95) instead of 15.5 ms, a jump anywhere 2.8 ms instead of 18.7 ms, and 10k new lines a second keep the main thread 18 % busy instead of 99.8 %.
   - Source chips: JS, Capacitor, Native, Bridge, Dev server, CapMac.
   - Level menu: Errors, Warnings, Info, Debug.
   - Search with highlighted matches, a match count and F3/Shift+F3 navigation.
-  - Auto-scroll pauses when you scroll up. "↓ 23 new lines" jumps back. ⏸ freezes the view.
+    - A case-insensitive regular expression tests each line (no lower-casing copies); typing more of a query re-checks only the lines that matched; the search runs as a deferred render, so typing never waits for it.
+  - Following: the view sticks to the latest line until you scroll up, drag the scrollbar, use the keyboard, or click into the lines (a selection holds still).
+    - An arrow at the bottom right goes back to the latest line, and counts the lines that came in meanwhile ("↓ 23 new lines").
+    - ⏸ freezes the view. Clear follows new lines again.
+    - Filters, wrapping and switching tabs keep the line at the top where it was.
+  - Selection: drag across any number of lines (the view scrolls past its edges), Shift+click, or Ctrl+A for every line shown.
+    - While there is a selection, the rows at its two ends stay in the page wherever they are, so the browser's own selection (and its highlight) never loses its place. Chromium moves a dragged selection's anchor off rows that leave the page; keeping them is what makes long drags work.
+    - Copying (Ctrl+C, or the right-click menu) builds the text from the lines themselves, as `time tag LEVEL message`, including the lines no longer in the page.
+  - Right-click menu: Copy, Select all, Copy line, Save to a file…, Clear.
   - Rows: timestamp, source badge, level icon, message.
     - Errors and warnings get a tinted gutter.
     - JSON in `console.log` becomes an expandable tree: arrow keys / Enter to expand, Copy value.
-  - Copy (selection or all visible lines) and Export (.log).
+  - Copy all visible lines, and Export (.log), from the ⋯ menu.
   - Multi-line console messages are grouped into one row.
 
 #### Simulator pane
@@ -477,11 +493,11 @@ Spinners only exist while work is running; idle CPU stays near zero.
 | CommandPalette | |
 | ProjectCard | |
 | DropZone | Window-wide overlay |
-| WorkspaceToolbar | MacPicker, TargetPicker, Run/Live/Stop group |
-| SessionBar | LiveCard, ReconnectBanner |
+| WorkspaceToolbar | MacPicker, TargetPicker, Run/Live/Stop group, RunButton (Run ▾: without building, Sync) |
+| SessionBar | LiveCard, RunCard, SyncCard, ReconnectBanner |
 | Timeline | TimelineStep |
 | ProblemsList | FileGroup, DiagnosticRow with CodeExcerpt |
-| Console | Toolbar, Row, JsonTree, NewLinesPill |
+| Console | ConsoleBar, ConsoleList (rows, selection, right-click menu, jump to the latest line), JsonTree |
 | SimulatorPane | DeviceFrame, ScreenCanvas, SimToolbar, Ripple |
 | DevicesList | SimulatorRow, DeviceRow |
 | MacCard | |

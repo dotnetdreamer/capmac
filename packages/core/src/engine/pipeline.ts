@@ -75,6 +75,11 @@ export async function buildWeb(project: ProjectInfo, ctx: EngineContext, signal?
   s.succeed();
 }
 
+/** A run that keeps the web files built before (`--no-web-build`, like `cap run`): shown as a skipped step. */
+export function skipWebBuild(ctx: EngineContext): void {
+  ctx.emit({ type: 'phase-skipped', phase: 'web', reason: 'using the web files already built' });
+}
+
 export interface BuildOptions {
   configuration?: string;
   scheme?: string;
