@@ -1,7 +1,7 @@
 {
   "name": "@capmac/desktop",
   "productName": "CapMac Studio",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "CapMac Studio: build, run, live-reload and see your Capacitor iOS app on a Mac, from Windows.",
   "license": "MIT",
@@ -17,7 +17,7 @@
     "test:e2e": "node scripts/build.mjs && playwright test --config playwright.config.ts"
   },
   "devDependencies": {
-    "@capmac/core": "0.1.2",
+    "@capmac/core": "0.1.3",
     "@playwright/test": "1.64.0",
     "@resvg/resvg-js": "^2.6.2",
     "@types/react": "19.3.0",

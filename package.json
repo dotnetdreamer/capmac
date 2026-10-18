@@ -1,6 +1,6 @@
 {
   "name": "capmac-workspace",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "CapMac: build and run iPhone, Mac and Windows apps from Windows. The CLI (packages/cli), the shared engine (packages/core), CapMac Studio (apps/desktop) and the VS Code extension (apps/vscode).",
   "license": "MIT",
