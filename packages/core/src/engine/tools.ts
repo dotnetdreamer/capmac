@@ -4,7 +4,7 @@ import type { Target } from '../shared/protocol.js';
 import { withStep, type EngineContext } from './context.js';
 import { formatBytes, plural } from './format.js';
 import { Pipeline } from './pipeline.js';
-import type { ProjectInfo } from './project.js';
+import { requireIos, type ProjectInfo } from './project.js';
 import type { MacSession } from './session.js';
 import { syncToMac } from './sync-client.js';
 
@@ -79,11 +79,26 @@ export async function pullFromMac(session: MacSession, project: ProjectInfo, pat
   }, (r) => `${plural(r.files, 'file')}, ${formatBytes(r.bytes)}`);
 }
 
-/** Syncs the project and opens it in Xcode on the Mac's screen. */
+/**
+ * What the Mac opens in Xcode for the project's iOS app: Capacitor's ios/App (the agent finds it),
+ * a Flutter app's Runner workspace, a React Native app's own (CocoaPods makes it on the Mac).
+ */
+export function xcodeOpenParams(project: ProjectInfo): { projectId: string; projectRel: string; iosDir: string; xcodeName?: string } {
+  const ref = { projectId: project.projectId, projectRel: project.projectRel };
+  if (project.kind === 'flutter') return { ...ref, iosDir: 'ios', xcodeName: 'Runner' };
+  if (project.kind === 'react-native') {
+    const ios = project.reactNative?.ios;
+    return { ...ref, iosDir: ios?.dir ?? 'ios', xcodeName: ios?.xcodeproj?.replace(/\.xcodeproj$/, '') ?? ios?.scheme ?? project.scheme };
+  }
+  return { ...ref, iosDir: project.iosDir };
+}
+
+/** Syncs the project and opens its iOS app in Xcode on the Mac's screen. */
 export async function openInXcode(session: MacSession, project: ProjectInfo, ctx: EngineContext, signal?: AbortSignal): Promise<string> {
+  // An Electron app, or an app with no iOS app yet: says what to do before anything is copied.
+  requireIos(project);
   await syncToMac(session, project, { includeWebDir: true, signal }, ctx);
-  const result = await withStep(ctx, 'Opening the project in Xcode on the Mac', 'other', () =>
-    session.call<{ opened: string }>('open-xcode', { projectId: project.projectId, projectRel: project.projectRel, iosDir: project.iosDir }));
+  const result = await withStep(ctx, 'Opening the project in Xcode on the Mac', 'other', () => session.call<{ opened: string }>('open-xcode', xcodeOpenParams(project)));
   return result.opened;
 }
 
