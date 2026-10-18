@@ -20,12 +20,23 @@ const SETUP_STEPS = [
 
 const gb = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 
+/** Where Apple's Developer Program is joined (Studio's setup dialog links to it). */
+const DEVELOPER_PROGRAM_URL = 'https://developer.apple.com/programs/enroll/';
+
+type SetupResult = { ok: boolean; cancelled: boolean; error?: string; hint?: string; details?: string[] };
+
 export async function setupPc(model: Model, app: WorkspaceApp, options: { appleLogin?: boolean } = {}): Promise<boolean> {
   if (process.platform !== 'win32') {
     void vscode.window.showInformationMessage(s.pcSetup.windowsOnly);
     return false;
   }
   const projectPath = app.project.dir;
+  // Before the Apple sign-in has worked, as Studio's dialog says up front: a free Apple Account stops there, after the long tools step.
+  if (!model.pc.get(keyOf(projectPath))?.status?.signing) {
+    void vscode.window.showInformationMessage(`${studio.pc.paid.title}. ${studio.pc.paid.body}`, studio.pc.paid.join).then((answer) => {
+      if (answer) void vscode.env.openExternal(vscode.Uri.parse(DEVELOPER_PROGRAM_URL));
+    });
+  }
   let setupId: string;
   try {
     setupId = (await model.client.invoke('wsl.setup', { projectPath, appleLogin: options.appleLogin })).setupId;
@@ -36,7 +47,7 @@ export async function setupPc(model: Model, app: WorkspaceApp, options: { appleL
   model.pcFor(projectPath).setupId = setupId;
   model.emit('pc');
   const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: s.pcSetup.title, cancellable: true }, (progress, token) =>
-    new Promise<{ ok: boolean; cancelled: boolean; error?: string; hint?: string }>((resolve) => {
+    new Promise<SetupResult>((resolve) => {
       token.onCancellationRequested(() => void model.client.call('wsl.stopSetup', { setupId }));
       let reported = 0;
       const report = () => {
@@ -71,7 +82,7 @@ export async function setupPc(model: Model, app: WorkspaceApp, options: { appleL
           changed = true;
           if (event.type === 'setup-ended') {
             listener.dispose();
-            resolve({ ok: event.ok && !event.cancelled, cancelled: event.cancelled, error: event.error ? tidy(event.error.message) : undefined, hint: event.error ? tidy(event.error.hint) : undefined });
+            resolve({ ok: event.ok && !event.cancelled, cancelled: event.cancelled, error: event.error ? tidy(event.error.message) : undefined, hint: event.error ? tidy(event.error.hint) : undefined, details: event.error?.details });
             return;
           }
         }
@@ -87,9 +98,13 @@ export async function setupPc(model: Model, app: WorkspaceApp, options: { appleL
   if (!result.ok) {
     const check = studio.pc.check;
     const again = studio.pc.continue;
-    const answer = await vscode.window.showErrorMessage(`${s.pcSetup.failed}${result.error ? `: ${result.error}` : ''}`, { detail: result.hint } as vscode.MessageOptions, again, check);
+    const details = studio.pc.details;
+    // A notification shows no detail: the hint goes in the message, Apple's and the tools' own words in Details.
+    const message = [`${s.pcSetup.failed}${result.error ? `: ${result.error}` : ''}`, result.hint].filter(Boolean).join('. ');
+    const answer = await vscode.window.showErrorMessage(message, again, check, details);
     if (answer === again) return setupPc(model, app);
     if (answer === check) await checkPc(model, app);
+    if (answer === details) await showDetails(model, projectPath, result);
     return false;
   }
   // Set up for this app: it builds here from now on.
@@ -114,4 +129,15 @@ export async function checkPc(model: Model, app: WorkspaceApp): Promise<void> {
     placeHolder: studio.pc.checksTitle,
   });
   if (picked && 'action' in picked) await setupPc(model, app, { appleLogin: result.value.ready });
+}
+
+/** Why setup stopped, in Apple's and the tools' own words, and its last output lines (Studio's dialog shows both), in an editor. */
+async function showDetails(model: Model, projectPath: string, result: SetupResult): Promise<void> {
+  const lines = model.pcFor(projectPath).lines.slice(-80);
+  const content = [
+    ...[result.error, result.hint].filter((line): line is string => Boolean(line)),
+    ...(result.details?.length ? ['', ...result.details] : []),
+    ...(lines.length ? ['', `── ${studio.pc.details} ──`, ...lines] : []),
+  ].join('\n');
+  await vscode.window.showTextDocument(await vscode.workspace.openTextDocument({ content, language: 'log' }), { preview: true });
 }

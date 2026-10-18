@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+What CapMac Studio could do and CapMac for VS Code couldn't yet
+
+- Remote access settings for each Mac: turn it on, how it connects, the relay, keeping the Mac awake, a connection test, the PCs that can reach it, moving to a new server, turning it off. And the remote access server itself
+- Build an IPA: Upload to TestFlight, the Team ID and the folder it goes to
+- The Devices view: a Mac's macOS, Xcode, chip and simulators, Copy UDID, and what an iPhone needs before your app can open on it
+- The Apps view: how much a sync copies to the Mac
+- Building on this PC: Run without building and a React Native release run work there too. Rebuild and Clean Rebuild work whenever the app can run
+- Setting up this PC: the paid Apple developer account note up front, and Details when setup stops
+- **Remove the CapMac Skill for AI Agents…**
+- The `capmac.problems.packageWarnings` setting
+
 ## 0.1.1
 
 The first version of CapMac for VS Code.

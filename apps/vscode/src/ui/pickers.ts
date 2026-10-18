@@ -7,7 +7,8 @@ import { automaticTarget, errorText, keyOf, pcReady, type Model, type WorkspaceA
 import { parseAddress } from '../state/pure.js';
 
 export { parseAddress };
-import { appKind, frameworkName, macState, targetState } from './format.js';
+import { appKind, frameworkName, macState, targetHint, targetState } from './format.js';
+import { turnRemoteOn } from './remote.js';
 
 type Item<T> = vscode.QuickPickItem & { value?: T };
 
@@ -85,7 +86,7 @@ export async function pickTarget(model: Model, app: WorkspaceApp): Promise<boole
       for (const t of sims) items.push({ label: `${isCurrentMac && dest.target === t.udid ? '$(check)' : '$(device-mobile)'} ${t.name}`, description: `${t.os} · ${targetState(t)}`, value: { kind: 'mac-target', mac: m, target: t } });
       if (targets.devices.length) {
         items.push(separator(s.pick.devices(m.label)));
-        for (const t of targets.devices) items.push({ label: `${isCurrentMac && dest.target === t.udid ? '$(check)' : '$(device-mobile)'} ${t.name}`, description: `${t.os} · ${targetState(t)}`, value: { kind: 'mac-target', mac: m, target: t } });
+        for (const t of targets.devices) items.push({ label: `${isCurrentMac && dest.target === t.udid ? '$(check)' : '$(device-mobile)'} ${t.name}`, description: `${t.os} · ${targetState(t)}`, detail: targetHint(t) ?? undefined, value: { kind: 'mac-target', mac: m, target: t } });
       }
     }
     if (!model.macs.length) items.push({ label: `$(add) ${s.pick.pairMac}`, detail: s.pick.pairMacHint, value: { kind: 'pair' } });
@@ -96,7 +97,7 @@ export async function pickTarget(model: Model, app: WorkspaceApp): Promise<boole
       if (!pcReady(pc?.status)) items.push({ label: `$(desktop-download) ${s.pick.pcSetUp}`, detail: s.pick.pcSetUpHint, value: { kind: 'pc-setup' } });
       else if (!pc?.devices) items.push({ label: `$(loading~spin) ${studio.pc.looking}`, alwaysShow: true });
       else if (!pc.devices.devices.length) items.push({ label: `$(info) ${studio.pc.none}`, detail: studio.pc.noPhone, alwaysShow: true });
-      else for (const t of pc.devices.devices) items.push({ label: `${backend === 'wsl' && dest.target === t.udid ? '$(check)' : '$(device-mobile)'} ${t.name}`, description: `${t.os} · ${t.connection === 'network' ? studio.targets.state.wifi : studio.targets.state.usb}`, value: { kind: 'pc-phone', target: t } });
+      else for (const t of pc.devices.devices) items.push({ label: `${backend === 'wsl' && dest.target === t.udid ? '$(check)' : '$(device-mobile)'} ${t.name}`, description: `${t.os} · ${targetState(t)}`, detail: targetHint(t, true) ?? undefined, value: { kind: 'pc-phone', target: t } });
     }
     return items;
   };
@@ -221,7 +222,11 @@ export async function pairMac(model: Model): Promise<MacSummary | undefined> {
   try {
     const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: s.pair.pairing(label ?? host) }, () => model.client.invoke('macs.pair', { host, port, username: username.trim(), label }));
     await model.refreshMacs();
-    void vscode.window.showInformationMessage(s.pair.paired(result.mac.label), { detail: s.pair.pairedBody } as vscode.MessageOptions);
+    // Remote access can come on now too, as Studio's sign-in step offers (it asks for the server when there is none).
+    const anywhere = studio.remote.toggle(result.mac.label);
+    void vscode.window.showInformationMessage(`${s.pair.paired(result.mac.label)}. ${s.pair.pairedBody}`, anywhere).then((answer) => {
+      if (answer === anywhere) void turnRemoteOn(model, model.macs.find((m) => m.name === result.mac.name) ?? result.mac);
+    });
     // Check it right away: what's missing shows in the Devices view, with fixes.
     void model.checkMac(result.mac.name).then((health) => {
       const issues = health.checks.filter((c) => c.level === 'fail' || c.level === 'warn');
@@ -249,13 +254,53 @@ export async function pickFlutterMode(): Promise<'debug' | 'profile' | 'release'
   return picked?.value;
 }
 
-export async function pickIpaKind(): Promise<'development' | 'ad-hoc' | 'app-store' | 'enterprise' | undefined> {
+/** An IPA built through the Mac: Studio's Build an IPA dialog (its distribution, upload, team and folder). */
+export interface IpaChoice {
+  exportKind: 'development' | 'ad-hoc' | 'app-store' | 'enterprise';
+  upload: boolean;
+  team?: string;
+  outDir?: string;
+}
+
+/** The team and folder an IPA build of a project used last (Studio's dialog asks each time; here they stay). */
+const IPA_OPTIONS = 'capmac.ipaOptions';
+type IpaOptions = Record<string, { team?: string; outDir?: string }>;
+
+/**
+ * Asks what to build: a distribution builds at once, Upload to TestFlight sends it to App Store
+ * Connect (not for Flutter, whose engine path can't), and the team and folder can be changed first.
+ */
+export async function pickIpa(app: WorkspaceApp, state: vscode.Memento): Promise<IpaChoice | undefined> {
+  const key = keyOf(app.project.dir);
   const kinds = studio.ipa.kinds;
-  const picked = await vscode.window.showQuickPick(
-    (['development', 'ad-hoc', 'app-store', 'enterprise'] as const).map((value) => ({ label: kinds[value].label, detail: kinds[value].hint, value })),
-    { title: s.pick.ipaTitle, placeHolder: studio.ipa.intro },
-  );
-  return picked?.value;
+  for (;;) {
+    const options = state.get<IpaOptions>(IPA_OPTIONS, {})[key] ?? {};
+    const save = (patch: { team?: string; outDir?: string }) => state.update(IPA_OPTIONS, { ...state.get<IpaOptions>(IPA_OPTIONS, {}), [key]: { ...options, ...patch } });
+    type Choice = { exportKind?: IpaChoice['exportKind']; upload?: boolean; set?: 'team' | 'folder' };
+    const items: Item<Choice>[] = [
+      ...(['development', 'ad-hoc', 'app-store', 'enterprise'] as const).map((value) => ({ label: kinds[value].label, detail: kinds[value].hint, value: { exportKind: value } })),
+      ...(app.project.framework === 'flutter' ? [] : [{ label: `$(cloud-upload) ${studio.ipa.upload}`, detail: studio.ipa.uploadDesc, value: { exportKind: 'app-store' as const, upload: true } }]),
+      separator<Choice>(s.ipa.options),
+      { label: `$(organization) ${studio.ipa.team}`, description: options.team ?? s.ipa.teamFromProject, value: { set: 'team' } },
+      { label: `$(folder) ${studio.ipa.saveTo}`, description: options.outDir ?? s.ipa.defaultFolder, value: { set: 'folder' } },
+    ];
+    const picked = (await vscode.window.showQuickPick(items, { title: s.pick.ipaTitle, placeHolder: studio.ipa.intro }))?.value;
+    if (!picked) return undefined;
+    if (picked.set === 'team') {
+      const team = await vscode.window.showInputBox({
+        title: studio.ipa.team, prompt: studio.ipa.teamHint, value: options.team ?? '', placeHolder: 'ABCDE12345',
+        validateInput: (value) => (value.trim() && !/^[A-Z0-9]{10}$/.test(value.trim().toUpperCase()) ? studio.ipa.teamError : undefined),
+      });
+      if (team !== undefined) await save({ team: team.trim().toUpperCase() || undefined });
+      continue;
+    }
+    if (picked.set === 'folder') {
+      const folder = await vscode.window.showOpenDialog({ title: studio.ipa.saveTo, canSelectFolders: true, canSelectFiles: false, openLabel: studio.ipa.chooseFolder, defaultUri: vscode.Uri.file(options.outDir ?? app.project.dir) });
+      if (folder?.[0]) await save({ outDir: folder[0].fsPath });
+      continue;
+    }
+    return { exportKind: picked.exportKind!, upload: Boolean(picked.upload), team: options.team, outDir: picked.upload ? undefined : options.outDir };
+  }
 }
 
 /** The samples the engine can copy (read from the contract when the extension is built). */

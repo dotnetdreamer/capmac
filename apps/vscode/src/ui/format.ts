@@ -73,6 +73,18 @@ export function targetState(target: Target): string {
   return '';
 }
 
+/**
+ * What to do on an iPhone before it can open your app, when something is in the way (Studio's
+ * Devices rows and target picker). `pc`: it's plugged into this PC, not the Mac.
+ */
+export function targetHint(target: Target, pc = false): string | null {
+  if (target.kind !== 'device') return null;
+  if (target.developerMode === 'disabled') return studio.devices.devModeHint;
+  if (target.paired === false) return pc ? studio.pc.trustHint : studio.devices.trustHint;
+  if (!pc && target.state !== 'connected' && target.state !== 'available') return studio.devices.connectHint;
+  return null;
+}
+
 /** A Mac's connection in words: "Connected · 12 ms", "Offline". */
 export function macState(mac: MacSummary): string {
   switch (mac.state) {
@@ -97,4 +109,25 @@ export function macIcon(mac: MacSummary): vscode.ThemeIcon {
   if (mac.state === 'offline') return new vscode.ThemeIcon('vm-outline', color('errorForeground'));
   if (mac.state === 'connecting' || mac.state === 'reconnecting' || mac.state === 'lost') return new vscode.ThemeIcon('loading~spin');
   return new vscode.ThemeIcon('vm');
+}
+
+const relative = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+
+/** "3 days ago", as CapMac Studio says it (renderer/lib/format.ts timeAgo). */
+export function timeAgo(ts: number, now = Date.now()): string {
+  const seconds = Math.round((ts - now) / 1000);
+  const abs = Math.abs(seconds);
+  if (abs < 45) return studio.time.justNow;
+  if (abs < 45 * 60) return relative.format(Math.round(seconds / 60), 'minute');
+  if (abs < 22 * 3600) return relative.format(Math.round(seconds / 3600), 'hour');
+  if (abs < 6 * 86400) return relative.format(Math.round(seconds / 86400), 'day');
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+/** "12.3 MB", as CapMac Studio writes sizes (renderer/lib/format.ts formatBytes). */
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10 * 1024 ? 1 : 0)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }

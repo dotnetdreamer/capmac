@@ -12,6 +12,7 @@ import { EngineError } from './engine/client.js';
 import { s, studio, tidy } from './i18n.js';
 import type { CapmacLaunch, SessionActions } from './debug/adapter.js';
 import type { ScreenPanel } from './screen/panel.js';
+import type { IpaChoice } from './ui/pickers.js';
 import { errorText, keyOf, pcReady, type Model, type WorkspaceApp } from './state/model.js';
 import { isActive, isNative, phaseLabel, type TimelinePhase } from './state/runs.js';
 
@@ -297,14 +298,20 @@ export class Sessions implements SessionActions {
     });
   }
 
-  async buildIpa(app: WorkspaceApp, exportKind: MethodParams<'builds.ipa'>['exportKind'] | null): Promise<void> {
+  /** `choice`: what to build through the Mac (pickIpa); on this PC the profile from setup decides. */
+  async buildIpa(app: WorkspaceApp, choice: IpaChoice | null): Promise<void> {
     const onPc = this.model.backendOf(app) === 'wsl';
     if (!(await this.ready(app))) return;
     const result = await this.follow(app, s.ipa.building(app.app.name), async () => {
       if (onPc) return this.model.startSession(this.model.sessionParams(app, 'build'));
-      return this.model.startIpaBuild({ projectPath: app.project.dir, mac: this.model.macFor(app)?.name, exportKind: exportKind ?? 'development' });
+      return this.model.startIpaBuild({ projectPath: app.project.dir, mac: this.model.macFor(app)?.name, exportKind: choice?.exportKind ?? 'development', upload: choice?.upload || undefined, team: choice?.team, outDir: choice?.outDir });
     });
     if (result.cancelled) return;
+    // Sent to App Store Connect: nothing comes back to this PC.
+    if (result.ok && choice?.upload) {
+      void vscode.window.showInformationMessage(s.ipa.uploaded(app.app.name));
+      return;
+    }
     if (!result.ok || !result.ipa) {
       const answer = await vscode.window.showErrorMessage(s.session.ipaFailed(app.app.name), { detail: [result.error, result.hint].filter(Boolean).join('\n') } as vscode.MessageOptions, s.session.showOutput);
       if (answer) this.output.show();
