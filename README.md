@@ -24,6 +24,9 @@ https://github.com/user-attachments/assets/cea942bc-a90b-4a7b-bb6c-0837361bfee8
 
 </div>
 
+> [!IMPORTANT]
+> **Building with no Mac needs a paid Apple developer account.** That's an [Apple Developer Program](https://developer.apple.com/programs/) membership (US$99 a year). A free Apple Account can't sign apps this way yet
+
 ## Why CapMac
 
 Apple's tools for building iPhone apps only run on a Mac. If you work on a Windows PC, every usual way around that has a catch
