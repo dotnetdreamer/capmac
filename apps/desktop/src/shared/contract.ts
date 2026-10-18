@@ -364,7 +364,10 @@ const unit = z.number().min(0).max(1);
 const points = z.number().min(-2000).max(2000);
 export const inputEventSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('tap'), x: unit, y: unit }).strict(),
-  z.object({ kind: z.literal('swipe'), x1: unit, y1: unit, x2: unit, y2: unit, durationMs: z.number().int().min(16).max(10_000) }).strict(),
+  z.object({
+    kind: z.literal('swipe'), x1: unit, y1: unit, x2: unit, y2: unit, durationMs: z.number().int().min(16).max(10_000),
+    pressMs: z.number().int().min(0).max(10_000).optional(), holdMs: z.number().int().min(0).max(10_000).optional(),
+  }).strict(),
   z.object({ kind: z.literal('text'), text: z.string().min(1).max(20_000), via: z.enum(['type', 'paste']).optional() }).strict(),
   z.object({ kind: z.literal('key'), key: z.enum(['return', 'enter', 'escape', 'delete', 'backspace', 'tab', 'space']) }).strict(),
   z.object({ kind: z.literal('button'), button: z.enum(['home', 'lock', 'siri', 'side', 'apple-pay']), phase: z.enum(['down', 'up']).optional() }).strict(),

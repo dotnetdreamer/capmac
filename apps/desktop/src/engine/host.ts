@@ -83,7 +83,7 @@ import {
   type Prompter,
   type VideoPacket,
 } from '@capmac/core/engine';
-import { PhoneScreen, iphoneTouchState, iphoneTouchTarget, setUpIphoneTouch, receiverInstalled, setBundledReceiver } from '@capmac/core/engine/iphone/index';
+import { PhoneScreen, iphoneTouchState, iphoneTouchTarget, mirrorReceiver, setUpIphoneTouch, receiverInstalled, setBundledReceiver } from '@capmac/core/engine/iphone/index';
 import { isSoundMode } from '@capmac/core/shared/electron';
 import { STREAM_CONFIG } from '@capmac/core/shared/stream';
 import type { ProbeResult, Target, TargetsResult } from '@capmac/core/shared/protocol';
@@ -836,10 +836,15 @@ function openScreen(streamId: string, mac: string, udid: string, port: MessagePo
   );
 }
 
+/** How long after mirroring stopped touch goes back to the pane's iPhone (a session that comes straight back keeps it). */
+const BACK_TO_PANE_MS = 3000;
+
 /**
- * A real iPhone at this PC, with no Mac: its screen mirrored over Wi-Fi, and touch through
- * WebDriverAgent. Studio keeps this stream open while it runs (the iPhone can't send its keyframe
- * again), so touch follows Studio's pane to another iPhone or app ('phone-target').
+ * A real iPhone at this PC, with no Mac: its screen mirrored over Wi-Fi (or, while nothing mirrors,
+ * over the cable), and touch through WebDriverAgent. Studio keeps this stream open while it runs (the
+ * iPhone can't send its keyframe again), so touch follows Studio's pane to another iPhone or app
+ * ('phone-target'). Touch drives the iPhone in the picture: the one that mirrors when this PC knows
+ * it, else the pane's.
  */
 async function openPhoneScreen(streamId: string, udid: string, projectPath: string, port: MessagePortMain, maxSize?: number): Promise<void> {
   const post = (message: ScreenPortMessage) => port.postMessage(message);
@@ -853,19 +858,24 @@ async function openPhoneScreen(streamId: string, udid: string, projectPath: stri
   let scope = { projectPath, streamId };
   // The iPhone sends a keyframe only when mirroring starts: a dropped frame could never be made up.
   const flow = screenFlow(post, () => stream.requestKeyframe(), { dropWhenBehind: false });
-  const target = await iphoneTouchTarget(project.capDir, udid);
+  let pane = { udid, projectPath };
+  let mirroring = mirrorReceiver().client;
+  let backToPane: NodeJS.Timeout | null = null;
+  const target = await iphoneTouchTarget(project.capDir, udid, mirroring);
   let retargets = 0;
-  const retarget = async (nextUdid: string, nextPath: string) => {
+  const retarget = async () => {
     const mine = ++retargets;
-    const next = await loadProject(nextPath).catch(() => null);
+    const wanted = pane;
+    const next = await loadProject(wanted.projectPath).catch(() => null);
     if (!next) return;
-    const nextTarget = await iphoneTouchTarget(next.capDir, nextUdid);
+    const nextTarget = await iphoneTouchTarget(next.capDir, wanted.udid, mirroring);
     if (mine !== retargets || screens.get(streamId)?.stream !== stream) return;
-    scope = { projectPath: nextPath, streamId };
+    scope = { projectPath: wanted.projectPath, streamId };
     stream.retarget(nextTarget.device, nextTarget.touch);
   };
   const stream: PhoneScreen = new PhoneScreen(target.device, { touch: target.touch }, {
-    onFrame: () => undefined,
+    // The picture over the cable, while nothing mirrors.
+    onFrame: flow.sendJpeg,
     onVideo: flow.sendVideo,
     onInfo: (info) => {
       post({ type: 'info', info });
@@ -882,14 +892,34 @@ async function openPhoneScreen(streamId: string, udid: string, projectPath: stri
       post({ type: 'codec', codec, fallback });
     },
     onWaiting: (wait) => post({ type: 'device-wait', wait }),
-    onClient: (client) => post({ type: 'mirror-client', name: client?.name ?? null, model: client?.model ?? null }),
-    onTouch: (ready, reason) => emit(scope, { type: 'log', level: 'note', message: ready ? 'Touch is on for this iPhone.' : `Touch: ${reason ?? 'off'}` }),
+    onClient: (client) => {
+      post({ type: 'mirror-client', name: client?.name ?? null, model: client?.model ?? null });
+      // Another iPhone started mirroring: touch goes to it. When mirroring stops, touch goes back to
+      // the pane's iPhone a moment later (its picture can come over the cable then).
+      if (!client) {
+        if (mirroring && !backToPane) {
+          backToPane = setTimeout(() => {
+            backToPane = null;
+            if (!mirroring) void retarget();
+          }, BACK_TO_PANE_MS);
+          backToPane.unref();
+        }
+        mirroring = null;
+        return;
+      }
+      if (backToPane) clearTimeout(backToPane);
+      backToPane = null;
+      if (client.name === mirroring?.name && client.model === mirroring?.model) return;
+      mirroring = client;
+      void retarget();
+    },
+    onTouch: (ready, reason) => emit(scope, { type: 'log', level: 'note', message: ready ? t.pc.screen.touchOn : reason ?? t.pc.screen.touchOffWhy }),
   });
   port.on('message', (e) => {
     const message = e.data as ScreenPortCommand;
     switch (message?.type) {
       case 'ack':
-        flow.ack(true);
+        flow.ack(stream.currentCodec === 'h264');
         break;
       case 'keyframe':
         stream.requestKeyframe();
@@ -905,7 +935,9 @@ async function openPhoneScreen(streamId: string, udid: string, projectPath: stri
         break;
       case 'phone-target': {
         const parsed = phoneTargetSchema.safeParse(message);
-        if (parsed.success) void retarget(parsed.data.udid, parsed.data.projectPath);
+        if (!parsed.success) break;
+        pane = { udid: parsed.data.udid, projectPath: parsed.data.projectPath };
+        void retarget();
         break;
       }
     }

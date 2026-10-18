@@ -51,6 +51,9 @@ describe('IPC validation', () => {
     expect(inputEventSchema.safeParse({ kind: 'tap', x: 0.5, y: 0.25 }).success).toBe(true);
     expect(inputEventSchema.safeParse({ kind: 'tap', x: 1.5, y: 0.25 }).success).toBe(false);
     expect(inputEventSchema.safeParse({ kind: 'swipe', x1: 0, y1: 0, x2: 1, y2: 1, durationMs: 5 }).success).toBe(false);
+    // A long press before the drag, and a hold before the finger lifts.
+    expect(inputEventSchema.safeParse({ kind: 'swipe', x1: 0, y1: 0, x2: 1, y2: 1, durationMs: 200, pressMs: 600, holdMs: 800 }).success).toBe(true);
+    expect(inputEventSchema.safeParse({ kind: 'swipe', x1: 0, y1: 0, x2: 1, y2: 1, durationMs: 200, holdMs: -1 }).success).toBe(false);
     expect(inputEventSchema.safeParse({ kind: 'key', key: 'return' }).success).toBe(true);
     expect(inputEventSchema.safeParse({ kind: 'key', key: 'F13' }).success).toBe(false);
     expect(inputEventSchema.safeParse({ kind: 'text', text: '' }).success).toBe(false);

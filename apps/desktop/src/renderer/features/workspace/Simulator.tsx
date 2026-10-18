@@ -123,8 +123,6 @@ function phoneMirror(): PhoneMirror {
  */
 export function Screen({ mac, macLabel, target, frame, backend, projectPath }: { mac?: string; macLabel?: string; target: Target; frame: boolean; backend?: 'wsl'; projectPath?: string }) {
   const pc = backend === 'wsl';
-  // No iPhone found at this PC, only one mirroring to it: no touch to set up.
-  const mirrorOnly = pc && target.udid === MIRROR_TARGET.udid;
   const device = target.kind === 'device';
   const macRoute = useMacs((s) => (mac ? s.macs.find((m) => m.name === mac)?.route ?? null : null));
   const [targetBitrate, setTargetBitrate] = useState<number | null>(null);
@@ -354,8 +352,9 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
     if (state.kind !== 'streaming') finger.current = null;
   }, [state.kind]);
 
-  // Gestures mode (AXe): a tap or a swipe once the pointer is released.
-  const down = useRef<{ x: number; y: number; t: number } | null>(null);
+  // Gestures mode (AXe, WebDriverAgent): a tap or a swipe once the pointer is released. Where it
+  // last rested and when it moved, so a long press before a drag, and a hold at its end, come through.
+  const down = useRef<{ x: number; y: number; t: number; restX: number; restY: number; movedAt: number | null; lastMoveAt: number } | null>(null);
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 || !canInput) return;
@@ -370,10 +369,23 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
       if (two) send({ kind: 'touch2', phase: 'down', x1: p.x, y1: p.y, x2: 1 - p.x, y2: 1 - p.y });
       else send({ kind: 'touch', phase: 'down', x: p.x, y: p.y });
     } else {
-      down.current = { x: p.x, y: p.y, t: performance.now() };
+      const t = performance.now();
+      down.current = { x: p.x, y: p.y, t, restX: p.x, restY: p.y, movedAt: null, lastMoveAt: t };
     }
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    const d = down.current;
+    if (d && mode !== 'touch') {
+      const p = point(e);
+      if (Math.hypot(p.x - d.restX, p.y - d.restY) > 0.008) {
+        const now = performance.now();
+        d.movedAt ??= now;
+        d.lastMoveAt = now;
+        d.restX = p.x;
+        d.restY = p.y;
+      }
+      return;
+    }
     const f = finger.current;
     if (!f || f.id !== e.pointerId) return;
     const p = point(e);
@@ -397,13 +409,22 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
     down.current = null;
     if (!start || !canInput) return;
     const p = point(e);
-    const dt = performance.now() - start.t;
+    const now = performance.now();
+    const dt = now - start.t;
     if (Math.hypot(p.x - start.x, p.y - start.y) < 0.015) {
       ripple(p.px, p.py);
       send(dt > 500 ? { kind: 'swipe', x1: start.x, y1: start.y, x2: p.x, y2: p.y, durationMs: Math.round(Math.min(dt, 2000)) } : { kind: 'tap', x: p.x, y: p.y });
-    } else {
-      send({ kind: 'swipe', x1: start.x, y1: start.y, x2: p.x, y2: p.y, durationMs: Math.round(Math.max(80, Math.min(dt, 1500))) });
+      return;
     }
+    // Held still before moving (a long press, then a drag), or at the end (swipe up and hold).
+    const movedAt = start.movedAt ?? start.t;
+    const pressMs = movedAt - start.t > 350 ? Math.round(Math.min(movedAt - start.t, 3000)) : 0;
+    const holdMs = now - start.lastMoveAt > 300 ? Math.round(Math.min(now - start.lastMoveAt, 3000)) : 0;
+    const moving = (holdMs ? start.lastMoveAt : now) - (pressMs ? movedAt : start.t);
+    send({
+      kind: 'swipe', x1: start.x, y1: start.y, x2: p.x, y2: p.y, durationMs: Math.round(Math.max(80, Math.min(moving, 1500))),
+      ...(pressMs ? { pressMs } : {}), ...(holdMs ? { holdMs } : {}),
+    });
   };
   const onPointerCancel = () => {
     down.current = null;
@@ -501,12 +522,14 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
     post({ type: 'retry-smooth' });
   }, [post]);
   // This PC iPhone: sign and install WebDriverAgent so the screen takes taps (one Apple sign-in).
+  // For the iPhone touch is for: the one that mirrors when this PC knows it, else the pane's.
+  const phone = pc ? info?.phone ?? null : null;
   const [settingUpTouch, setSettingUpTouch] = useState(false);
   const setUpTouch = useCallback(async () => {
-    if (!projectPath) return;
+    if (!projectPath || !phone) return;
     setSettingUpTouch(true);
     try {
-      await call('iphone.setUpTouch', { projectPath, udid: target.udid });
+      await call('iphone.setUpTouch', { projectPath, udid: phone.udid });
       toast({ tone: 'success', title: t.pc.screen.touchOn });
       // Touch starts on the stream that is open: a new one could not show the picture again.
       mirrorRef.current?.refreshTouch();
@@ -516,7 +539,7 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
     } finally {
       setSettingUpTouch(false);
     }
-  }, [projectPath, target.udid]);
+  }, [projectPath, phone?.udid]);
   const restartSimulator = useCallback(async () => {
     try {
       toast({ tone: 'info', title: t.simulator.restarting(target.name), body: t.simulator.restartingBody });
@@ -560,8 +583,10 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
         : t.simulator.connectingTo(target.name);
   const streamName = codec === 'h264' ? t.simulator.streamSmooth : codec === 'jpeg' ? t.simulator.streamCompatible : t.simulator.stream;
   const overInternet = macRoute === 'direct' || macRoute === 'relay';
+  // An iPhone at this PC: its picture is mirrored, or (pictures, while nothing mirrors) comes over the cable.
+  const cablePicture = pc && codec === 'jpeg';
   const statsTip = [
-    pc && mirroring ? t.pc.screen.mirroring(mirroring) : streamName,
+    cablePicture ? t.pc.screen.overCable : pc && mirroring ? t.pc.screen.mirroring(mirroring) : streamName,
     overInternet ? t.simulator.overInternetRoute(macRoute, macRtt) : null,
     codec === 'h264' && targetBitrate ? t.simulator.upTo(formatRate(Math.round(targetBitrate / 1000))) : null,
     stats && codec === 'h264' && stats.latencyMs !== null ? t.simulator.delay(Math.round(stats.latencyMs), Math.round(stats.latencyP95Ms ?? stats.latencyMs)) : null,
@@ -569,9 +594,9 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
     stats?.inputMs != null ? t.simulator.touch(Math.round(stats.inputMs)) : null,
     codec === 'h264' && stats?.fps === 0 ? t.simulator.still : null,
   ].filter(Boolean).join(' · ');
-  const viewOnlyReason = mirrorOnly ? t.pc.screen.touchPlugIn : pc ? tidy(info?.inputReason) ?? t.pc.screen.touchOffWhy : device ? t.simulator.deviceViewOnly : tidy(info?.inputReason) ?? t.simulator.viewOnlyWhy;
-  // Another iPhone mirrors than the target: touch stays off (the engine says why), nothing to turn on.
-  const otherPhone = pc && mirroring !== null && mirroring !== target.name;
+  const viewOnlyReason = pc ? (phone ? tidy(info?.inputReason) ?? t.pc.screen.touchOffWhy : t.pc.screen.touchPlugIn) : device ? t.simulator.deviceViewOnly : tidy(info?.inputReason) ?? t.simulator.viewOnlyWhy;
+  // An iPhone this PC doesn't know mirrors: touch stays off (the engine says why), nothing to turn on.
+  const otherPhone = pc && !cablePicture && mirroring !== null && mirroring !== phone?.name;
   const inputHelp = mode === 'touch' ? t.simulator.helpTouch : t.simulator.helpBasic;
   return (
     <div className="sim">
@@ -645,10 +670,12 @@ export function Screen({ mac, macLabel, target, frame, backend, projectPath }: {
                 {t.simulator.viewOnly}
               </span>
             </Tooltip>
-            {mirrorOnly || otherPhone ? null : pc ? (
-              <Button size="sm" variant="ghost" icon="phone" busy={settingUpTouch} onClick={() => void setUpTouch()}>
-                {t.pc.screen.turnOnTouch}
-              </Button>
+            {pc ? (
+              phone && !otherPhone && (
+                <Button size="sm" variant="ghost" icon="phone" busy={settingUpTouch} onClick={() => void setUpTouch()}>
+                  {t.pc.screen.turnOnTouch}
+                </Button>
+              )
             ) : !device ? (
               <Button size="sm" variant="ghost" onClick={() => void fixAxe()}>
                 {t.simulator.installAxe}

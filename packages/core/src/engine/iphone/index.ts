@@ -6,5 +6,5 @@
  */
 export { PhoneScreen, type PhoneScreenOptions, type PhoneScreenHandlers, type PhoneWait } from './screen.js';
 export { MirrorReceiver, mirrorReceiver, receiverHome, receiverInstalled, RECEIVER_VERSION, setBundledReceiver, type MirrorClient, type ReceiverState } from './receiver.js';
-export { iphoneTouchState, iphoneTouchTarget, setUpIphoneTouch, type TouchState } from './touch.js';
+export { iphoneTouchState, iphoneTouchTarget, mirroringIphone, setUpIphoneTouch, type TouchState } from './touch.js';
 export { WDA_VERSION, forgetWdaInstall } from './wda.js';

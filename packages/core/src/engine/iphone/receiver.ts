@@ -33,6 +33,8 @@ const IDLE_STOP_MS = 10 * 60 * 1000;
 const FIREWALL_RECHECK_MS = 3000;
 /** Windows asks about a new receiver when it first listens: how long a missing rule may still be on its way. */
 const FIREWALL_ASKING_MS = 2 * 60 * 1000;
+/** How long an iPhone that connected may take to send its first picture (it takes about a second). */
+const NO_PICTURE_MS = 5000;
 
 /** The receiver Studio's installer ships (resources/mirror-receiver), once the engine said where. */
 let bundledHome: string | null = null;
@@ -87,10 +89,11 @@ export interface MirrorClient {
 
 /**
  * `waiting`: the receiver is on the network and no iPhone mirrors to it; `mirroring`: pictures come;
- * `catch-up`: an iPhone mirrors, but this screen opened too long after its keyframe to show it
- * (mirroring has to start again on the iPhone).
+ * `catch-up`: an iPhone mirrors, but this screen opened too long after its keyframe to show it;
+ * `no-picture`: an iPhone connected but sends no picture, as one does that reconnects with its old
+ * session after the receiver restarted. For both, mirroring has to start again on the iPhone.
  */
-export type ReceiverState = 'stopped' | 'starting' | 'waiting' | 'mirroring' | 'catch-up';
+export type ReceiverState = 'stopped' | 'starting' | 'waiting' | 'mirroring' | 'catch-up' | 'no-picture';
 
 export interface ReceiverListener {
   /** A config or frame message, as the Mac's helpers write them. */
@@ -141,6 +144,8 @@ export type ReceiverEvent =
 
 export function parseReceiverLine(line: string): ReceiverEvent | null {
   let m: RegExpMatchArray | null;
+  // A late heartbeat from the iPhone on a busy Wi-Fi: UxPlay calls it an error, but mirroring goes on.
+  if (/since last client feedback request/.test(line)) return null;
   if (/register_dnssd: advertised/.test(line)) return { t: 'ready' };
   if ((m = /connection request from (.+) \((.+)\) with deviceID = (\S+)/.exec(line))) return { t: 'client', client: { name: m[1]!.trim(), model: m[2]!.trim(), deviceId: m[3]!.trim() } };
   if ((m = /Open connections: (\d+)/.exec(line))) return { t: 'connections', count: Number(m[1]) };
@@ -180,6 +185,9 @@ export class MirrorReceiver {
   private catchUpLost = false;
   private idleTimer: NodeJS.Timeout | null = null;
   private firewallTimer: NodeJS.Timeout | null = null;
+  /** Checks that an iPhone that connected sends its picture, and when the last picture came. */
+  private pictureTimer: NodeJS.Timeout | null = null;
+  private pictureAt = 0;
   private starting: Promise<void> | null = null;
   private restarts = 0;
   private readonly recent: string[] = [];
@@ -307,11 +315,13 @@ export class MirrorReceiver {
         // An iPhone got through, whatever the firewall's rules said a moment ago.
         if (this.firewallBlocked) this.setFirewall(false);
         this.log('info', `${event.client.name} (${event.client.model}) is mirroring to this PC.`);
+        this.expectPicture();
         break;
       case 'connections':
         if (event.count === 0) {
           // The iPhone stopped mirroring: what was kept belongs to that session.
           this.client = null;
+          this.stopExpectingPicture();
           this.resetStream();
           if (this.state !== 'stopped' && this.state !== 'starting') this.setState('waiting');
         }
@@ -329,6 +339,7 @@ export class MirrorReceiver {
       for (const message of this.messages.push(unit, Date.now() * 1000)) {
         const header = parseStreamHeader(message)!;
         if (header.type !== STREAM_CONFIG) this.keep(message, header.key);
+        this.pictureAt = Date.now();
         if (this.state !== 'mirroring') this.setState('mirroring');
         for (const listener of this.listeners) listener.onVideo({ data: message, header });
       }
@@ -352,6 +363,26 @@ export class MirrorReceiver {
     }
   }
 
+  /**
+   * An iPhone that reconnects to a new receiver with its old session (Studio restarted while it
+   * mirrored) keeps its connections open but sends no picture until mirroring starts again on it.
+   * Opening the Screen Mirroring list doesn't connect: UxPlay names an iPhone only when it starts.
+   */
+  private expectPicture(): void {
+    this.stopExpectingPicture();
+    const since = Date.now();
+    this.pictureTimer = setTimeout(() => {
+      this.pictureTimer = null;
+      if (this.client && this.pictureAt < since && this.state !== 'stopped' && this.state !== 'starting') this.setState('no-picture');
+    }, NO_PICTURE_MS);
+    this.pictureTimer.unref();
+  }
+
+  private stopExpectingPicture(): void {
+    if (this.pictureTimer) clearTimeout(this.pictureTimer);
+    this.pictureTimer = null;
+  }
+
   private resetStream(): void {
     this.depacketizer.reset();
     this.messages = new H264Messages();
@@ -364,6 +395,7 @@ export class MirrorReceiver {
     if (this.child !== child) return;
     this.child = null;
     this.stopFirewallChecks();
+    this.stopExpectingPicture();
     this.socket?.close();
     this.socket = null;
     this.client = null;
@@ -385,6 +417,7 @@ export class MirrorReceiver {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = null;
     this.stopFirewallChecks();
+    this.stopExpectingPicture();
     this.setState('stopped');
     const child = this.child;
     this.child = null;

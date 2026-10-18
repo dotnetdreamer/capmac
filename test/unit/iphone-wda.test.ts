@@ -56,10 +56,12 @@ describe('touch through WebDriverAgent', () => {
       { type: 'pause', duration: 1200 },
       { type: 'pointerUp', button: 0 },
     ]));
+    // Along a point on the way: iOS's edge gestures ignore a finger that jumps.
     expect(wda.requests[2]!.body).toEqual(finger([
       { type: 'pointerMove', duration: 0, x: 319, y: 334 },
       { type: 'pointerDown', button: 0 },
-      { type: 'pointerMove', duration: 120, x: 56, y: 334 },
+      { type: 'pointerMove', duration: 60, x: 188, y: 334 },
+      { type: 'pointerMove', duration: 60, x: 56, y: 334 },
       { type: 'pointerUp', button: 0 },
     ]));
   });
@@ -70,7 +72,19 @@ describe('touch through WebDriverAgent', () => {
     await touch.drag(0, 0, 1, 1, 9);
     await touch.hold(0.5, 0.5, 60);
     const moves = (i: number) => (wda.requests[i]!.body as { actions: Array<{ actions: Array<{ type: string; duration?: number }> }> }).actions[0]!.actions;
-    expect(moves(0)[2]).toMatchObject({ type: 'pointerMove', duration: 1500 });
+    const moving = moves(0).filter((m) => m.type === 'pointerMove').reduce((total, m) => total + (m.duration ?? 0), 0);
+    expect(moving).toBe(1500);
     expect(moves(1)[2]).toEqual({ type: 'pause', duration: 10_000 });
+  });
+
+  it('presses the Home button for real, which also closes Control Center', async () => {
+    const wda = await fakeWda();
+    const touch = control(wda.port);
+    await touch.button('home');
+    await touch.button('lock');
+    expect(wda.requests.map((r) => `${r.method} ${r.url} ${JSON.stringify(r.body ?? null)}`)).toEqual([
+      'POST /session/S1/wda/pressButton {"name":"home"}',
+      'POST /wda/lock null',
+    ]);
   });
 });

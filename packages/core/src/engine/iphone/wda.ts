@@ -1,12 +1,16 @@
 /**
- * Touch for an iPhone plugged into this PC, through WebDriverAgent (Appium's, BSD licence): an
- * XCTest runner that CapMac signs with the developer's team and installs once, then starts from
- * here (wda-runner.py, CapMac's Python). Taps, swipes, keys and buttons go to it as HTTP requests
- * through a port the runner forwards over the cable. XCTest needs Developer Mode on the iPhone.
+ * Touch for an iPhone at this PC, through WebDriverAgent (Appium's, BSD licence): an XCTest runner
+ * that CapMac signs with the developer's team and installs once, then starts from here
+ * (wda-runner.py, CapMac's Python). Taps, swipes, keys and buttons go to it as HTTP requests through
+ * a port the runner forwards: over the cable, or over Wi-Fi through the no-admin tunnel (an iPhone
+ * paired for Wi-Fi, iOS 17 and later). XCTest needs Developer Mode on the iPhone.
  *
  * WebDriverAgent plays a whole gesture once it is known, so a drag reaches the iPhone when the
  * pointer is released (the pane's gestures mode), and XCTest's wait for the app to settle is
  * turned off so a tap goes straight through.
+ *
+ * WebDriverAgent also streams the screen (MJPEG): over the cable that is the iPhone's picture
+ * without mirroring (watchScreen).
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -17,7 +21,8 @@ import path from 'node:path';
 import { CancelledError, UserError } from '../errors.js';
 import { trackChild } from '../../agent/proc.js';
 import { hostRun } from '../wsl/bootstrap.js';
-import { deviceHelperCommand, installWslApp, mountWslDeveloperImage, type WslDevice, type WslDeviceOptions } from '../wsl/device.js';
+import { deviceHelperCommand, installWslApp, mountWslDeveloperImage, OVER_WIFI, type WslDevice, type WslDeviceOptions } from '../wsl/device.js';
+import { MjpegParser } from './mjpeg.js';
 import runnerScript from './wda-runner.py';
 
 export const WDA_VERSION = '16.15.3';
@@ -26,6 +31,15 @@ const WDA_SHA256 = '2176793538d902f6b1e61291e9997f68d306541f222ea715d256a7c6ce9d
 const RUNNER_APP = 'WebDriverAgentRunner-Runner.app';
 /** WebDriverAgent's HTTP port on the iPhone. */
 const WDA_PORT = 8100;
+/** WebDriverAgent's screen stream (MJPEG) on the iPhone. */
+const WDA_SCREEN_PORT = 9100;
+
+/**
+ * The screen stream's settings. Measured on an iPhone 8 over the cable: 28 frames a second at the
+ * screen's own size (the most it asks for is 30), about 100 KB each, the first after 50–150 ms; taps
+ * were no slower with it on. Scaling it down made the frames bigger, not quicker.
+ */
+const SCREEN_STREAM = { mjpegServerFramerate: 30, mjpegScalingFactor: 100, mjpegServerScreenshotQuality: 50 };
 
 /** CapMac's folder for WebDriverAgent: the download, and each team's signed copy. */
 export function wdaHome(): string {
@@ -172,8 +186,59 @@ function wdaError(reply: WdaReply): string {
   return typeof value?.message === 'string' ? value.message : typeof value?.error === 'string' ? value.error : `HTTP ${reply.status}`;
 }
 
+/**
+ * How near an edge (a part of the screen) a swipe that moves away from it starts on the edge. XCTest's
+ * fingers open Control Center only from the last few points: on an iPhone 8, 6 points in did and 10
+ * didn't, and going back a page needed the very edge.
+ */
+const EDGE = 0.03;
+
+/**
+ * A swipe as one finger's W3C actions: down where it starts, a few points along the line, up where
+ * it ends, as fast as the pointer moved. iOS's edge gestures ignore a finger that jumps from start to
+ * end: on an iPhone 8, one move opened Control Center 0 times out of 6 and never went back a page,
+ * while two moves did every time (each point costs about 0.17 s there, so a quick swipe gets two and
+ * a slow drag up to six). A swipe that starts near the edge it moves away from starts on that edge,
+ * as a finger off the bezel does. `x`/`y` are 0..1 from the top left; `size` is the screen in points.
+ * `pressMs`: the finger rests before it moves (a long press, then a drag); `holdMs`: it rests at the
+ * end before it lifts (swipe up and hold for the app switcher).
+ */
+export function swipeMoves(
+  x1: number, y1: number, x2: number, y2: number, seconds: number, size: { width: number; height: number },
+  { pressMs = 0, holdMs = 0 }: { pressMs?: number; holdMs?: number } = {},
+): unknown[] {
+  const clamp = (v: number) => Math.min(1, Math.max(0, v));
+  [x1, y1, x2, y2] = [clamp(x1), clamp(y1), clamp(x2), clamp(y2)];
+  const snap = (start: number, end: number) => (start < EDGE && end > start ? 0 : start > 1 - EDGE && end < start ? 1 : start);
+  if (Math.abs(y2 - y1) >= Math.abs(x2 - x1)) y1 = snap(y1, y2);
+  else x1 = snap(x1, x2);
+  const moving = Math.round(Math.min(1.5, Math.max(0.05, seconds)) * 1000);
+  const count = Math.min(6, Math.max(2, Math.round(moving / 150)));
+  const at = (x: number, y: number) => ({ x: Math.round(x * size.width), y: Math.round(y * size.height) });
+  const rest = (ms: number) => Math.round(Math.min(5000, Math.max(0, ms)));
+  const moves: unknown[] = [{ type: 'pointerMove', duration: 0, ...at(x1, y1) }, { type: 'pointerDown', button: 0 }];
+  if (rest(pressMs)) moves.push({ type: 'pause', duration: rest(pressMs) });
+  for (let i = 1; i <= count; i++) {
+    const point = i === count ? at(x2, y2) : at(x1 + ((x2 - x1) * i) / count, y1 + ((y2 - y1) * i) / count);
+    moves.push({ type: 'pointerMove', duration: Math.round(moving / count), ...point });
+  }
+  if (rest(holdMs)) moves.push({ type: 'pause', duration: rest(holdMs) });
+  moves.push({ type: 'pointerUp', button: 0 });
+  return moves;
+}
+
 /** What the runner helper says: the forwarded port, or why it stopped. */
 export type WdaRunnerEvent = { t: 'port'; port: number } | { t: 'ended'; reason: string } | { t: 'log'; line: string };
+
+/**
+ * WebDriverAgent did not start. `retry`: starting it again later can work (the iPhone was away or
+ * locked, or a setting on it is being changed); false: it has to be put on the iPhone again first.
+ */
+export class WdaStartError extends UserError {
+  constructor(message: string, hint: string, details: string[], readonly retry: boolean) {
+    super(message, hint, details);
+  }
+}
 
 /**
  * WebDriverAgent running on one iPhone: the runner helper, a session, and the gestures. Points
@@ -182,6 +247,8 @@ export type WdaRunnerEvent = { t: 'port'; port: number } | { t: 'ended'; reason:
 export class WdaControl {
   private child: ChildProcess | null = null;
   private port = 0;
+  /** The local end of WebDriverAgent's screen stream (0: the runner forwards none). */
+  private screenPort = 0;
   private session: string | null = null;
   private size: { width: number; height: number } | null = null;
   private readonly agent = new http.Agent({ keepAlive: true, maxSockets: 4 });
@@ -197,12 +264,16 @@ export class WdaControl {
   /** Mounts the developer services, starts the runner, and opens a session with XCTest's waits off. */
   async start(): Promise<void> {
     const { device } = this;
-    if (!device.productVersion) throw new UserError('The iPhone’s iOS version is not known yet.', 'Unplug the iPhone and plug it in again.');
-    await mountWslDeveloperImage(device, this.options);
+    const wifi = device.connection === 'network';
+    // On the cable the iOS version decides how the test daemon is reached; over Wi-Fi it's always the tunnel.
+    if (!wifi && !device.productVersion) throw new UserError('The iPhone’s iOS version is not known yet.', 'Unplug the iPhone and plug it in again.');
+    // Over Wi-Fi the runner mounts them through its own tunnel: finding the iPhone once is enough.
+    if (!wifi) await mountWslDeveloperImage(device, this.options);
     const python = await deviceHelperCommand(this.options, device.udid);
     // During screen capture, reach the iPhone through CapMac's own usbmux (Apple's is down then).
     const env = this.options.usbmuxAddress ? { ...python.env, USBMUXD_SOCKET_ADDRESS: this.options.usbmuxAddress } : python.env;
-    const child = spawn(python.executable, [...python.prefix, '-c', runnerScript, device.udid, device.productVersion, this.bundleId, String(WDA_PORT)], {
+    const args = [device.udid, device.productVersion ?? '', this.bundleId, String(WDA_PORT), wifi ? 'wifi' : 'usb', String(WDA_SCREEN_PORT)];
+    const child = spawn(python.executable, [...python.prefix, '-c', `${OVER_WIFI}${runnerScript}`, ...args], {
       env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     });
     trackChild(child);
@@ -221,17 +292,23 @@ export class WdaControl {
         const lines = buffer.split(/\r?\n/);
         buffer = lines.pop() ?? '';
         for (const line of lines) {
-          const port = /^CAPMAC_PORT (\d+)$/.exec(line)?.[1];
+          const ports = /^CAPMAC_PORT (\d+)(?: (\d+))?$/.exec(line);
           const ended = /^CAPMAC_ENDED (.*)$/.exec(line)?.[1];
-          if (port) resolve(Number(port));
-          else if (ended !== undefined) this.ended(ended);
+          if (ports) {
+            this.screenPort = Number(ports[2] ?? 0);
+            resolve(Number(ports[1]));
+          } else if (ended !== undefined) this.ended(ended);
+          // A Wi-Fi iPhone that is asleep or locked: the runner waits for it.
+          else if (line === 'CAPMAC_LOCKED') this.options.onLocked?.();
           else if (line.trim()) this.options.onLog?.(line);
         }
       });
       child.once('exit', (code) => {
         this.options.signal?.removeEventListener('abort', onAbort);
-        if (!this.port) reject(new UserError('WebDriverAgent did not start on the iPhone.', this.startHint(), this.stderr.slice(-12)));
-        else this.ended(code ? `the runner stopped (exit ${code})` : 'the runner stopped');
+        if (!this.port) {
+          const { hint, retry } = this.startHint();
+          reject(new WdaStartError('WebDriverAgent did not start on the iPhone.', hint, this.stderr.slice(-12), retry));
+        } else this.ended(code ? `the runner stopped (exit ${code})` : 'the runner stopped');
       });
       child.once('error', (error) => reject(new UserError('Could not start the iPhone tools.', String(error))));
     });
@@ -241,22 +318,28 @@ export class WdaControl {
     const sessionId = created.sessionId ?? (created.value as { sessionId?: string } | null)?.sessionId;
     if (!sessionId) throw new UserError('WebDriverAgent did not open a session.', wdaError(created));
     this.session = sessionId;
-    await this.request('POST', `/session/${sessionId}/appium/settings`, { settings: { waitForIdleTimeout: 0, animationCoolOffTimeout: 0 } }).catch(() => undefined);
+    await this.request('POST', `/session/${sessionId}/appium/settings`, { settings: { waitForIdleTimeout: 0, animationCoolOffTimeout: 0, ...SCREEN_STREAM } }).catch(() => undefined);
     await this.refreshSize();
   }
 
-  private startHint(): string {
+  private startHint(): { hint: string; retry: boolean } {
     const text = this.stderr.join('\n');
-    if (/AppNotInstalled|No app with bundle id/i.test(text)) return 'WebDriverAgent is not on the iPhone any more. Turn touch on again to put it back.';
-    if (/DeveloperMode|developer mode/i.test(text)) return 'Turn on Developer Mode on the iPhone.';
-    if (/Locked|passcode/i.test(text)) return 'Unlock the iPhone, then try again.';
-    if (/untrusted|not trusted|0xe8008018|Verify|valid/i.test(text)) return 'On the iPhone, open Settings › General › VPN & Device Management and trust your developer app, then try again.';
-    return 'Unlock the iPhone and keep it plugged in, then try again.';
+    const wifi = this.device.connection === 'network';
+    if (/AppNotInstalled|No app with bundle id/i.test(text)) return { hint: 'WebDriverAgent is not on the iPhone any more. Turn touch on again to put it back.', retry: false };
+    if (/DeveloperMode|developer mode/i.test(text)) return { hint: 'Turn on Developer Mode on the iPhone.', retry: true };
+    // With a passcode set, the iPhone asks for it before XCTest may take over its screen (now and then).
+    if (/automation mode|UI Automation/i.test(text)) return { hint: 'Your iPhone asks for its passcode before touch can start: enter it on the iPhone. If it doesn’t ask, open Settings, tap Developer, then turn on Enable UI Automation.', retry: true };
+    if (/Locked|passcode/i.test(text)) return { hint: 'Unlock the iPhone, then try again.', retry: true };
+    // Not just "verify": the Wi-Fi tunnel's own log lines talk about its pair verification.
+    if (/untrusted|not trusted|0xe8008018|Unable to Verify|no longer valid|invalid code signature/i.test(text)) return { hint: 'On the iPhone, open Settings › General › VPN & Device Management and trust your developer app, then try again.', retry: true };
+    return { hint: wifi ? 'Unlock the iPhone and keep it on this Wi-Fi, then try again.' : 'Unlock the iPhone and keep it plugged in, then try again.', retry: true };
   }
 
   private ended(reason: string): void {
     const wasReady = this.session !== null;
     this.session = null;
+    // A runner that ended waits for its stdin to close before it exits.
+    this.child?.stdin?.end();
     if (!this.stopped && wasReady) this.options.onEnded?.(reason);
   }
 
@@ -281,7 +364,7 @@ export class WdaControl {
 
   /**
    * One finger's raw events (W3C actions). XCTest plays them faster than WebDriverAgent's own tap
-   * and drag calls: on an iPhone 8 a swipe took 0.8–1.2 s instead of 1.4–2 s, a tap 0.6 s instead of 0.9 s.
+   * and drag calls: on an iPhone 8 a tap took 0.6 s instead of 0.9 s.
    */
   private finger(moves: unknown[]): Promise<void> {
     return this.expectOk(this.request('POST', this.sessionPath('/actions'), { actions: [{ type: 'pointer', id: 'finger1', parameters: { pointerType: 'touch' }, actions: moves }] }));
@@ -298,15 +381,9 @@ export class WdaControl {
     await this.finger([{ type: 'pointerMove', duration: 0, ...this.points(x, y) }, { type: 'pointerDown', button: 0 }, { type: 'pause', duration: held }, { type: 'pointerUp', button: 0 }]);
   }
 
-  /** A swipe or drag, as fast as the pointer moved. */
-  async drag(x1: number, y1: number, x2: number, y2: number, seconds: number): Promise<void> {
-    const moving = Math.round(Math.min(1.5, Math.max(0.05, seconds)) * 1000);
-    await this.finger([
-      { type: 'pointerMove', duration: 0, ...this.points(x1, y1) },
-      { type: 'pointerDown', button: 0 },
-      { type: 'pointerMove', duration: moving, ...this.points(x2, y2) },
-      { type: 'pointerUp', button: 0 },
-    ]);
+  /** A swipe or drag, as fast as the pointer moved, with the rests it made (see swipeMoves). */
+  async drag(x1: number, y1: number, x2: number, y2: number, seconds: number, rests: { pressMs?: number; holdMs?: number } = {}): Promise<void> {
+    await this.finger(swipeMoves(x1, y1, x2, y2, seconds, this.size ?? { width: 390, height: 844 }, rests));
   }
 
   /** Types text into whatever has the keyboard focus on the iPhone (any characters). */
@@ -315,10 +392,13 @@ export class WdaControl {
     await this.expectOk(this.request('POST', this.sessionPath('/wda/keys'), { value: [...text] }));
   }
 
-  /** The Home button, and the side button (lock). */
+  /**
+   * The Home button, pressed for real: WebDriverAgent's own "home screen" only brings the home
+   * screen forward, which leaves Control Center or Notification Center open over it. And the side
+   * button (lock).
+   */
   async button(name: 'home' | 'lock' | 'volumeup' | 'volumedown' | 'action'): Promise<void> {
-    if (name === 'home') await this.expectOk(this.request('POST', '/wda/homescreen'));
-    else if (name === 'lock') await this.expectOk(this.request('POST', '/wda/lock'));
+    if (name === 'lock') await this.expectOk(this.request('POST', '/wda/lock'));
     else await this.expectOk(this.request('POST', this.sessionPath('/wda/pressButton'), { name }));
   }
 
@@ -327,6 +407,59 @@ export class WdaControl {
     const reply = await this.request('GET', '/screenshot');
     if (typeof reply.value !== 'string') throw new UserError('WebDriverAgent did not send the picture.', wdaError(reply));
     return Buffer.from(reply.value, 'base64');
+  }
+
+  /** The screen in points, as last measured (null before the session). */
+  get screenSize(): { width: number; height: number } | null {
+    return this.size;
+  }
+
+  /** Whether the runner forwards the screen stream. */
+  get canWatchScreen(): boolean {
+    return this.screenPort > 0 && this.session !== null;
+  }
+
+  /**
+   * The screen as WebDriverAgent streams it: each new picture as a JPEG (a picture that didn't
+   * change is not sent again), until the returned function stops it or the stream ends (`onEnd`,
+   * not called after a stop). About 3 MB a second: for the cable.
+   */
+  watchScreen(onJpeg: (jpeg: Buffer) => void, onEnd: (reason: string) => void): () => void {
+    let done = false;
+    const end = (reason: string) => {
+      if (done) return;
+      done = true;
+      onEnd(reason);
+    };
+    if (!this.canWatchScreen) {
+      queueMicrotask(() => end('touch is not on'));
+      return () => void (done = true);
+    }
+    const parser = new MjpegParser();
+    let last: Buffer | null = null;
+    const req = http.get({ host: '127.0.0.1', port: this.screenPort, path: '/', agent: false }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        end(`the screen stream answered HTTP ${res.statusCode}`);
+        return;
+      }
+      res.on('data', (chunk: Buffer) => {
+        if (done) return;
+        for (const jpeg of parser.push(chunk)) {
+          // WebDriverAgent sends the same picture again and again while the screen stands still.
+          if (last?.equals(jpeg)) continue;
+          last = jpeg;
+          onJpeg(jpeg);
+        }
+      });
+      res.on('end', () => end('the screen stream ended'));
+      res.on('error', (error) => end(error.message));
+    });
+    req.on('error', (error) => end(error.message));
+    return () => {
+      done = true;
+      req.destroy();
+    };
   }
 
   private async expectOk(pending: Promise<WdaReply>): Promise<void> {

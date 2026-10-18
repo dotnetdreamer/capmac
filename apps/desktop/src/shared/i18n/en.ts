@@ -1383,7 +1383,7 @@ export const en = {
     },
     /** An iPhone that doesn't trust this PC yet. */
     trust: { title: 'Trust this PC', body: 'Unlock your iPhone and tap Trust when it asks' },
-    /** The live iPhone screen at this PC, mirrored over Wi-Fi (no Mac). */
+    /** The live iPhone screen at this PC, mirrored over Wi-Fi or over the cable (no Mac). */
     screen: {
       mirrorTitle: 'Mirror your iPhone here',
       mirrorBody: (name: string) => `On your iPhone, open Control Center, tap Screen Mirroring, then choose ${name}. Your iPhone needs to be on the same Wi-Fi as this PC`,
@@ -1392,10 +1392,12 @@ export const en = {
       firewallTitle: 'Windows Firewall is blocking the screen receiver',
       firewallBody: 'If Windows asks about uxplay.exe, click Allow. If it doesn’t, open Windows Security, go to Firewall & network protection, choose Allow an app through firewall, then tick uxplay.exe for this network',
       mirroring: (name: string) => `${name} is mirroring`,
+      /** The picture comes over the USB cable while nothing mirrors. */
+      overCable: 'Picture over the cable',
       /** The footer while no picture comes. */
       waiting: 'Waiting for your iPhone',
       blocked: 'Blocked by Windows Firewall',
-      touchPlugIn: 'To tap and type from here, plug in your iPhone with a cable, then turn on touch',
+      touchPlugIn: 'To tap and type from here, plug your iPhone into this PC once with a cable, then turn on touch',
       turnOnTouch: 'Turn on touch',
       touchOn: 'Touch is on for this iPhone',
       touchFailed: 'Couldn’t turn on touch',

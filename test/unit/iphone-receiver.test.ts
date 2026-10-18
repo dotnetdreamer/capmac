@@ -35,6 +35,8 @@ describe('the screen-mirroring receiver', () => {
     expect(parseReceiverLine(lines.streaming)).toEqual({ t: 'streaming' });
     expect(parseReceiverLine(lines.missing)).toEqual({ t: 'error', message: 'The screen receiver is missing its libav part.' });
     expect(parseReceiverLine('POST /feedback RTSP/1.0')).toBeNull();
+    // A late heartbeat on a busy Wi-Fi is no error: mirroring goes on.
+    expect(parseReceiverLine('*** ERROR: 3 seconds since last client feedback request (expected every two seconds); client may be offline')).toBeNull();
   });
 
   it('forwards video to a loopback port, decoding and playing nothing', () => {
@@ -87,6 +89,39 @@ describe('the screen-mirroring receiver', () => {
     internals.catchUpListener(late.listener);
     expect(late.states).toEqual(['catch-up']);
     expect(late.types).toEqual([]);
+  });
+
+  it('asks for mirroring to start again when an iPhone connected but sends no picture', async () => {
+    vi.useFakeTimers();
+    try {
+      const receiver = new MirrorReceiver({ name: 'CapMac', home: 'C:\\nowhere' });
+      const internals = receiver as unknown as { onLine(line: string): void; onPacket(packet: Buffer): void; state: ReceiverState };
+      internals.state = 'waiting';
+      const pane = listen();
+      receiver.subscribe({ ...pane.listener, onLog: () => undefined });
+      // An iPhone that mirrors as usual: its picture comes within a second.
+      internals.onLine(lines.client);
+      await vi.advanceTimersByTimeAsync(800);
+      for (const packet of rtpPackets()) internals.onPacket(packet);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(receiver.state).toBe('mirroring');
+      internals.onLine(lines.closed);
+
+      // One that came back to a restarted receiver with its old session: connected, and nothing comes.
+      internals.onLine(lines.client);
+      internals.onLine(lines.open);
+      await vi.advanceTimersByTimeAsync(4900);
+      expect(receiver.state).toBe('waiting');
+      await vi.advanceTimersByTimeAsync(100);
+      expect(receiver.state).toBe('no-picture');
+      expect(pane.states.at(-1)).toBe('no-picture');
+      // Mirroring started again on the iPhone: the picture comes.
+      for (const packet of rtpPackets()) internals.onPacket(packet);
+      expect(receiver.state).toBe('mirroring');
+      receiver.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('stops at once when its last screen was closed for good, and keeps going a while for a reloaded window', () => {
