@@ -330,8 +330,11 @@ jobs:
           RELEASE_TAG: ${{ needs.release.outputs.tag }}
         run: gh workflow run npm.yml --repo "$GITHUB_REPOSITORY" --ref "$RELEASE_TAG"
 
+  # The Marketplace hasn't turned trusted publishing on for every publisher yet ("Trusted Publishing
+  # is not supported" for capmac on 2026-10-18). Set CAPMAC_MARKETPLACE_PUBLISH to true once its policy exists.
   vscode:
     needs: [version, release]
+    if: vars.CAPMAC_MARKETPLACE_PUBLISH == 'true'
     runs-on: ubuntu-latest
     permissions:
       id-token: write
