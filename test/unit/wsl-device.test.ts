@@ -6,7 +6,7 @@ import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CancelledError } from '../../packages/core/src/engine/errors.js';
 import {
-  ensureWslWifiPairing, inspectWslDeviceTools, installWslApp, LAUNCH_APP, launchWslApp, listWslDevices, selectWslDevice,
+  ensureWslWifiPairing, inspectWslDeviceTools, installWslApp, LAUNCH_APP, launchWslApp, listWslDevices, mountWslDeveloperImage, selectWslDevice,
   stopWslApp, streamWslDeviceLogs, USB_IPHONES, waitForDeveloperMode, WIFI_COMMAND, WIFI_IPHONES, wslDeviceTarget,
 } from '../../packages/core/src/engine/wsl/device.js';
 
@@ -213,6 +213,32 @@ describe('install and launch', () => {
     expect(commands()[1]?.args.slice(3)).toEqual(['developer', 'core-device', 'launch-application', '--tunnel', udid, 'com.example.app']);
     await launchWslApp('com.example.app', { ...device, productVersion: '16.7' }, options);
     expect(commands()[3]?.args.slice(3)).toEqual(['developer', 'dvt', 'launch', '--udid', udid, 'com.example.app']);
+  });
+
+  it('mounts the developer image once a locked iPhone is unlocked, says so once, and Stop ends the wait', async () => {
+    // A restarted iPhone is locked and has no developer image: it refuses the image (the end of what
+    // the tools printed on a real one).
+    const locked = { code: 1, stderr: [
+      '| > 222             raise PyMobileDevice3Exception(f"command ReceiveBytes     |',
+      '|       failed with: {result}")                                               |',
+      '+-----------------------------------------------------------------------------+',
+      "PyMobileDevice3Exception: command ReceiveBytes failed with: {'Error': ",
+      "'DeviceLocked'}",
+    ].join('\r\n') + '\r\n' };
+    const onLocked = vi.fn();
+    const onLog = vi.fn();
+    boundary.replies.push(locked, locked, { stderr: 'INFO DeveloperDiskImage mounted successfully\n' });
+    await mountWslDeveloperImage(device, { ...options, onLocked, onLog }, 1);
+    expect(commands().map((call) => call.args.slice(3))).toEqual(Array(3).fill(['mounter', 'auto-mount', '--udid', udid]));
+    expect(onLocked).toHaveBeenCalledOnce();
+    // The refused tries' tracebacks stay out of the log.
+    expect(onLog.mock.calls.map(([line]) => line)).toEqual(['INFO DeveloperDiskImage mounted successfully']);
+    const stop = new AbortController();
+    boundary.replies.push(locked);
+    const waiting = mountWslDeveloperImage(device, { ...options, signal: stop.signal }, 60_000);
+    await vi.waitFor(() => expect(commands()).toHaveLength(4));
+    stop.abort();
+    await expect(waiting).rejects.toBeInstanceOf(CancelledError);
   });
 
   it('does not report launch success or attempt launch when developer image mounting fails', async () => {

@@ -560,17 +560,43 @@ asyncio.run(main(*sys.argv[1:]))
 /** The process each launch opened, so a run can stop its app over Wi-Fi. */
 const launchedProcesses = new Map<string, number>();
 
+/** The developer image mounter's answer for a locked iPhone. */
+const DEVICE_LOCKED = /\bDeviceLocked\b/;
+
+/**
+ * Mounts the developer services (Apple's developer disk image) that opening apps and running tests
+ * need; needs Developer Mode. An image already mounted stays, whoever mounted it (a Mac's Xcode
+ * mounts its own). A locked iPhone refuses the mount, and one that just restarted is locked with no
+ * image: this says so once (`onLocked`) and mounts it as soon as the iPhone is unlocked (Stop ends
+ * the wait).
+ */
+export async function mountWslDeveloperImage(device: WslDevice, options: WslDeviceOptions = {}, everyMs = 3_000): Promise<void> {
+  validateUdid(device.udid);
+  const wifi = device.connection === 'network';
+  for (let tries = 0; ; tries++) {
+    // A try the locked iPhone refused tells nothing new: only the last try's lines are logged.
+    const lines: string[] = [];
+    let failure: unknown;
+    try {
+      await runDevice(['mounter', 'auto-mount', ...reach(device), '--udid', device.udid], { ...options, onLog: (line) => lines.push(line) }, { udid: device.udid, timeoutMs: wifi ? 600_000 : 180_000, wifi });
+    } catch (error) {
+      failure = error;
+    }
+    if (!(failure instanceof UserError && DEVICE_LOCKED.test((failure.details ?? []).join('\n')))) {
+      for (const line of lines) options.onLog?.(line);
+      if (failure !== undefined) throw failure;
+      return;
+    }
+    if (tries === 0) options.onLocked?.();
+    await wait(everyMs, options.signal);
+    cancelled(options.signal);
+  }
+}
+
 /**
  * Mounts developer services and waits for a confirmed launch; there is no manual-open success fallback.
  * `onLocked`: the iPhone is locked, and the app opens once it is unlocked (Stop ends the wait).
  */
-/** Mounts the developer services (Apple's developer disk image) that launching apps and tests needs; needs Developer Mode. */
-export async function mountWslDeveloperImage(device: WslDevice, options: WslDeviceOptions = {}): Promise<void> {
-  validateUdid(device.udid);
-  const wifi = device.connection === 'network';
-  await runDevice(['mounter', 'auto-mount', ...reach(device), '--udid', device.udid], options, { udid: device.udid, timeoutMs: wifi ? 600_000 : 180_000, wifi });
-}
-
 export async function launchWslApp(bundleId: string, device: WslDevice, options: WslDeviceOptions & { args?: string[] } = {}): Promise<void> {
   validateUdid(device.udid);
   validateBundleId(bundleId);

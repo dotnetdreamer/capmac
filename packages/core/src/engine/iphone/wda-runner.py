@@ -9,15 +9,16 @@
 # WebDriverAgent listens only where CapMac reaches it (USE_IP): on the iPhone itself for the cable, on
 # the tunnel's address for Wi-Fi. Left alone it takes taps from, and streams its screen to, anyone on
 # the same Wi-Fi.
-# Prints CAPMAC_PORT <port> <screen port> once WebDriverAgent answers, CAPMAC_LOCKED while a Wi-Fi
-# iPhone is away (locked or asleep), and CAPMAC_ENDED <reason> when the runner stops. Runs until stdin
-# closes (CapMac stops it), then stops the runner. Run with CapMac's own Python (pymobiledevice3 11.32).
+# Prints CAPMAC_PORT <port> <screen port> once WebDriverAgent answers, CAPMAC_LOCKED while it waits
+# for a Wi-Fi iPhone (away and asleep, or locked so it refuses the developer image), and
+# CAPMAC_ENDED <reason> when the runner stops. Runs until stdin closes (CapMac stops it), then stops
+# the runner. Run with CapMac's own Python (pymobiledevice3 11.32).
 import asyncio
 import ipaddress
 import sys
 
 from pymobiledevice3 import usbmux
-from pymobiledevice3.exceptions import AlreadyMountedError
+from pymobiledevice3.exceptions import AlreadyMountedError, PyMobileDevice3Exception
 from pymobiledevice3.lockdown import create_using_usbmux
 from pymobiledevice3.remote import userspace_tunnel
 from pymobiledevice3.services.dvt.testmanaged.xcuitest import TestConfig, XCUITestListener, XCUITestService
@@ -26,6 +27,27 @@ from pymobiledevice3.services.mobile_image_mounter import auto_mount
 
 def say(*words):
     print(*words, flush=True)
+
+
+async def mount(provider):
+    """The developer services over the Wi-Fi tunnel, as CapMac mounts them over the cable (device.ts
+    mountWslDeveloperImage): an image already there stays, and a locked iPhone, which refuses the mount
+    (DeviceLocked), is waited for."""
+    told = False
+    while True:
+        try:
+            await auto_mount(provider)
+            return
+        except AlreadyMountedError:
+            return
+        except PyMobileDevice3Exception as error:
+            if 'DeviceLocked' not in str(error):
+                raise
+        if not told:
+            say('CAPMAC_LOCKED')
+            told = True
+        # Each try sends the whole image again.
+        await asyncio.sleep(10)
 
 
 class Takeover(XCUITestListener):
@@ -143,10 +165,7 @@ async def main(udid, version, runner, port, transport, screen_port='9100'):
     provider, tunnel = await provider_for(udid, version, wifi)
     try:
         if wifi:
-            try:
-                await auto_mount(provider)
-            except AlreadyMountedError:
-                pass
+            await mount(provider)
         config = await TestConfig.create_for(provider, runner_bundle_id=runner)
         # usbmux connections arrive on the iPhone's IPv4 loopback ("localhost" left it unreachable).
         config.runner_app_env = {'USE_IP': tunnel_address(provider) if wifi else '127.0.0.1'}
