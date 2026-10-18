@@ -1,24 +1,30 @@
 /**
- * The live screen tab: an iOS simulator, an iPhone plugged into the Mac, or
- * an app's window on the Mac's desktop. One tab, which follows the app being
- * worked on; it can live beside the code or in a window of its own.
+ * The live screen tab: an iOS simulator, an iPhone plugged into the Mac, an
+ * app's window on the Mac's desktop, or an iPhone at this PC with no Mac (the
+ * one mirroring to it over Wi-Fi, or its picture over the cable). One tab,
+ * which follows the app being worked on; it can live beside the code or in a
+ * window of its own.
  */
 import { randomBytes } from 'node:crypto';
 import * as vscode from 'vscode';
 import { streamPreference as sharedStreamPreference } from '@capmac/core/engine/config';
 import type { ScreenPortMessage } from '../../../desktop/src/shared/contract.js';
-import type { ScreenChannel } from '../engine/client.js';
-import { s } from '../i18n.js';
+import { EngineError, type ScreenChannel } from '../engine/client.js';
+import { s, studio } from '../i18n.js';
+import { sameStream } from '../state/screens.js';
 import { isActive } from '../state/runs.js';
-import { keyOf, type Model, type WorkspaceApp } from '../state/model.js';
+import { errorText, keyOf, type Model, type WorkspaceApp } from '../state/model.js';
 
 export interface ScreenActions {
   screenshot(app: WorkspaceApp, window?: number | null): Promise<void>;
+  /** The screenshot as a PNG, for Copy screenshot (null: it failed, and it said why). */
+  screenshotPng(app: WorkspaceApp, window?: number | null): Promise<Uint8Array | null>;
   run(app: WorkspaceApp, mode: 'run' | 'live'): Promise<void>;
   reloadApp(app: WorkspaceApp): Promise<void>;
 }
 
 type Screen = NonNullable<ReturnType<Model['screenFor']>>;
+type PhoneScreen = Extract<Screen, { backend: 'wsl' }>;
 
 /** The stream setting CapMac's front ends share (~/.capmac/config.json `stream`). */
 export async function streamPreference(): Promise<'smooth' | 'compatible'> {
@@ -59,6 +65,11 @@ export class ScreenPanel implements vscode.Disposable {
     return this.panel !== null;
   }
 
+  /** The open stream of an iPhone at this PC (its screenshots come from it), or null. */
+  get phoneStreamId(): string | null {
+    return this.screen?.backend === 'wsl' && this.channel ? this.channel.streamId : null;
+  }
+
   private frame(): boolean {
     return vscode.workspace.getConfiguration('capmac').get<boolean>('screen.deviceFrame', true);
   }
@@ -74,7 +85,7 @@ export class ScreenPanel implements vscode.Disposable {
         this.screen = screen;
         this.panel.title = s.screen.title(screen.name);
         if (this.ready) await this.open();
-      }
+      } else if (screen.backend === 'wsl') this.retargetPhone(screen);
       this.panel.reveal(undefined, options.preserveFocus ?? true);
       return true;
     }
@@ -85,6 +96,20 @@ export class ScreenPanel implements vscode.Disposable {
     this.adopt(panel);
     if (location === 'window') await vscode.commands.executeCommand('workbench.action.moveEditorToNewWindow').then(undefined, () => undefined);
     return true;
+  }
+
+  /**
+   * Another iPhone or app at this PC: the picture goes on (it is the same for all), touch moves to
+   * it. A new stream could not show the picture again: the iPhone sends its keyframe only when
+   * mirroring starts.
+   */
+  private retargetPhone(screen: PhoneScreen): void {
+    const was = this.screen;
+    this.screen = screen;
+    if (was?.backend === 'wsl' && was.udid === screen.udid && keyOf(was.projectPath) === keyOf(screen.projectPath) && was.name === screen.name) return;
+    if (this.panel) this.panel.title = s.screen.title(screen.name);
+    this.channel?.post({ type: 'phone-target', udid: screen.udid, projectPath: screen.projectPath });
+    void this.panel?.webview.postMessage({ type: 'name', name: screen.name });
   }
 
   private options(): vscode.WebviewPanelOptions & vscode.WebviewOptions {
@@ -129,9 +154,13 @@ export class ScreenPanel implements vscode.Disposable {
     if (screen) {
       this.noneFor = null;
       if (!this.screen || !sameStream(screen, this.screen)) void this.show(app);
+      else if (screen.backend === 'wsl') {
+        this.app = app;
+        this.retargetPhone(screen);
+      }
       return;
     }
-    // Nothing to stream here (a Windows app, an iPhone plugged into this PC): say where it is.
+    // Nothing to stream here (a Windows app, an iPhone that doesn't trust this PC yet): say where it is.
     if (!this.ready || this.noneFor === app.key || this.model.engine.state !== 'ready' || this.model.detecting) return;
     const dest = this.model.resolveDestination(app);
     // Still finding out (the Mac's simulators aren't listed yet).
@@ -143,7 +172,7 @@ export class ScreenPanel implements vscode.Disposable {
     this.app = app;
     this.noneFor = app.key;
     this.panel.title = app.app.name;
-    const text = dest.kind === 'pc-desktop' ? s.session.noScreenWindows : dest.kind === 'pc-iphone' ? s.session.noScreenPc : s.screen.noTarget;
+    const text = dest.kind === 'pc-desktop' ? s.session.noScreenWindows : dest.kind === 'pc-iphone' ? studio.pc.trust.body : s.screen.noTarget;
     void this.panel.webview.postMessage({ type: 'none', text });
   }
 
@@ -160,13 +189,15 @@ export class ScreenPanel implements vscode.Disposable {
     this.channel = null;
     const prefer = await streamPreference();
     if (open !== this.opens || this.panel !== panel) return;
-    const mac = this.model.macs.find((m) => m.name === screen.mac);
+    const mac = screen.backend === 'mac' ? this.model.macs.find((m) => m.name === screen.mac) : undefined;
     const run = this.model.runOf(app);
-    const kind = screen.udid === 'mac-desktop' ? 'app' : screen.device ? 'device' : 'simulator';
+    const kind = screen.backend === 'wsl' ? 'phone' : screen.udid === 'mac-desktop' ? 'app' : screen.device ? 'device' : 'simulator';
     const webview = panel.webview;
     // The page learns the stream's id first; every message after carries it.
     const channel = this.model.client.openScreen(
-      { mac: screen.mac, udid: screen.udid, prefer, projectPath: screen.projectPath, device: screen.device },
+      screen.backend === 'wsl'
+        ? { udid: screen.udid, prefer, projectPath: screen.projectPath, backend: 'wsl' }
+        : { mac: screen.mac, udid: screen.udid, prefer, projectPath: screen.projectPath, device: screen.device },
       {
         onMessage: (message: ScreenPortMessage) => void webview.postMessage({ type: 'port', streamId: channel.streamId, message }),
         onClose: () => {
@@ -181,7 +212,7 @@ export class ScreenPanel implements vscode.Disposable {
       init: {
         kind,
         name: screen.name,
-        macLabel: mac?.label ?? screen.mac,
+        macLabel: screen.backend === 'mac' ? mac?.label ?? screen.mac : '',
         frame: this.frame(),
         live: run?.mode === 'live' && isActive(run),
         running: isActive(run ?? undefined) && run?.app?.state === 'running',
@@ -192,7 +223,7 @@ export class ScreenPanel implements vscode.Disposable {
     });
   }
 
-  private async onMessage(message: { type: string; name?: string; command?: unknown; text?: string; window?: number | null; streamId?: string }): Promise<void> {
+  private async onMessage(message: { type: string; name?: string; command?: unknown; text?: string; window?: number | null; streamId?: string; udid?: string; req?: number; ok?: boolean; error?: string }): Promise<void> {
     const app = this.app;
     switch (message.type) {
       case 'ready':
@@ -213,8 +244,19 @@ export class ScreenPanel implements vscode.Disposable {
           case 'screenshot':
             await this.actions.screenshot(app, message.window ?? null);
             return;
+          case 'copy-screenshot': {
+            // The page puts it on the clipboard: VS Code's clipboard takes text only.
+            const webview = this.panel?.webview;
+            const png = await this.actions.screenshotPng(app, message.window ?? null);
+            void webview?.postMessage(png ? { type: 'shot', req: message.req, png } : { type: 'shot', req: message.req, error: studio.simulator.shotFailed });
+            return;
+          }
+          case 'screenshot-copied':
+            if (message.ok) vscode.window.setStatusBarMessage(`$(copy) ${s.screen.copied}`, 4000);
+            else void vscode.window.showErrorMessage(s.screen.copyFailed, { detail: message.error } as vscode.MessageOptions);
+            return;
           case 'restart-simulator':
-            if (this.screen && !this.screen.device && this.screen.udid !== 'mac-desktop') {
+            if (this.screen?.backend === 'mac' && !this.screen.device && this.screen.udid !== 'mac-desktop') {
               const { mac, udid, name } = this.screen;
               await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: s.screen.title(name) }, async (progress) => {
                 progress.report({ message: `Restarting ${name}…` });
@@ -225,10 +267,13 @@ export class ScreenPanel implements vscode.Disposable {
             }
             return;
           case 'fix-axe':
-            if (this.screen) {
+            if (this.screen?.backend === 'mac') {
               await this.model.client.invoke('macs.fix', { name: this.screen.mac, fix: 'install-axe' });
               await this.open();
             }
+            return;
+          case 'turn-on-touch':
+            if (this.screen?.backend === 'wsl' && message.udid) await this.turnOnTouch(this.screen, message.udid);
             return;
           case 'reload-app':
             await this.actions.reloadApp(app);
@@ -247,6 +292,31 @@ export class ScreenPanel implements vscode.Disposable {
     }
   }
 
+  /**
+   * An iPhone at this PC: signs WebDriverAgent with the developer's team and puts it on the iPhone
+   * touch is for (`udid`: the one that mirrors when this PC knows it, else the tab's), so the screen
+   * takes taps. Touch then starts on the open stream.
+   */
+  private async turnOnTouch(screen: PhoneScreen, udid: string): Promise<void> {
+    const webview = this.panel?.webview;
+    void webview?.postMessage({ type: 'touch-busy', busy: true });
+    try {
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: s.screen.turningOnTouch }, () =>
+        this.model.client.invoke('iphone.setUpTouch', { projectPath: screen.projectPath, udid }),
+      );
+      vscode.window.setStatusBarMessage(`$(check) ${studio.pc.screen.touchOn}`, 5000);
+      // Touch starts on the stream that is open: a new one could not show the picture again.
+      if (this.screen?.backend === 'wsl') this.channel?.post({ type: 'phone-target', udid: this.screen.udid, projectPath: this.screen.projectPath });
+    } catch (err) {
+      if (!(err instanceof EngineError && err.cancelled)) {
+        const error = errorText(err);
+        void vscode.window.showErrorMessage(studio.pc.screen.touchFailed, { detail: [error.message, error.hint].filter(Boolean).join('\n') } as vscode.MessageOptions);
+      }
+    } finally {
+      void webview?.postMessage({ type: 'touch-busy', busy: false });
+    }
+  }
+
   /** An app's window: tell the page whether the app runs (it shows Run and Live otherwise). */
   private syncRun(): void {
     if (!this.panel || !this.app || this.screen?.udid !== 'mac-desktop') return;
@@ -255,8 +325,9 @@ export class ScreenPanel implements vscode.Disposable {
   }
 
   private syncRoute(): void {
-    if (!this.panel || !this.screen) return;
-    const mac = this.model.macs.find((m) => m.name === this.screen?.mac);
+    const screen = this.screen;
+    if (!this.panel || screen?.backend !== 'mac') return;
+    const mac = this.model.macs.find((m) => m.name === screen.mac);
     void this.panel.webview.postMessage({ type: 'route', route: mac?.route ?? null, rttMs: mac?.rttMs ?? null });
   }
 
@@ -300,8 +371,4 @@ export class ScreenPanel implements vscode.Disposable {
     this.panel?.dispose();
     for (const d of this.disposables) d.dispose();
   }
-}
-
-function sameStream(a: Screen, b: Screen): boolean {
-  return a.mac === b.mac && a.udid === b.udid && (a.projectPath ?? '') === (b.projectPath ?? '');
 }

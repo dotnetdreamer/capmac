@@ -30,12 +30,15 @@ export interface EngineHandlers {
 
 /** What `screen-open` takes besides the stream id (see host-protocol.ts). */
 export interface ScreenOpenOptions {
-  mac: string;
+  /** The Mac it streams from; none for an iPhone at this PC. */
+  mac?: string;
   udid: string;
   prefer: 'smooth' | 'compatible';
   maxSize?: number;
   projectPath?: string;
   device?: { name: string };
+  /** 'wsl': an iPhone at this PC, shown with no Mac (needs projectPath). */
+  backend?: 'mac' | 'wsl';
 }
 
 /** One screen's two-way channel (a MessagePort in CapMac Studio). */
