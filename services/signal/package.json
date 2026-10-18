@@ -1,6 +1,6 @@
 {
   "name": "@capmac/signal",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "CapMac's signaling server: introduces a PC to the door on its Mac (WebRTC), relays when they can't connect directly, and answers STUN. Deploy it on your own server; see deploy/README.md.",
   "license": "MIT",
@@ -13,7 +13,7 @@
     "ws": "^8.22.0"
   },
   "devDependencies": {
-    "@capmac/core": "0.1.2",
+    "@capmac/core": "0.1.3",
     "@types/ws": "^8.18.1"
   }
 }
