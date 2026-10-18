@@ -144,6 +144,10 @@ export const engineMethods = {
   'wsl.stopSetup': z.object({ setupId: id }).strict(),
   'wsl.doctor': z.object({ projectPath: fsPath }).strict(),
   'wsl.devices': z.object({ projectPath: fsPath }).strict(),
+  // A real iPhone shown and driven from this PC with no Mac (the WSL backend's device).
+  'iphone.screenReady': z.object({ projectPath: fsPath, udid }).strict(),
+  'iphone.setUpTouch': z.object({ projectPath: fsPath, udid }).strict(),
+  'iphone.screenshot': z.object({ streamId: id }).strict(),
 } as const;
 
 export type EngineMethod = keyof typeof engineMethods;
@@ -296,7 +300,14 @@ export interface MethodResults {
   'wsl.stopSetup': void;
   'wsl.doctor': { ready: boolean; checks: Check[] };
   'wsl.devices': WslDevices;
+  /** receiverReady: CapMac's screen-mirroring receiver is on this PC. */
+  'iphone.screenReady': { receiverReady: boolean; touch: IphoneTouchState };
+  'iphone.setUpTouch': { bundleId: string };
+  'iphone.screenshot': { png: ArrayBuffer; width: number | null; height: number | null };
 }
+
+/** Touch for a This-PC iPhone: WebDriverAgent's bundle id when it is on, else why not (and whether CapMac can turn it on). */
+export type IphoneTouchState = { bundleId: string } | { unavailable: string; canSetUp: boolean };
 
 // ─── Events ────────────────────────────────────────────────────────────────
 
@@ -353,7 +364,10 @@ const unit = z.number().min(0).max(1);
 const points = z.number().min(-2000).max(2000);
 export const inputEventSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('tap'), x: unit, y: unit }).strict(),
-  z.object({ kind: z.literal('swipe'), x1: unit, y1: unit, x2: unit, y2: unit, durationMs: z.number().int().min(16).max(10_000) }).strict(),
+  z.object({
+    kind: z.literal('swipe'), x1: unit, y1: unit, x2: unit, y2: unit, durationMs: z.number().int().min(16).max(10_000),
+    pressMs: z.number().int().min(0).max(10_000).optional(), holdMs: z.number().int().min(0).max(10_000).optional(),
+  }).strict(),
   z.object({ kind: z.literal('text'), text: z.string().min(1).max(20_000), via: z.enum(['type', 'paste']).optional() }).strict(),
   z.object({ kind: z.literal('key'), key: z.enum(['return', 'enter', 'escape', 'delete', 'backspace', 'tab', 'space']) }).strict(),
   z.object({ kind: z.literal('button'), button: z.enum(['home', 'lock', 'siri', 'side', 'apple-pay']), phase: z.enum(['down', 'up']).optional() }).strict(),
@@ -383,6 +397,9 @@ export const inputEventSchema = z.discriminatedUnion('kind', [
   }).strict(),
 ]);
 
+/** An iPhone at this PC: touch for this iPhone and app from now on, while its picture goes on. */
+export const phoneTargetSchema = z.object({ type: z.literal('phone-target'), udid, projectPath: fsPath }).strict();
+
 /** Messages on a screen port, engine → renderer. Frames are ArrayBuffers sent with a transfer list. */
 export type ScreenPortMessage =
   /** Compatible stream: one JPEG. */
@@ -395,8 +412,10 @@ export type ScreenPortMessage =
   | { type: 'codec'; codec: 'h264' | 'jpeg'; fallback: StreamFallback | null }
   /** Smooth stream: preparing the helper on the Mac (compiling it the first time). */
   | { type: 'preparing'; stage: 'building' | 'starting'; xcode?: string }
-  /** A device's screen: waiting for its cable or for Allow on the Mac; null once the picture comes. */
-  | { type: 'device-wait'; wait: 'device' | 'permission' | null }
+  /** A device's screen: waiting for its cable or for Allow on the Mac (an iPhone at this PC: for it to start mirroring, or to start again); null once the picture comes. */
+  | { type: 'device-wait'; wait: 'device' | 'permission' | 'mirror' | 'restart-mirroring' | 'firewall' | null }
+  /** An iPhone at this PC: which one mirrors to CapMac now (nulls: none). */
+  | { type: 'mirror-client'; name: string | null; model: string | null }
   /** The Mac's clock minus this PC's (µs), for the latency readout. */
   | { type: 'clock'; offsetUs: number; rttUs: number }
   /** Smooth stream: the bitrate adaptive bitrate chose, and frames dropped to catch up (every few seconds). */
@@ -439,7 +458,8 @@ export type ScreenPortCommand =
   | { type: 'dialog-list'; req: number; path: string; hidden?: boolean }
   | { type: 'dialog-mkdir'; req: number; path: string }
   /** An Electron app: where its sound plays from now on (remembered for the project). */
-  | { type: 'sound'; mode: SoundMode };
+  | { type: 'sound'; mode: SoundMode }
+  | z.infer<typeof phoneTargetSchema>;
 
 // ─── App (main process) ────────────────────────────────────────────────────
 
@@ -538,12 +558,14 @@ export const appChannels = {
   'app:save-text': z.object({ text: z.string().max(200 * 1024 * 1024), name: text(200) }).strict(),
   /** With `projectPath` and the Mac's desktop as `udid`: the project's Electron app's windows. */
   'app:screen-open': z.object({
-    mac: macName,
+    mac: macName.optional(),
     udid,
     maxSize: z.number().int().min(320).max(4096).optional(),
     projectPath: fsPath.optional(),
     /** A real iPhone or iPad plugged into the Mac, not a simulator. */
     device: z.object({ name: z.string().max(200) }).strict().optional(),
+    /** 'wsl': an iPhone on this PC, shown with no Mac (needs projectPath, no mac). */
+    backend: z.enum(['mac', 'wsl']).optional(),
   }).strict(),
   'app:project-opened': z.object({ path: fsPath, name: z.string().max(200), appId: z.string().max(200) }).strict(),
   'app:forget-project': z.object({ path: fsPath }).strict(),

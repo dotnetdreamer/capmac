@@ -42,6 +42,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Capmac
   const sessions = new Sessions(m, output);
   const screen = new ScreenPanel(context, m, {
     screenshot: async (app, window) => void (await sessions.screenshot(app, window)),
+    screenshotPng: (app, window) => sessions.screenshotPng(app, window),
     run: async (app, mode) => void (await sessions.start(app, mode)),
     reloadApp: (app) => sessions.reload(app),
   });
@@ -105,7 +106,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Capmac
     }
   }));
 
-  m.start();
+  void m.start();
   return { statusReport: async () => (await import('./lm/tools.js')).statusReport(m), model: m };
 }
 

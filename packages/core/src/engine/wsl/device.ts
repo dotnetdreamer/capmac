@@ -44,7 +44,8 @@ const pairingFolder = () => path.join(os.homedir(), '.pymobiledevice3');
 /** iPhones seen over the cable, so one reached over Wi-Fi can be named. */
 const knownFile = () => path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), '.local', 'share'), 'CapMac', 'iphones.json');
 
-async function knownIphones(): Promise<Record<string, Omit<WslDevice, 'udid' | 'connection'>>> {
+/** The iPhones this PC has seen over the cable, by UDID: their names, iOS versions and models. */
+export async function knownIphones(): Promise<Record<string, Omit<WslDevice, 'udid' | 'connection'>>> {
   try {
     const value: unknown = JSON.parse(await readFile(knownFile(), 'utf8'));
     return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, Omit<WslDevice, 'udid' | 'connection'>> : {};
@@ -148,7 +149,7 @@ async function wifiIphones(options: WslDeviceOptions): Promise<string[]> {
  * before). An asleep iPhone leaves the network, so it waits up to five minutes (`searches` of ten
  * seconds) for it to wake and says so once (CAPMAC_LOCKED, as for a locked iPhone).
  */
-const OVER_WIFI = String.raw`from pymobiledevice3.remote import tunnel_service,userspace_tunnel
+export const OVER_WIFI = String.raw`from pymobiledevice3.remote import tunnel_service,userspace_tunnel
 searches=30
 async def over_wifi(serial,autopair,fallback):
  for attempt in range(searches):
@@ -336,6 +337,12 @@ async function requirePython(options: WslDeviceOptions): Promise<PythonCommand> 
   return pythonCommand(tools.python);
 }
 
+/** How to start a long-running iPhone helper script: CapMac's Python, its arguments before the script, and the clean environment. */
+export async function deviceHelperCommand(options: WslDeviceOptions = {}, udid?: string): Promise<{ executable: string; prefix: string[]; env: NodeJS.ProcessEnv }> {
+  const python = await requirePython(options);
+  return { executable: python.executable, prefix: python.prefix, env: deviceEnvironment(udid) };
+}
+
 /** A Wi-Fi tunnel the iPhone dropped: locked or asleep in the middle of a command. */
 const DROPPED = /terminated abruptly|transport closed|ConnectionResetError|ConnectionTerminatedError|did not come back on this Wi-Fi/i;
 
@@ -376,8 +383,11 @@ async function runDevice(
   }
 }
 
+/** Whether this is a UDID as the iPhone tools write them (not a stand-in for an iPhone nobody knows). */
+export const isIphoneUdid = (udid: string): boolean => /^[a-f\d-]{8,64}$/i.test(udid);
+
 function validateUdid(udid: string): void {
-  if (!/^[a-f\d-]{8,64}$/i.test(udid)) throw new UserError('Invalid iPhone UDID.', 'Use a UDID listed by capmac wsl targets.');
+  if (!isIphoneUdid(udid)) throw new UserError('Invalid iPhone UDID.', 'Use a UDID listed by capmac wsl targets.');
 }
 
 function validateBundleId(bundleId: string): void {
@@ -423,6 +433,19 @@ export async function listWslDevices(options: WslDeviceOptions = {}): Promise<Ws
   const known = wifi.length ? await knownIphones() : {};
   for (const udid of wifi) devices.push({ name: 'iPhone', ...known[udid], udid, connection: 'network' });
   return devices;
+}
+
+/**
+ * An iPhone paired for Wi-Fi (over the cable once), taken as on this Wi-Fi when a quick search
+ * missed it: iPhones answer searches late while they mirror or doze. The commands that reach it
+ * over Wi-Fi wait for it. Undefined when it isn't paired for Wi-Fi.
+ */
+export async function wifiPairedIphone(udid: string): Promise<WslDevice | undefined> {
+  validateUdid(udid);
+  const pairings = await readdir(pairingFolder()).catch(() => [] as string[]);
+  if (!pairings.some((name) => name.toLowerCase() === `remote_${udid.toLowerCase()}.plist`)) return undefined;
+  const known = Object.entries(await knownIphones()).find(([id]) => id.toLowerCase() === udid.toLowerCase())?.[1];
+  return { name: 'iPhone', ...known, udid, connection: 'network' };
 }
 
 export async function selectWslDevice(udid?: string, options: WslDeviceOptions = {}): Promise<WslDevice> {

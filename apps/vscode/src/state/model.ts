@@ -32,6 +32,8 @@ import type {
   WslStatus,
 } from '../../../desktop/src/shared/contract.js';
 import type { HostInit } from '../../../desktop/src/shared/host-protocol.js';
+import { placeReceiver, receiverForEngine } from '../mirrorReceiver.js';
+import { pcScreen, type ScreenSource } from './screens.js';
 import { EngineClient, EngineError } from '../engine/client.js';
 import { s, studio, tidy } from '../i18n.js';
 import { automaticTarget, isWithin, keyOf, pcReady, WebBuildDiagnostics } from './pure.js';
@@ -157,8 +159,11 @@ export class Model implements vscode.Disposable {
       reactNativeSampleDir: sample('hello-react-native'),
       samplesHome: path.join(os.homedir(), 'Documents', 'CapMac'),
       remoteModulesDir: existsSync(dist('remote', 'node_modules')) ? dist('remote') : null,
+      // The screen-mirroring receiver for iPhones at this PC (Windows .vsix): CapMac's own copy of it, see start().
+      mirrorReceiverDir: receiverForEngine(dist('mirror-receiver')),
       settings: this.hostSettings(),
     });
+    this.shippedReceiver = dist('mirror-receiver');
     this.client = new EngineClient(
       dist('engine.cjs'),
       init,
@@ -196,7 +201,17 @@ export class Model implements vscode.Disposable {
     this.disposables.push(watcher, watcher.onDidCreate(() => this.scheduleDetect()), watcher.onDidDelete(() => this.scheduleDetect()), watcher.onDidChange(() => this.scheduleDetect()));
   }
 
-  start(): void {
+  /** The screen-mirroring receiver this .vsix ships (none in a build without it). */
+  private readonly shippedReceiver: string;
+
+  /**
+   * Starts the engine. The first time, the receiver goes to CapMac's own folder before (about a
+   * second): from there Windows Firewall asks about it once, not after every update.
+   */
+  async start(): Promise<void> {
+    await placeReceiver(this.shippedReceiver).catch((error: unknown) => {
+      this.output.warn(`Copying the screen receiver: ${error instanceof Error ? error.message : String(error)}`);
+    });
     this.client.start();
   }
 
@@ -669,15 +684,17 @@ export class Model implements vscode.Disposable {
   }
 
   /** Whether the current destination shows a picture CapMac can stream. */
-  screenFor(app: WorkspaceApp): { mac: string; udid: string; projectPath?: string; device?: { name: string }; name: string } | null {
+  screenFor(app: WorkspaceApp): ScreenSource | null {
     const dest = this.resolveDestination(app);
-    if (!dest.mac) return null;
-    if (dest.kind === 'mac-desktop') return { mac: dest.mac.name, udid: MAC_TARGET_ID, projectPath: app.project.dir, name: app.app.name };
     const run = this.runOf(app);
     // The one it runs on now, else the one it will run on.
-    const target = (isActive(run ?? undefined) && run?.target && (run.target.kind === 'simulator' || run.target.kind === 'device') ? run.target : null) ?? dest.target;
+    const running = isActive(run ?? undefined) && run?.target && (run.target.kind === 'simulator' || run.target.kind === 'device') ? run.target : null;
+    if (dest.kind === 'pc-iphone') return pcScreen(app.project.dir, running ?? dest.target);
+    if (!dest.mac) return null;
+    if (dest.kind === 'mac-desktop') return { backend: 'mac', mac: dest.mac.name, udid: MAC_TARGET_ID, projectPath: app.project.dir, name: app.app.name };
+    const target = running ?? dest.target;
     if (!target) return null;
-    return { mac: dest.mac.name, udid: target.udid, device: target.kind === 'device' ? { name: target.name } : undefined, name: target.name };
+    return { backend: 'mac', mac: dest.mac.name, udid: target.udid, device: target.kind === 'device' ? { name: target.name } : undefined, name: target.name };
   }
 
   // ─── Sessions ────────────────────────────────────────────────────────────

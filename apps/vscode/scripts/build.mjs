@@ -7,8 +7,10 @@
 //   samples/           the sample projects ("Try a sample")
 //   remote/            node-datachannel for remote access (with --remote): the engine and the CLI load
 //                      remote/node_modules; it picks its native binary (x64, arm64) by architecture
+//   mirror-receiver/   the screen-mirroring receiver for iPhones at this PC (--production, or --receiver), as
+//                      CapMac Studio's installer ships it: the extension copies it to CapMac's own folder
 //
-//   node scripts/build.mjs [--watch] [--production] [--remote [--target win32-x64|win32-arm64]]
+//   node scripts/build.mjs [--watch] [--production] [--remote [--target win32-x64|win32-arm64]] [--receiver]
 //   (--target keeps one architecture's binary, for that platform's .vsix: vsce package --target …)
 import { existsSync, promises as fs, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -35,6 +37,9 @@ const started = Date.now();
  */
 const contract = readFileSync(path.join(repoDir, 'apps', 'desktop', 'src', 'shared', 'contract.ts'), 'utf8');
 
+/** CapMac Studio's staging of the screen-mirroring receiver (iPhones at this PC), and the engine's version of it. */
+const mirrorReceiver = await import(pathToFileURL(path.join(repoDir, 'apps', 'desktop', 'scripts', 'mirror-receiver.mjs')).href);
+
 /** The values of a `z.enum([...])` named `field` in an engine method's params, from the contract's text. */
 function contractEnum(method, field, fallback) {
   const start = contract.indexOf(`'${method}'`);
@@ -49,6 +54,8 @@ const define = {
   __CAPMAC_SAMPLE_KINDS__: JSON.stringify(contractEnum('projects.createSample', 'kind', ['ios', 'electron'])),
   // React Native DevTools for a live session (feature/react-native's `sessions.devtools`).
   __CAPMAC_HAS_DEVTOOLS__: JSON.stringify(/^\s*'sessions\.devtools':/m.test(contract)),
+  // The folder name of CapMac's own copy of the receiver (mirrorReceiver.ts): the engine looks for this version.
+  __CAPMAC_RECEIVER_VERSION__: JSON.stringify(mirrorReceiver.receiverVersion()),
   __APP_VERSION__: JSON.stringify(pkg.version),
   __AGENT_VERSION__: JSON.stringify(agentVersion),
   __CAPMAC_VERSION__: JSON.stringify(core.version),
@@ -167,6 +174,14 @@ if (args.has('--remote')) {
   const modules = dist('remote', 'node_modules');
   for (const arch of arches) await fs.cp(path.join(staging, arch, 'node_modules'), modules, { recursive: true, force: true });
   await fs.rm(staging, { recursive: true, force: true });
+}
+
+if (production || args.has('--receiver')) {
+  // The receiver CapMac Studio ships (CAPMAC_MIRROR_RECEIVER, else the copy set up on this PC); x64, also
+  // for an arm64 PC (emulation), as in Studio. Every .vsix has it: without it, an iPhone at this PC shows
+  // no picture.
+  const { dir, version } = await mirrorReceiver.stageMirrorReceiver(dist('mirror-receiver'));
+  console.log(`Screen receiver ${version} from ${dir}`);
 }
 
 if (watch) {

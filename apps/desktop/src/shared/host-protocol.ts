@@ -21,6 +21,8 @@ export interface HostInit {
   samplesHome: string;
   /** node-datachannel for remote access (resources/remote when packaged; null: from node_modules). */
   remoteModulesDir: string | null;
+  /** The screen-mirroring receiver the installer ships (resources/mirror-receiver; null: not packaged). */
+  mirrorReceiverDir: string | null;
   settings: HostSettings;
 }
 
@@ -29,7 +31,7 @@ export type MainToHost =
   | { kind: 'call'; id: number; method: EngineMethod; params: unknown }
   | { kind: 'prompt-response'; response: PromptResponse }
   /** Comes with the engine's end of a MessageChannel in `ports`. */
-  | { kind: 'screen-open'; streamId: string; mac: string; udid: string; prefer: 'smooth' | 'compatible'; maxSize?: number; projectPath?: string; device?: { name: string } }
+  | { kind: 'screen-open'; streamId: string; mac?: string; udid: string; prefer: 'smooth' | 'compatible'; maxSize?: number; projectPath?: string; device?: { name: string }; backend?: 'mac' | 'wsl' }
   | { kind: 'settings'; settings: HostSettings }
   | { kind: 'visibility'; visible: boolean }
   | { kind: 'shutdown' };

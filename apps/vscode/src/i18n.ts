@@ -239,7 +239,6 @@ export const s = {
     notLive: 'Start live reload first',
     noScreen: 'This app has no screen to show here',
     noScreenWindows: 'Your Windows app opens in its own window on this PC',
-    noScreenPc: 'Your app runs on your iPhone. Look at the iPhone',
     stopping: 'Stopping…',
   },
 
@@ -295,9 +294,16 @@ export const s = {
     noTarget: 'Nothing to show yet. Run your app first',
     macOffline: (mac: string) => `${mac} is offline`,
     saved: (file: string) => `Screenshot saved: ${file}`,
-    copied: 'Screenshot copied',
+    copied: studio.simulator.shotCopied,
+    copyFailed: 'Couldn’t copy the screenshot',
     open: 'Open',
     shotFailed: studio.simulator.shotFailed,
+    /** An iPhone at this PC: its screenshot comes from its screen, which has to be open. */
+    shotOnceShown: 'Take the screenshot once your iPhone’s screen shows here',
+    /** For an AI agent: the iPhone's screen was just opened, its picture comes in a moment. */
+    shotNeedsScreen: 'CapMac just opened the iPhone’s screen in VS Code. Take the screenshot again once its picture shows',
+    /** While WebDriverAgent is signed and put on the iPhone (one Apple sign-in, the first time). */
+    turningOnTouch: 'Turning on touch for your iPhone…',
     stream: (mode: string) => `Screen stream: ${mode}`,
     smooth: 'Smooth (video)',
     smoothHint: 'Sharp and fast. Falls back by itself when it can’t',

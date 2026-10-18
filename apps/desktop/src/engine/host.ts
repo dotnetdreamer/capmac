@@ -83,12 +83,14 @@ import {
   type Prompter,
   type VideoPacket,
 } from '@capmac/core/engine';
+import { PhoneScreen, iphoneTouchState, iphoneTouchTarget, mirrorReceiver, setUpIphoneTouch, receiverInstalled, setBundledReceiver } from '@capmac/core/engine/iphone/index';
 import { isSoundMode } from '@capmac/core/shared/electron';
 import { STREAM_CONFIG } from '@capmac/core/shared/stream';
 import type { ProbeResult, Target, TargetsResult } from '@capmac/core/shared/protocol';
 import type { RemoteDoorStatus } from '@capmac/core/shared/remote-door';
 import {
   inputEventSchema,
+  phoneTargetSchema,
   type CallResult,
   type EngineMethod,
   type Envelope,
@@ -595,7 +597,7 @@ async function startFlutterSession(params: MethodParams<'sessions.start'> | (Met
 
 const toArrayBuffer = (buffer: Buffer) => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
 
-const screens = new Map<string, { stream: ScreenStream | AppScreenStream; port: MessagePortMain }>();
+const screens = new Map<string, { stream: ScreenStream | AppScreenStream | PhoneScreen; port: MessagePortMain }>();
 
 /** Smooth stream: frames posted to the renderer and not taken yet before it counts as falling behind. */
 const VIDEO_MAX_IN_FLIGHT = 30;
@@ -607,7 +609,8 @@ const VIDEO_MAX_IN_FLIGHT = 30;
  * before it); when the renderer falls behind, drop up to the next keyframe and
  * ask for one.
  */
-function screenFlow(post: (message: ScreenPortMessage) => void, requestKeyframe: () => void) {
+/** `dropWhenBehind: false`: send every frame even when the renderer falls behind (for a stream with no keyframes on request). */
+function screenFlow(post: (message: ScreenPortMessage) => void, requestKeyframe: () => void, { dropWhenBehind = true }: { dropWhenBehind?: boolean } = {}) {
   let jpegSeq = 0;
   let jpegInFlight = 0;
   let jpegPending: Buffer | null = null;
@@ -625,7 +628,7 @@ function screenFlow(post: (message: ScreenPortMessage) => void, requestKeyframe:
     sendJpeg,
     sendVideo({ data, header }: VideoPacket): void {
       const config = header.type === STREAM_CONFIG;
-      if (!config) {
+      if (!config && dropWhenBehind) {
         if (videoDropping) {
           if (!header.key || videoInFlight > 4) return;
           videoDropping = false;
@@ -833,11 +836,130 @@ function openScreen(streamId: string, mac: string, udid: string, port: MessagePo
   );
 }
 
-function closeScreen(streamId: string): void {
+/** How long after mirroring stopped touch goes back to the pane's iPhone (a session that comes straight back keeps it). */
+const BACK_TO_PANE_MS = 3000;
+
+/**
+ * A real iPhone at this PC, with no Mac: its screen mirrored over Wi-Fi (or, while nothing mirrors,
+ * over the cable), and touch through WebDriverAgent. Studio keeps this stream open while it runs (the
+ * iPhone can't send its keyframe again), so touch follows Studio's pane to another iPhone or app
+ * ('phone-target'). Touch drives the iPhone in the picture: the one that mirrors when this PC knows
+ * it, else the pane's.
+ */
+async function openPhoneScreen(streamId: string, udid: string, projectPath: string, port: MessagePortMain, maxSize?: number): Promise<void> {
+  const post = (message: ScreenPortMessage) => port.postMessage(message);
+  let project;
+  try {
+    project = await loadProject(projectPath);
+  } catch (err) {
+    post({ type: 'state', state: 'ended', error: toErrorInfo(err) });
+    return;
+  }
+  let scope = { projectPath, streamId };
+  // The iPhone sends a keyframe only when mirroring starts: a dropped frame could never be made up.
+  const flow = screenFlow(post, () => stream.requestKeyframe(), { dropWhenBehind: false });
+  let pane = { udid, projectPath };
+  let mirroring = mirrorReceiver().client;
+  let backToPane: NodeJS.Timeout | null = null;
+  const target = await iphoneTouchTarget(project.capDir, udid, mirroring);
+  let retargets = 0;
+  const retarget = async () => {
+    const mine = ++retargets;
+    const wanted = pane;
+    const next = await loadProject(wanted.projectPath).catch(() => null);
+    if (!next) return;
+    const nextTarget = await iphoneTouchTarget(next.capDir, wanted.udid, mirroring);
+    if (mine !== retargets || screens.get(streamId)?.stream !== stream) return;
+    scope = { projectPath: wanted.projectPath, streamId };
+    stream.retarget(nextTarget.device, nextTarget.touch);
+  };
+  const stream: PhoneScreen = new PhoneScreen(target.device, { touch: target.touch }, {
+    // The picture over the cable, while nothing mirrors.
+    onFrame: flow.sendJpeg,
+    onVideo: flow.sendVideo,
+    onInfo: (info) => {
+      post({ type: 'info', info });
+      emit(scope, { type: 'screen-info', info });
+    },
+    onLog: (level, message) => emit(scope, { type: 'log', level: level === 'info' ? 'note' : level, message: `Screen: ${message}` }),
+    onEnd: (error) => post({ type: 'state', state: 'ended', error }),
+    onState: (state) => {
+      if (state === 'streaming') flow.reset();
+      post({ type: 'state', state });
+    },
+    onCodec: (codec, fallback) => {
+      flow.reset();
+      post({ type: 'codec', codec, fallback });
+    },
+    onWaiting: (wait) => post({ type: 'device-wait', wait }),
+    onClient: (client) => {
+      post({ type: 'mirror-client', name: client?.name ?? null, model: client?.model ?? null });
+      // Another iPhone started mirroring: touch goes to it. When mirroring stops, touch goes back to
+      // the pane's iPhone a moment later (its picture can come over the cable then).
+      if (!client) {
+        if (mirroring && !backToPane) {
+          backToPane = setTimeout(() => {
+            backToPane = null;
+            if (!mirroring) void retarget();
+          }, BACK_TO_PANE_MS);
+          backToPane.unref();
+        }
+        mirroring = null;
+        return;
+      }
+      if (backToPane) clearTimeout(backToPane);
+      backToPane = null;
+      if (client.name === mirroring?.name && client.model === mirroring?.model) return;
+      mirroring = client;
+      void retarget();
+    },
+    onTouch: (ready, reason) => emit(scope, { type: 'log', level: 'note', message: ready ? t.pc.screen.touchOn : reason ?? t.pc.screen.touchOffWhy }),
+  });
+  port.on('message', (e) => {
+    const message = e.data as ScreenPortCommand;
+    switch (message?.type) {
+      case 'ack':
+        flow.ack(stream.currentCodec === 'h264');
+        break;
+      case 'keyframe':
+        stream.requestKeyframe();
+        break;
+      case 'input': {
+        const parsed = inputEventSchema.safeParse(message.event);
+        if (parsed.success) stream.input(parsed.data);
+        break;
+      }
+      case 'restart':
+        flow.reset();
+        void stream.start().catch((err) => post({ type: 'state', state: 'ended', error: toErrorInfo(err) }));
+        break;
+      case 'phone-target': {
+        const parsed = phoneTargetSchema.safeParse(message);
+        if (!parsed.success) break;
+        pane = { udid: parsed.data.udid, projectPath: parsed.data.projectPath };
+        void retarget();
+        break;
+      }
+    }
+  });
+  // The window closed or reloaded: the receiver keeps running a while, for a reloaded one to catch up.
+  port.on('close', () => closeScreen(streamId));
+  port.start();
+  screens.set(streamId, { stream, port });
+  post({ type: 'state', state: 'connecting' });
+  stream.start().then(
+    () => post({ type: 'state', state: 'streaming' }),
+    (err) => post({ type: 'state', state: 'ended', error: toErrorInfo(err) }),
+  );
+}
+
+/** `forGood`: the renderer closed it (not a closed or reloaded window), so a This-PC iPhone's receiver can stop at once. */
+function closeScreen(streamId: string, { forGood = false }: { forGood?: boolean } = {}): void {
   const entry = screens.get(streamId);
   if (!entry) return;
   screens.delete(streamId);
-  entry.stream.dispose();
+  if (entry.stream instanceof PhoneScreen) entry.stream.dispose({ forGood });
+  else entry.stream.dispose();
   try {
     entry.port.close();
   } catch {
@@ -1015,7 +1137,24 @@ const handlers: Handlers = {
     const name = mac ?? project.config.host ?? (await defaultMacName());
     return { text: await readFromMac(await link(name).session(), project, logPath) };
   },
-  'screen.stop': async ({ streamId }) => closeScreen(streamId),
+  'screen.stop': async ({ streamId }) => closeScreen(streamId, { forGood: true }),
+  // ── A real iPhone on this PC (the WSL backend), with no Mac ──
+  'iphone.screenReady': async ({ projectPath, udid }) => {
+    const project = await loadProject(projectPath);
+    const touch = await iphoneTouchState(project.capDir, { udid }).catch(() => ({ unavailable: 'Touch is unavailable', canSetUp: false }));
+    return { receiverReady: receiverInstalled(), touch };
+  },
+  'iphone.setUpTouch': async ({ projectPath, udid }) => {
+    const scope = { projectPath };
+    const controller = new AbortController();
+    return setUpIphoneTouch({ cwd: projectPath, udid }, contextFor(scope), controller.signal);
+  },
+  'iphone.screenshot': async ({ streamId }) => {
+    const entry = screens.get(streamId);
+    if (!(entry?.stream instanceof PhoneScreen)) throw new UserError('That iPhone screen is not open.');
+    const png = await entry.stream.still();
+    return { png: toArrayBuffer(png), width: png.length > 24 ? png.readUInt32BE(16) : null, height: png.length > 24 ? png.readUInt32BE(20) : null };
+  },
   'screen.screenshot': async ({ mac, udid, projectPath, window }) => {
     // A plugged-in iPhone: the newest picture of its open screen, at the iPhone's own size.
     const device = [...screens.values()].find((s) => s.stream instanceof ScreenStream && s.stream.isDevice && s.stream.udid === udid)?.stream as ScreenStream | undefined;
@@ -1133,6 +1272,7 @@ parent.on('message', (e) => {
       settings = message.init.settings;
       setAgentBundlePath(message.init.agentPath);
       if (message.init.remoteModulesDir) setNodeDataChannelDir(message.init.remoteModulesDir);
+      setBundledReceiver(message.init.mirrorReceiverDir);
       send({ kind: 'ready' });
       break;
     case 'call':
@@ -1146,8 +1286,10 @@ parent.on('message', (e) => {
     }
     case 'screen-open': {
       const port = e.ports[0];
-      if (port && message.udid === MAC_TARGET_ID && message.projectPath) void openAppScreen(message.streamId, message.mac, message.projectPath, port, message.prefer, message.maxSize);
-      else if (port) openScreen(message.streamId, message.mac, message.udid, port, message.prefer, message.maxSize, message.device);
+      if (!port) break;
+      if (message.backend === 'wsl' && message.projectPath) void openPhoneScreen(message.streamId, message.udid, message.projectPath, port, message.maxSize);
+      else if (message.udid === MAC_TARGET_ID && message.projectPath && message.mac) void openAppScreen(message.streamId, message.mac, message.projectPath, port, message.prefer, message.maxSize);
+      else if (message.mac) openScreen(message.streamId, message.mac, message.udid, port, message.prefer, message.maxSize, message.device);
       break;
     }
     case 'settings':

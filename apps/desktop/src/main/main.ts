@@ -27,7 +27,7 @@ import { installSkill, removeSkill, skillProjectRoot, skillStatus } from '@capma
 import { capmacCommandStatus, installCapmacCommand, removeCapmacCommand } from '@capmac/core/engine/capmac-command';
 import { loadGlobalConfig, streamPreference } from '@capmac/core/engine/config';
 import { disableTakeover, enableTakeover, ensureTakeoverDefault, samePath, takeoverStatus, type TakeoverInstall } from '@capmac/core/engine/takeover';
-import { agentPath, cliDir, electronSampleDir, flutterSampleDir, iconsDir, outDir, reactNativeSampleDir, remoteModulesDir, sampleDir } from './paths.js';
+import { agentPath, cliDir, electronSampleDir, flutterSampleDir, iconsDir, mirrorReceiverDir, outDir, reactNativeSampleDir, remoteModulesDir, sampleDir } from './paths.js';
 import { SettingsStore } from './settings.js';
 import { AppTray } from './tray.js';
 import { Updates } from './updates.js';
@@ -315,11 +315,11 @@ function registerIpc(): void {
     await fs.writeFile(result.filePath, text);
     return result.filePath;
   });
-  handle('app:screen-open', async ({ mac, udid, maxSize, projectPath, device }, event) => {
+  handle('app:screen-open', async ({ mac, udid, maxSize, projectPath, device, backend }, event) => {
     const streamId = `scr-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const prefer = await sharedStream();
     const { port1, port2 } = new MessageChannelMain();
-    engine.openScreen(streamId, mac, udid, port1, { prefer, maxSize, projectPath, device });
+    engine.openScreen(streamId, mac, udid, port1, { prefer, maxSize, projectPath, device, backend });
     event.sender.postMessage('screen-port', { streamId }, [port2]);
     return { streamId };
   });
@@ -460,6 +460,7 @@ app.whenReady().then(async () => {
     reactNativeSampleDir: reactNativeSampleDir(),
     samplesHome: path.join(app.getPath('documents'), 'CapMac Studio'),
     remoteModulesDir: remoteModulesDir(),
+    mirrorReceiverDir: mirrorReceiverDir(),
     settings: { verbose: settings.get().verbose, osLogs: settings.get().osLogs },
   }), {
     onEvents: onEngineEvents,

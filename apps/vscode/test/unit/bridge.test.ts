@@ -44,7 +44,7 @@ function client(modulePath: string) {
   const statuses: EngineStatus[] = [];
   const logs: string[] = [];
   // The React Native sample is for a host that knows it (feature/react-native).
-  const init = (): HostInit & { reactNativeSampleDir: string | null } => ({ agentPath: 'none', sampleDir: null, electronSampleDir: null, flutterSampleDir: null, reactNativeSampleDir: null, samplesHome: out, remoteModulesDir: null, settings: { verbose: false, osLogs: false } });
+  const init = (): HostInit & { reactNativeSampleDir: string | null } => ({ agentPath: 'none', sampleDir: null, electronSampleDir: null, flutterSampleDir: null, reactNativeSampleDir: null, samplesHome: out, remoteModulesDir: null, mirrorReceiverDir: null, settings: { verbose: false, osLogs: false } });
   const engine = new EngineClient(
     modulePath,
     init,

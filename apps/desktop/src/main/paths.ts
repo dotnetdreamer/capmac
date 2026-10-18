@@ -64,6 +64,14 @@ export function remoteModulesDir(): string | null {
   return existsSync(dir) ? dir : null;
 }
 
+/**
+ * CapMac's screen-mirroring receiver (UxPlay), shipped next to app.asar: also when it went missing,
+ * so the engine says to install Studio again. In development the engine finds the one set up on this PC.
+ */
+export function mirrorReceiverDir(): string | null {
+  return app.isPackaged ? resources('mirror-receiver') : null;
+}
+
 export function rendererDir(): string {
   return outDir('renderer');
 }

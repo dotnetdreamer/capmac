@@ -104,7 +104,7 @@ export class EngineProcess {
     this.post({ kind: 'prompt-response', response });
   }
 
-  openScreen(streamId: string, mac: string, udid: string, port: MessagePortMain, options: { prefer: 'smooth' | 'compatible'; maxSize?: number; projectPath?: string; device?: { name: string } }): void {
+  openScreen(streamId: string, mac: string | undefined, udid: string, port: MessagePortMain, options: { prefer: 'smooth' | 'compatible'; maxSize?: number; projectPath?: string; device?: { name: string }; backend?: 'mac' | 'wsl' }): void {
     void this.readyPromise.then(() => this.post({ kind: 'screen-open', streamId, mac, udid, ...options }, [port]));
   }
 

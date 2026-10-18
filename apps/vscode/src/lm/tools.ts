@@ -38,7 +38,7 @@ export function registerTools(context: vscode.ExtensionContext, model: Model, se
         return text(s.lm.stopped);
       },
     }),
-    vscode.lm.registerTool('capmac_screenshot', { invoke: async () => screenshotTool(model) }),
+    vscode.lm.registerTool('capmac_screenshot', { invoke: async () => screenshotTool(model, sessions) }),
     vscode.lm.registerTool<{ lines?: number; level?: 'all' | 'warn' | 'error' }>('capmac_logs', {
       invoke: async (options) => {
         const app = model.current();
@@ -171,12 +171,20 @@ async function runTool(model: Model, sessions: Sessions, input: { mode?: 'run' |
   }
 }
 
-async function screenshotTool(model: Model): Promise<vscode.LanguageModelToolResult> {
+async function screenshotTool(model: Model, sessions: Sessions): Promise<vscode.LanguageModelToolResult> {
   const app = model.current();
   if (!app) return text(s.lm.noApp);
   const screen = model.screenFor(app);
   if (!screen) return text(s.lm.noScreen);
-  const shot = await model.client.invoke('screen.screenshot', { mac: screen.mac, udid: screen.udid, projectPath: screen.projectPath });
+  // An iPhone at this PC: the newest picture of its open screen.
+  const phoneStream = screen.backend === 'wsl' ? sessions.screen?.phoneStreamId ?? null : null;
+  if (screen.backend === 'wsl' && !phoneStream) {
+    await sessions.showScreen(app);
+    return text(s.screen.shotNeedsScreen);
+  }
+  const shot = screen.backend === 'mac'
+    ? await model.client.invoke('screen.screenshot', { mac: screen.mac, udid: screen.udid, projectPath: screen.projectPath })
+    : await model.client.invoke('iphone.screenshot', { streamId: phoneStream! });
   const caption = `Screenshot of ${screen.name}${shot.width ? ` (${shot.width}×${shot.height})` : ''}`;
   // Images in tool results arrived in VS Code 1.110; older ones get the file.
   const DataPart = (vscode as unknown as { LanguageModelDataPart?: { image(data: Uint8Array, mime: string): unknown } }).LanguageModelDataPart;

@@ -1,12 +1,14 @@
 /**
  * The live screen in a VS Code tab: an iOS simulator, an iPhone plugged into
- * the Mac, or an app's window on the Mac's desktop. Frames come from the
+ * the Mac, an app's window on the Mac's desktop, or an iPhone at this PC (the
+ * one mirroring to it, or its picture over the cable). Frames come from the
  * extension and go straight to CapMac Studio's own decoder worker (H.264 with
  * WebCodecs, or JPEG), through a MessageChannel that stands in for Studio's
  * screen port; input goes back the same way.
  */
 import { AppAudioPlayer } from '../../../../desktop/src/renderer/lib/app-audio';
 import { CSS_CURSORS } from '@capmac/core/shared/electron';
+import { MIRROR_RECEIVER_NAME } from '@capmac/core/shared/mirror';
 import type { AppDialog, AppWindowInfo, ErrorInfo, InputEvent, ScreenInfo, ScreenPortCommand, ScreenPortMessage, SoundMode, StreamFallback } from '../../../../desktop/src/shared/contract';
 import { t, tidy } from '../../../../desktop/src/shared/i18n/index';
 import { DialogLayer, type DialogCommand } from './dialogs';
@@ -18,7 +20,8 @@ declare function acquireVsCodeApi(): { postMessage(message: unknown): void; getS
 
 /** What the extension opens the page with. */
 export interface ScreenInit {
-  kind: 'simulator' | 'device' | 'app';
+  /** 'phone': an iPhone at this PC, with no Mac. */
+  kind: 'simulator' | 'device' | 'app' | 'phone';
   name: string;
   macLabel: string;
   frame: boolean;
@@ -39,8 +42,14 @@ type FromExtension =
   | { type: 'run-state'; running: boolean; live: boolean }
   | { type: 'route'; route: string | null; rttMs: number | null }
   | { type: 'frame'; frame: boolean }
+  /** An iPhone at this PC: the tab moved to another iPhone or app, on the same picture. */
+  | { type: 'name'; name: string }
+  /** An iPhone at this PC: touch is being turned on (its button waits). */
+  | { type: 'touch-busy'; busy: boolean }
   /** The app has no screen to stream here: where to look instead. */
-  | { type: 'none'; text: string };
+  | { type: 'none'; text: string }
+  /** The screenshot Copy screenshot asked for (`error`: it failed, and the extension said so). */
+  | { type: 'shot'; req: number; png?: Uint8Array<ArrayBuffer>; error?: string };
 
 type StreamState = { kind: 'connecting' } | { kind: 'streaming' } | { kind: 'reconnecting' } | { kind: 'ended'; error?: ErrorInfo };
 
@@ -66,7 +75,11 @@ let info: ScreenInfo | null = null;
 let codec: 'h264' | 'jpeg' | null = null;
 let fallback: StreamFallback | null = null;
 let preparing: { stage: 'building' | 'starting'; xcode?: string } | null = null;
-let wait: 'device' | 'permission' | null = null;
+/** A plugged-in iPhone: waiting for its cable or for Allow on the Mac. An iPhone at this PC: for it to mirror (again), or for Windows Firewall. */
+let wait: 'device' | 'permission' | 'mirror' | 'restart-mirroring' | 'firewall' | null = null;
+/** An iPhone at this PC: which one mirrors now. */
+let mirroring: string | null = null;
+let touchBusy = false;
 let frameSize: { width: number; height: number } | null = null;
 let hasFrame = false;
 let stats: { fps: number; kbps: number; decodeMs: number; latencyMs: number | null; latencyP95Ms: number | null; inputMs: number | null } | null = null;
@@ -82,6 +95,8 @@ let sentVideoSize = 0;
 let videoTimer = 0;
 let nextReq = 1;
 const replies = new Map<number, { resolve: (data: unknown) => void; reject: (err: Error) => void; timer: number }>();
+/** Copy screenshot: the screenshots on their way from the extension. */
+const shots = new Map<number, { resolve: (png: Blob) => void; reject: (err: Error) => void }>();
 
 // ─── Page ──────────────────────────────────────────────────────────────────
 
@@ -127,6 +142,8 @@ async function startWorker(): Promise<void> {
   const w = new Worker(blob, { name: 'capmac screen' });
   URL.revokeObjectURL(blob);
   worker = w;
+  // A mirrored iPhone sends a keyframe only when mirroring starts: never skip frames to wait for one.
+  if (isPhone()) w.postMessage({ type: 'keyframes', onRequest: false });
   const offscreen = canvas.transferControlToOffscreen();
   w.postMessage({ type: 'canvas', canvas: offscreen }, [offscreen]);
   const channel = new MessageChannel();
@@ -187,6 +204,17 @@ function onWorker(m: any): void {
     case 'device-wait':
       wait = m.wait;
       render();
+      break;
+    case 'mirror-client':
+      mirroring = m.name;
+      renderToolbar();
+      break;
+    case 'decoder-error':
+      // Without keyframes on request, a broken picture comes back only when mirroring starts again.
+      if (isPhone()) {
+        wait = 'restart-mirroring';
+        render();
+      }
       break;
     case 'codec':
       codec = m.codec;
@@ -254,6 +282,7 @@ function dialogRequest(command: DialogCommand): Promise<unknown> {
 // ─── Input ─────────────────────────────────────────────────────────────────
 
 const isApp = () => init?.kind === 'app';
+const isPhone = () => init?.kind === 'phone';
 const inputMode = (): InputMode | null => {
   if (isApp()) return info?.input && !appWaiting && state.kind === 'streaming' ? 'mouse' : null;
   return info?.input ? (info.inputMode === 'touch' ? 'touch' : 'gestures') : null;
@@ -408,7 +437,7 @@ function renderOverlay(): void {
       icon(state.kind === 'ended' && state.error?.code === 'DEVICE_SCREEN_DENIED' ? 'shield' : 'debug-disconnect', 'overlay__icon'),
       h('span', null, tidy(state.kind === 'ended' ? state.error?.message : undefined) ?? (app ? t.appWindow.stopped : t.simulator.stopped)),
       state.kind === 'ended' && state.error?.hint ? h('span', { class: 'faint' }, tidy(state.error.hint) ?? '') : null,
-      button(init.kind === 'device' ? t.simulator.tryAgain : t.simulator.reconnect, () => action('reconnect'), { small: true }),
+      button(init.kind === 'device' || isPhone() ? t.simulator.tryAgain : t.simulator.reconnect, () => action('reconnect'), { small: true }),
     );
   } else if (notRunning) {
     lines.push(
@@ -418,6 +447,15 @@ function renderOverlay(): void {
     );
   } else if (noWindow) {
     lines.push(icon('window', 'overlay__icon'), h('span', null, t.appWindow.noWindow), h('span', { class: 'faint' }, t.appWindow.noWindowBody));
+  } else if (waiting && !reconnecting && isPhone()) {
+    // An iPhone at this PC: how to mirror it here, or why it can't reach this PC.
+    const firewall = wait === 'firewall';
+    const again = wait === 'restart-mirroring';
+    lines.push(
+      icon(firewall ? 'shield' : 'broadcast', 'overlay__icon'),
+      h('span', null, firewall ? t.pc.screen.firewallTitle : again ? t.pc.screen.mirrorAgainTitle : t.pc.screen.mirrorTitle),
+      h('span', { class: 'faint' }, firewall ? t.pc.screen.firewallBody : again ? t.pc.screen.mirrorAgainBody(MIRROR_RECEIVER_NAME) : t.pc.screen.mirrorBody(MIRROR_RECEIVER_NAME)),
+    );
   } else if (waiting && !reconnecting) {
     lines.push(
       icon(wait === 'device' ? 'plug' : 'shield', 'overlay__icon'),
@@ -442,8 +480,10 @@ function statsTip(): string {
   if (!init) return '';
   const app = isApp();
   const overInternet = init.route === 'direct' || init.route === 'relay';
+  const streamName = codec === 'h264' ? (app ? t.appWindow.streamSmooth : t.simulator.streamSmooth) : codec === 'jpeg' ? (app ? t.appWindow.streamCompatible : t.simulator.streamCompatible) : null;
   return [
-    codec === 'h264' ? (app ? t.appWindow.streamSmooth : t.simulator.streamSmooth) : codec === 'jpeg' ? (app ? t.appWindow.streamCompatible : t.simulator.streamCompatible) : null,
+    // An iPhone at this PC: its picture is mirrored, or (pictures, while nothing mirrors) comes over the cable.
+    isPhone() ? (codec === 'jpeg' ? t.pc.screen.overCable : mirroring ? t.pc.screen.mirroring(mirroring) : streamName) : streamName,
     overInternet ? t.simulator.overInternetRoute(init.route as 'direct' | 'relay', init.rttMs) : null,
     codec === 'h264' && targetBitrate ? t.simulator.upTo(formatRate(Math.round(targetBitrate / 1000))) : null,
     stats && codec === 'h264' && stats.latencyMs !== null ? t.simulator.delay(Math.round(stats.latencyMs), Math.round(stats.latencyP95Ms ?? stats.latencyMs)) : null,
@@ -506,6 +546,15 @@ function renderToolbar(): void {
       items.push(button(t.simulator.installAxe, () => action('fix-axe'), { small: true }));
     } else if (info && init.kind === 'device') {
       items.push(h('span', { class: 'chip', title: t.simulator.deviceViewOnly }, t.simulator.viewOnly));
+    } else if (info && isPhone()) {
+      // Touch is for the iPhone the engine names: the one that mirrors when this PC knows it, else the tab's.
+      const phone = info.phone ?? null;
+      // An iPhone this PC doesn't know mirrors: touch stays off (the engine says why), nothing to turn on.
+      const otherPhone = codec !== 'jpeg' && mirroring !== null && mirroring !== phone?.name;
+      items.push(h('span', { class: 'chip', title: phone ? tidy(info.inputReason) ?? t.pc.screen.touchOffWhy : t.pc.screen.touchPlugIn }, t.simulator.viewOnly));
+      if (phone && !otherPhone) {
+        items.push(button(t.pc.screen.turnOnTouch, () => action('turn-on-touch', { udid: phone.udid }), { icon: touchBusy ? 'loading' : 'device-mobile', small: true, disabled: touchBusy }));
+      }
     }
   }
   items.push(h('span', { class: 'toolbar__spacer' }));
@@ -531,8 +580,33 @@ function renderToolbar(): void {
   }
   if (stats && streaming) items.push(h('span', { class: 'chip chip--stats', title: statsTip() }, codec === 'h264' ? `${stats.fps} fps` : `${stats.fps} fps · ${formatRate(stats.kbps)}`));
   items.push(button('', () => action('screenshot', app ? { window: watched } : {}), { icon: 'device-camera', title: app ? t.simulator.screenshot : `${t.simulator.screenshot} (Ctrl+Shift+S)`, small: true }));
+  items.push(button('', () => copyScreenshot(), { icon: 'copy', title: t.simulator.copyShot, small: true }));
   toolbar.replaceChildren(...items.filter((i): i is HTMLElement => i !== null));
-  toolbar.setAttribute('aria-label', app ? t.appWindow.controls : init.kind === 'device' ? t.simulator.deviceControls : t.simulator.controls);
+  toolbar.setAttribute('aria-label', app ? t.appWindow.controls : init.kind === 'device' || isPhone() ? t.simulator.deviceControls : t.simulator.controls);
+}
+
+/**
+ * Copy screenshot, as in Studio: the extension takes it, the page puts it on the clipboard (VS Code's
+ * own clipboard is text only). The write starts in the click, with the picture to come, so it still
+ * counts as the click's.
+ */
+function copyScreenshot(): void {
+  const req = nextReq++;
+  const png = new Promise<Blob>((resolve, reject) => shots.set(req, { resolve, reject }));
+  let shotFailed = false;
+  action('copy-screenshot', { req, ...(isApp() ? { window: watched } : {}) });
+  navigator.clipboard
+    .write([new ClipboardItem({ 'image/png': png.catch((err: unknown) => {
+      shotFailed = true;
+      throw err;
+    }) })])
+    .then(
+      () => action('screenshot-copied', { ok: true }),
+      (err: unknown) => {
+        // A screenshot that failed was said already.
+        if (!shotFailed) action('screenshot-copied', { ok: false, error: err instanceof Error ? err.message : String(err) });
+      },
+    );
 }
 
 // ─── Messages from the extension ───────────────────────────────────────────
@@ -553,6 +627,8 @@ window.addEventListener('message', (e: MessageEvent<FromExtension>) => {
       fallback = null;
       preparing = null;
       wait = null;
+      mirroring = null;
+      touchBusy = false;
       frameSize = null;
       hasFrame = false;
       stats = null;
@@ -595,6 +671,24 @@ window.addEventListener('message', (e: MessageEvent<FromExtension>) => {
         layout();
       }
       break;
+    case 'name':
+      if (init) {
+        init = { ...init, name: m.name };
+        render();
+      }
+      break;
+    case 'touch-busy':
+      touchBusy = m.busy;
+      renderToolbar();
+      break;
+    case 'shot': {
+      const waiting = shots.get(m.req);
+      if (!waiting) break;
+      shots.delete(m.req);
+      if (m.png) waiting.resolve(new Blob([m.png], { type: 'image/png' }));
+      else waiting.reject(new Error(m.error ?? ''));
+      break;
+    }
     case 'none':
       // No stream: the device and toolbar give way to a note.
       streamId = '';

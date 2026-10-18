@@ -2,12 +2,13 @@
  * Mouse, wheel and keyboard on the screen, turned into the engine's input
  * events, exactly as CapMac Studio's panes do (Simulator.tsx, AppWindow.tsx):
  *  - 'touch' (CapMac's helper): fingers stream as they move; Alt+drag pinches;
- *  - 'gestures' (AXe): whole taps and swipes;
+ *  - 'gestures' (AXe, WebDriverAgent): whole taps and swipes (gesture.ts);
  *  - 'mouse' (an app's window on the Mac): pointer, wheel and keys as on a Mac.
  */
 import { keystrokeForChar, keystrokeForKey } from '@capmac/core/shared/hid';
 import { macModifiers } from '@capmac/core/shared/electron';
 import type { InputEvent } from '../../../../desktop/src/shared/contract';
+import { fingerDown, fingerMoved, fingerUp, type GestureFinger } from './gesture';
 
 export type InputMode = 'touch' | 'gestures' | 'mouse';
 
@@ -49,7 +50,7 @@ export function attachInput(o: InputOptions): () => void {
   };
 
   // ─── Gestures mode ───────────────────────────────────────────────────────
-  let down: { x: number; y: number; t: number } | null = null;
+  let down: GestureFinger | null = null;
 
   // ─── Mouse mode ──────────────────────────────────────────────────────────
   let pressed = 0;
@@ -88,12 +89,17 @@ export function attachInput(o: InputOptions): () => void {
       if (two) send({ kind: 'touch2', phase: 'down', x1: p.x, y1: p.y, x2: 1 - p.x, y2: 1 - p.y });
       else send({ kind: 'touch', phase: 'down', x: p.x, y: p.y });
     } else {
-      down = { x: p.x, y: p.y, t: performance.now() };
+      down = fingerDown(p.x, p.y, performance.now());
     }
   };
 
   const onPointerMove = (e: PointerEvent) => {
     const mode = o.mode();
+    if (down && mode === 'gestures') {
+      const p = point(e);
+      fingerMoved(down, p.x, p.y, performance.now());
+      return;
+    }
     if (mode === 'mouse') {
       const p = point(e);
       lastMove = { x: p.x, y: p.y, buttons: e.buttons, modifiers: macModifiers(e) };
@@ -136,13 +142,9 @@ export function attachInput(o: InputOptions): () => void {
     down = null;
     if (!start || !mode) return;
     const p = point(e);
-    const dt = performance.now() - start.t;
-    if (Math.hypot(p.x - start.x, p.y - start.y) < 0.015) {
-      o.ripple(p.px, p.py);
-      send(dt > 500 ? { kind: 'swipe', x1: start.x, y1: start.y, x2: p.x, y2: p.y, durationMs: Math.round(Math.min(dt, 2000)) } : { kind: 'tap', x: p.x, y: p.y });
-    } else {
-      send({ kind: 'swipe', x1: start.x, y1: start.y, x2: p.x, y2: p.y, durationMs: Math.round(clamp(dt, 80, 1500)) });
-    }
+    // A finger that stayed where it went down (a tap or a long press) shows where it landed.
+    if (Math.hypot(p.x - start.x, p.y - start.y) < 0.015) o.ripple(p.px, p.py);
+    send(fingerUp(start, p.x, p.y, performance.now()));
   };
 
   const onPointerCancel = () => {

@@ -263,6 +263,11 @@ body {
   }
 }
 
+/* A button whose work is under way (Turn on touch). */
+.btn .codicon-loading {
+  animation: spin 1s linear infinite;
+}
+
 /* ─── Toolbar ────────────────────────────────────────────────────────────── */
 
 .toolbar {

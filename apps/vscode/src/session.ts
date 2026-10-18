@@ -201,7 +201,8 @@ export class Sessions implements SessionActions {
     if (!this.screen) return;
     if (await this.screen.show(app, { preserveFocus: false })) return;
     const dest = this.model.resolveDestination(app);
-    void vscode.window.showInformationMessage(dest.kind === 'pc-desktop' ? s.session.noScreenWindows : dest.kind === 'pc-iphone' ? s.session.noScreenPc : s.screen.noTarget);
+    // An iPhone at this PC has no screen here only while it doesn't trust this PC.
+    void vscode.window.showInformationMessage(dest.kind === 'pc-desktop' ? s.session.noScreenWindows : dest.kind === 'pc-iphone' ? studio.pc.trust.body : s.screen.noTarget);
   }
 
   started(app: WorkspaceApp, config: CapmacLaunch): void {
@@ -232,15 +233,12 @@ export class Sessions implements SessionActions {
 
   /** A full-size screenshot, saved in the project's .capmac folder and opened beside the code. */
   async screenshot(app: WorkspaceApp, window: number | null = null): Promise<string | null> {
-    const screen = this.model.screenFor(app);
-    if (!screen) {
-      void vscode.window.showInformationMessage(s.screen.noTarget);
-      return null;
-    }
+    const shot = await this.shoot(app, window);
+    if (!shot) return null;
+    const { screen } = shot;
     try {
-      const shot = await this.model.client.invoke('screen.screenshot', { mac: screen.mac, udid: screen.udid, projectPath: screen.projectPath, window: window ?? undefined });
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-      const name = screen.udid === 'mac-desktop' ? studio.appWindow.shotName(stamp) : screen.device ? studio.simulator.deviceShotName(screen.name, stamp) : `${screen.name} ${stamp}.png`;
+      const name = screen.udid === 'mac-desktop' ? studio.appWindow.shotName(stamp) : screen.backend === 'wsl' || screen.device ? studio.simulator.deviceShotName(screen.name, stamp) : `${screen.name} ${stamp}.png`;
       const dir = path.join(app.project.dir, '.capmac', 'screenshots');
       await fs.mkdir(dir, { recursive: true });
       const file = path.join(dir, name.replace(/[<>:"/\\|?*]+/g, '-'));
@@ -248,6 +246,37 @@ export class Sessions implements SessionActions {
       void vscode.commands.executeCommand('vscode.open', vscode.Uri.file(file), { viewColumn: vscode.ViewColumn.Beside, preview: true, preserveFocus: true });
       vscode.window.setStatusBarMessage(`$(device-camera) ${s.screen.saved(path.basename(file))}`, 5000);
       return file;
+    } catch (err) {
+      void vscode.window.showErrorMessage(`${s.screen.shotFailed}: ${errorText(err).message}`);
+      return null;
+    }
+  }
+
+  /** A full-size screenshot as a PNG, for the screen tab's Copy screenshot. */
+  async screenshotPng(app: WorkspaceApp, window: number | null = null): Promise<Uint8Array | null> {
+    const shot = await this.shoot(app, window);
+    return shot ? new Uint8Array(shot.png) : null;
+  }
+
+  /** Takes a full-size screenshot of the app's screen, or says why it can't (null). */
+  private async shoot(app: WorkspaceApp, window: number | null): Promise<{ png: ArrayBuffer; screen: NonNullable<ReturnType<Model['screenFor']>> } | null> {
+    const screen = this.model.screenFor(app);
+    if (!screen) {
+      void vscode.window.showInformationMessage(s.screen.noTarget);
+      return null;
+    }
+    // An iPhone at this PC: the newest picture of its open screen (the tab opens it).
+    const phoneStream = screen.backend === 'wsl' ? this.screen?.phoneStreamId ?? null : null;
+    if (screen.backend === 'wsl' && !phoneStream) {
+      await this.showScreen(app);
+      void vscode.window.showInformationMessage(s.screen.shotOnceShown);
+      return null;
+    }
+    try {
+      const shot = screen.backend === 'mac'
+        ? await this.model.client.invoke('screen.screenshot', { mac: screen.mac, udid: screen.udid, projectPath: screen.projectPath, window: window ?? undefined })
+        : await this.model.client.invoke('iphone.screenshot', { streamId: phoneStream! });
+      return { png: shot.png, screen };
     } catch (err) {
       void vscode.window.showErrorMessage(`${s.screen.shotFailed}: ${errorText(err).message}`);
       return null;

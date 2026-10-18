@@ -231,6 +231,8 @@ export interface ScreenInfo {
   inputMode?: 'touch' | 'gestures' | 'mouse';
   /** Why input is not available (or limited to gestures). */
   inputReason?: string;
+  /** An iPhone at this PC with no Mac: the one touch is for (it follows the iPhone that mirrors). */
+  phone?: { udid: string; name: string };
   /** Points to pixels. */
   scale?: number;
   codec?: 'h264' | 'jpeg';
@@ -249,7 +251,11 @@ export interface StreamFallback {
 /** Normalized screen coordinates: 0 to 1 from the top left corner. */
 export type InputEvent =
   | { kind: 'tap'; x: number; y: number }
-  | { kind: 'swipe'; x1: number; y1: number; x2: number; y2: number; durationMs: number }
+  /**
+   * `durationMs`: while the finger moves. `pressMs`: how long it held still before it moved (a long
+   * press, then a drag); `holdMs`: how long it held still at the end before it lifted.
+   */
+  | { kind: 'swipe'; x1: number; y1: number; x2: number; y2: number; durationMs: number; pressMs?: number; holdMs?: number }
   /** `via: 'paste'` puts the text on the simulator's pasteboard and pastes it; 'type' (the default) types it. */
   | { kind: 'text'; text: string; via?: 'type' | 'paste' }
   | { kind: 'key'; key: string }
