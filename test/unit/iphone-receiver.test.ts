@@ -25,6 +25,11 @@ const lines = {
   closed: 'Open connections: 0',
   streaming: 'Begin streaming to GStreamer video pipeline',
   missing: "Required gstreamer plugin 'libav' not found",
+  // Mirroring stopped in Control Center (in this order, before the connection closed).
+  teardown: 'TEARDOWN request,  96=0, 110=1',
+  shutdown: 'video_reset: type = RTP_Shutdown',
+  // No heartbeat from the iPhone for 15 seconds.
+  lost: '***ERROR lost connection with client (network problem?)',
 };
 
 describe('the screen-mirroring receiver', () => {
@@ -34,6 +39,13 @@ describe('the screen-mirroring receiver', () => {
     expect(parseReceiverLine(lines.closed)).toEqual({ t: 'connections', count: 0 });
     expect(parseReceiverLine(lines.streaming)).toEqual({ t: 'streaming' });
     expect(parseReceiverLine(lines.missing)).toEqual({ t: 'error', message: 'The screen receiver is missing its libav part.' });
+    expect(parseReceiverLine(lines.shutdown)).toEqual({ t: 'mirror-stopped' });
+    expect(parseReceiverLine('video_reset: type = RTP_to_HLS_Shutdown')).toEqual({ t: 'mirror-stopped' });
+    expect(parseReceiverLine(lines.lost)).toEqual({ t: 'mirror-stopped' });
+    expect(parseReceiverLine('*** ERROR lost connection with client (network problem?)')).toEqual({ t: 'mirror-stopped' });
+    // Another iPhone taking over is no stop: its picture follows.
+    expect(parseReceiverLine('video_reset: type = NoHold')).toBeNull();
+    expect(parseReceiverLine(lines.teardown)).toBeNull();
     expect(parseReceiverLine('POST /feedback RTSP/1.0')).toBeNull();
     // A late heartbeat on a busy Wi-Fi is no error: mirroring goes on.
     expect(parseReceiverLine('*** ERROR: 3 seconds since last client feedback request (expected every two seconds); client may be offline')).toBeNull();
@@ -77,6 +89,48 @@ describe('the screen-mirroring receiver', () => {
     (receiver as unknown as { catchUpListener(l: ReceiverListener): void }).catchUpListener(after.listener);
     expect(after.states).toEqual(['waiting']);
     expect(after.types).toEqual([]);
+  });
+
+  it('knows mirroring stopped when a connection from an earlier attempt stays open', () => {
+    const receiver = new MirrorReceiver({ name: 'CapMac', home: 'C:\\nowhere' });
+    const internals = receiver as unknown as { onLine(line: string): void; onPacket(packet: Buffer): void; state: ReceiverState };
+    internals.state = 'waiting';
+    const pane = listen();
+    receiver.subscribe({ ...pane.listener, onLog: () => undefined });
+    // A connection that never went away, then the iPhone that mirrors.
+    internals.onLine(lines.open);
+    internals.onLine('Open connections: 2');
+    internals.onLine(lines.client);
+    for (const packet of rtpPackets()) internals.onPacket(packet);
+    expect(receiver.state).toBe('mirroring');
+
+    // Stopped in Control Center: the old connection keeps the count at 1.
+    internals.onLine(lines.teardown);
+    internals.onLine(lines.shutdown);
+    internals.onLine(lines.open);
+    expect(receiver.state).toBe('waiting');
+    expect(receiver.client).toBeNull();
+    expect(pane.states.at(-1)).toBe('waiting');
+
+    // It mirrors again: the picture comes back, then the iPhone goes quiet and UxPlay drops it.
+    internals.onLine(lines.client);
+    for (const packet of rtpPackets()) internals.onPacket(packet);
+    expect(receiver.state).toBe('mirroring');
+    internals.onLine(lines.lost);
+    expect(receiver.state).toBe('waiting');
+    receiver.stop();
+  });
+
+  it('tells the screens nobody mirrors when an iPhone stops before its picture came', () => {
+    const receiver = new MirrorReceiver({ name: 'CapMac', home: 'C:\\nowhere' });
+    const internals = receiver as unknown as { onLine(line: string): void; state: ReceiverState };
+    internals.state = 'waiting';
+    const clients: Array<string | null> = [];
+    receiver.subscribe({ onVideo: () => undefined, onState: (_state, client) => clients.push(client?.name ?? null), onLog: () => undefined });
+    internals.onLine(lines.client);
+    internals.onLine(lines.shutdown);
+    expect(clients.at(-1)).toBeNull();
+    receiver.stop();
   });
 
   it('asks for mirroring to start again when a screen opens past the catch-up limit', () => {

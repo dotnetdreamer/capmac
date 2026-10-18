@@ -139,6 +139,8 @@ export type ReceiverEvent =
   | { t: 'ready' }
   | { t: 'client'; client: MirrorClient }
   | { t: 'connections'; count: number }
+  /** The mirrored picture's stream ended, whatever other connections stay open. */
+  | { t: 'mirror-stopped' }
   | { t: 'streaming' }
   | { t: 'error'; message: string };
 
@@ -149,6 +151,9 @@ export function parseReceiverLine(line: string): ReceiverEvent | null {
   if (/register_dnssd: advertised/.test(line)) return { t: 'ready' };
   if ((m = /connection request from (.+) \((.+)\) with deviceID = (\S+)/.exec(line))) return { t: 'client', client: { name: m[1]!.trim(), model: m[2]!.trim(), deviceId: m[3]!.trim() } };
   if ((m = /Open connections: (\d+)/.exec(line))) return { t: 'connections', count: Number(m[1]) };
+  // Mirroring stopped on the iPhone (its TEARDOWN; iOS 27 sends one without the video stream's
+  // type), or UxPlay heard nothing from it for too long and drops its connections.
+  if (/video_reset: type = RTP(?:_to_HLS)?_Shutdown|lost connection with client/.test(line)) return { t: 'mirror-stopped' };
   if (/Begin streaming to GStreamer video pipeline/.test(line)) return { t: 'streaming' };
   if ((m = /\*\*\* ERROR: (.+)/.exec(line))) return { t: 'error', message: m[1]!.trim() };
   if ((m = /Required gstreamer plugin '(.+)' not found/.exec(line))) return { t: 'error', message: `The screen receiver is missing its ${m[1]} part.` };
@@ -318,13 +323,11 @@ export class MirrorReceiver {
         this.expectPicture();
         break;
       case 'connections':
-        if (event.count === 0) {
-          // The iPhone stopped mirroring: what was kept belongs to that session.
-          this.client = null;
-          this.stopExpectingPicture();
-          this.resetStream();
-          if (this.state !== 'stopped' && this.state !== 'starting') this.setState('waiting');
-        }
+        if (event.count === 0) this.mirrorStopped();
+        break;
+      case 'mirror-stopped':
+        // Not the connections' count: one left open by an earlier attempt (or another device) keeps it above 0.
+        this.mirrorStopped();
         break;
       case 'streaming':
         break;
@@ -332,6 +335,18 @@ export class MirrorReceiver {
         this.log('error', event.message);
         break;
     }
+  }
+
+  /** The iPhone stopped mirroring: what was kept belongs to that session. */
+  private mirrorStopped(): void {
+    const had = this.client;
+    this.client = null;
+    this.stopExpectingPicture();
+    this.resetStream();
+    if (this.state === 'stopped' || this.state === 'starting') return;
+    if (this.state !== 'waiting') this.setState('waiting');
+    // It stopped before its picture came: the screens still hear that nobody mirrors now.
+    else if (had) for (const listener of this.listeners) listener.onState('waiting', null);
   }
 
   private onPacket(packet: Buffer): void {
