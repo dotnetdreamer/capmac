@@ -208,6 +208,9 @@ Plug the iPhone into your PC. See [Build without a Mac](#build-without-a-mac)
 CapMac can build, sign and install Capacitor, Flutter and React Native iPhone apps on Windows, with no Mac.
 It's experimental
 
+You need WSL 2, an iPhone and a paid [Apple Developer Program](https://developer.apple.com/programs/) membership (US$99 a year).
+A free Apple Account can't sign apps here yet
+
 ```powershell
 capmac wsl setup
 capmac backend wsl

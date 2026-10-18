@@ -78,7 +78,10 @@ capmac run      # build, open in the simulator, show the logs
 capmac dev      # live reload as you save
 ```
 
-**Or run it with no Mac** (experimental). You need WSL 2 (`wsl --install --no-distribution` adds it), an iPhone, and a paid Apple Developer Program membership
+**Or run it with no Mac** (experimental). You need WSL 2 (`wsl --install --no-distribution` adds it) and an iPhone
+
+> [!IMPORTANT]
+> **You need a paid Apple developer account.** Building with no Mac needs an [Apple Developer Program](https://developer.apple.com/programs/) membership (US$99 a year). A free Apple Account can't sign apps this way yet
 
 ```powershell
 cd my-app
@@ -104,7 +107,7 @@ In CapMac Studio it's all buttons. Pair your Mac or pick **This PC (no Mac)**, a
 Apple's simulator only runs on macOS, but your iPhone doesn't care where its app was built. CapMac's no-Mac mode builds, signs and installs the app from Windows
 
 - **No Linux to learn.** CapMac sets up its own Ubuntu in WSL and installs every tool in it. Your own WSL setup stays as it is
-- **One Apple sign-in.** You sign in once on Apple's website. CapMac makes the certificate, App IDs and profiles, and downloads Xcode to take the iPhone SDK from it
+- **One Apple sign-in.** You sign in once on Apple's website, with your paid developer account. CapMac makes the certificate, App IDs and profiles, and downloads Xcode to take the iPhone SDK from it
 - **USB or Wi-Fi.** Plug the iPhone in for the first run. After that, it works over Wi-Fi too
 - **Live reload.** Capacitor apps reload as you save and React Native apps get Fast Refresh. Flutter apps rebuild and reopen
 
@@ -145,7 +148,7 @@ With a Mac, CapMac sends only the files that changed, builds with Xcode, and str
 ## FAQ
 
 **Is it free?**
-Yes. CapMac is open source under the MIT license. Apple charges for its Developer Program, which you need to sign apps for an iPhone without a Mac
+Yes. CapMac is open source under the MIT license. The simulator on your Mac needs no Apple account. Building with no Mac needs a paid Apple Developer Program membership (US$99 a year), and a free Apple Account can't sign apps that way yet
 
 **Does my code go anywhere?**
 Only to your own Mac, over SSH. Without a Mac, it stays on your PC. There's no CapMac account, no CapMac server and no telemetry. CapMac even turns off Flutter's analytics

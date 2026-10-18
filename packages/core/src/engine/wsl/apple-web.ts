@@ -853,7 +853,7 @@ export async function chooseAppleSignIn(ctx: EngineContext, options: AppleWebOpt
   const saved = hasAppleWebSignIn(options);
   const way = await ctx.prompter.choose<'web' | 'web-fresh' | 'password'>({
     message: 'Sign in to Apple',
-    detail: 'CapMac needs your Apple developer account to sign your app. Who should do the Apple part?',
+    detail: 'CapMac needs your paid Apple developer account to sign your app. Who should do the Apple part?',
     items: [
       { label: 'Let CapMac do it (recommended)', value: 'web', hint: saved ? 'Uses your saved sign-in to Apple’s website. Nothing to type' : `Sign in once on Apple’s website in ${browser.name}. CapMac remembers it and does the rest, the certificate too` },
       ...saved ? [{ label: 'Let CapMac do it with a fresh sign-in', value: 'web-fresh' as const, hint: 'Forgets the saved sign-in, then you sign in to Apple again' }] : [],

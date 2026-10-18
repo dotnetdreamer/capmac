@@ -1344,10 +1344,16 @@ export const en = {
     show: 'Show',
     title: 'Build on this PC',
     intro: 'CapMac builds and signs your iPhone app on this PC, then installs it on your iPhone over USB. No Mac needed',
+    /** Signing here needs Apple's paid program: a free Apple Account has no developer team. */
+    paid: {
+      title: 'You need a paid Apple developer account',
+      body: 'Apple’s Developer Program costs US$99 a year. A free Apple Account can’t sign apps here yet',
+      join: 'Join the Developer Program',
+    },
     steps: {
       tools: { title: 'Build tools', desc: 'Installs the tools that build your app. The longest step on a new PC' },
       devices: { title: 'iPhone connection', desc: 'Lets this PC reach your iPhone over USB, with Apple’s free Apple Devices app' },
-      signIn: { title: 'Apple sign-in', desc: 'Your Apple developer account, so CapMac can sign your app' },
+      signIn: { title: 'Apple sign-in', desc: 'Your paid Apple developer account, so CapMac can sign your app' },
       signing: { title: 'Signing', desc: 'Apple’s permission for your app to run on your iPhone' },
       download: { title: 'Xcode download', desc: 'Xcode 26.6 from Apple, about 3 GB. CapMac keeps only the iPhone parts' },
       sdk: { title: 'iPhone SDK', desc: 'Takes the iPhone parts out of Xcode' },

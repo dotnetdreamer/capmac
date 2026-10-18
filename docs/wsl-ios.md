@@ -16,6 +16,8 @@ This remains an experimental build backend, not a guarantee that every Xcode fea
 
 ## Start here
 
+You need WSL 2, an iPhone and a paid [Apple Developer Program](https://developer.apple.com/programs/) membership (US$99 a year). A free Apple Account can't sign apps here yet, so setup would stop at the Apple sign-in
+
 You can set up and build either in CapMac Studio or in PowerShell. Both run the same setup, save it in the same files, and share the project's choice of where it builds.
 
 **In CapMac Studio:** open your app, click the Mac picker next to **Run** and choose **This PC (no Mac)**. Without a paired Mac, the workspace also offers **No Mac? Build on this PC instead**, and the first screen of a new Studio offers **No Mac? Build on this PC**. The setup screen opens; press **Start setup**. See [Building in CapMac Studio](#building-in-capmac-studio) below.

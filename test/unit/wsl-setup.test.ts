@@ -202,6 +202,19 @@ describe('guided WSL setup', () => {
     expect(JSON.stringify(events)).not.toContain('never-save');
   });
 
+  it('says a paid Apple developer account is needed before the long tools step, only when it signs in', async () => {
+    const events: EngineEvent[] = [];
+    const context = ctx();
+    context.emit = (event) => events.push(event);
+    boundary.bootstrap.mockImplementation(async () => { boundary.order.push(events.some((event) => event.type === 'log' && /paid Apple Developer Program/.test(event.message)) ? 'told, then tools' : 'tools'); return installed; });
+    await guidedWslSetup({}, directory, context, signal());
+    expect(boundary.order[0]).toBe('told, then tools');
+
+    events.length = 0;
+    await guidedWslSetup({ sdk: '/apple/existing.sdk', xcodeVersion: '26.6' }, directory, context, signal());
+    expect(events.some((event) => event.type === 'log' && /paid Apple Developer Program/.test(event.message))).toBe(false);
+  });
+
   it('says which steps were not needed, and which were done before', async () => {
     const events: EngineEvent[] = [];
     const context = ctx();

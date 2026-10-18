@@ -220,7 +220,7 @@ async function signIn(ctx: EngineContext, signal: AbortSignal | undefined, via: 
       expo.Teams.selectTeamAsync = async (props = {}) => {
         throwIfAborted(signal);
         const teams = await expo.Teams.getTeamsAsync(props.restoringSession);
-        if (!teams.length) throw new UserError('This Apple Account has no developer team.', 'Join the Apple Developer Program to sign apps for a physical iPhone.');
+        if (!teams.length) throw new UserError('This Apple Account has no developer team.', 'A free Apple Account can’t sign apps here yet. Join the Apple Developer Program (US$99 a year) at developer.apple.com/programs, then run setup again.');
         chosenTeam = props.teamId ? teams.find((team) => team.teamId === props.teamId) : teams.length === 1 ? teams[0] : await ctx.prompter.choose({
           message: 'Choose your Apple developer team:', items: teams.map((team) => ({ label: `${team.name} (${team.teamId})`, value: team })),
         });

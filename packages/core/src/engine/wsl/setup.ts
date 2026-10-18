@@ -121,6 +121,8 @@ export async function guidedWslSetup(input: WslOptions, cwd: string, ctx: Engine
   let archive = input.xcode ? path.resolve(cwd, input.xcode) : !ready.sdk ? await findDownloadedXcode() : undefined;
   const needsDownload = !ready.sdk && !archive;
   const needsSigning = !!project && (!!input.appleLogin || !ready.signing);
+  // A free Apple Account stops at the sign-in, after the long tools step: say so first.
+  if (input.appleLogin || needsDownload || needsSigning) log(ctx, 'info', 'Building on this PC needs a paid Apple Developer Program membership (US$99 a year). A free Apple Account can’t sign apps here yet.');
 
   // 1. Tools first: no sign-in needed, and the longest step on a new PC.
   const output = (text: string, stream: 'stdout' | 'stderr') => ctx.emit({ type: 'tool-output', text, stream });
