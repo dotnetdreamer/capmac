@@ -329,3 +329,26 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.release.outputs.tag }}
         run: gh workflow run npm.yml --repo "$GITHUB_REPOSITORY" --ref "$RELEASE_TAG"
+
+  vscode:
+    needs: [version, release]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: vscode-extension
+          path: vsix
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          package-manager-cache: false
+      # No checkout or project scripts in the job with publish rights. --oidc signs in through the
+      # Marketplace's trusted publishing policy for this workflow, so no token is stored. vsce
+      # 4.0.1-1 is the first with the Marketplace's final token exchange (4.0.0's no longer works).
+      - name: Publish to the VS Code Marketplace
+        env:
+          npm_config_ignore_scripts: 'true'
+          VERSION: ${{ needs.version.outputs.version }}
+        run: npx --yes @vscode/vsce@4.0.1-3 publish --oidc --packagePath "vsix/capmac-vscode-${VERSION}.vsix" --skip-duplicate

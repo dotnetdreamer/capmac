@@ -104,5 +104,5 @@ Left out on purpose: Studio's takeover of another CapMac's run (VS Code's debug 
 
 ## Not done yet
 
-- Publishing to the Marketplace (needs a publisher account; the `publisher` field is a placeholder) and per-architecture `.vsix` files (the WebRTC module for remote access is most of the size).
+- Per-architecture `.vsix` files (the WebRTC module for remote access is most of the size). The release workflow publishes one universal `.vsix` to the Marketplace (see [releases.md](releases.md))
 - A real JavaScript debugger: Electron apps already expose the DevTools protocol on the Mac, which could be tunnelled to VS Code's `js-debug`; Flutter's VM service could be handed to the Dart extension.
