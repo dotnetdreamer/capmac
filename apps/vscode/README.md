@@ -149,3 +149,7 @@ The screen stream (smooth video, or compatible pictures), your paired Macs and e
 ## Privacy
 
 CapMac talks to your Mac over SSH with a key it makes on this PC. Passwords are asked when needed and never saved. Nothing goes to a CapMac server: remote access, when you turn it on, uses a signaling server you run yourself.
+
+## Open-source parts
+
+To show an iPhone's screen on a Windows PC, CapMac for VS Code includes CapMac's screen-mirroring receiver: UxPlay (GPL-3.0) with GStreamer and other libraries under the LGPL. Their licenses are in the extension's `dist/mirror-receiver/licenses` folder. Their complete source is the `capmac-mirror-receiver-…-source.zip` file on [CapMac's releases page](https://github.com/dotnetdreamer/capmac/releases)

@@ -101,8 +101,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'CLI help failed.' }
       - name: Pack CLI
         run: npm pack --workspace capmac --ignore-scripts --pack-destination "$env:RUNNER_TEMP"
-      # This PC's iPhone screen: the screen-mirroring receiver (UxPlay, GPL-3.0) the installers
-      # ship, made by packages/core/receiver/build.sh. Kept between runs while the recipe is the same.
+      # This PC's iPhone screen: the screen-mirroring receiver (UxPlay, GPL-3.0) the installers and
+      # the VS Code extension ship, made by packages/core/receiver/build.sh with its complete source
+      # (the release attaches it). Kept between runs while the recipe is the same.
       - name: Restore the screen receiver
         id: receiver
         uses: actions/cache@v5
@@ -120,10 +121,19 @@ jobs:
       - name: Build the screen receiver
         if: steps.receiver.outputs.cache-hit != 'true'
         shell: msys2 {0}
+        env:
+          CAPMAC_SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}/releases
         run: |
           dir="$(cygpath -u "$RUNNER_TEMP")/mirror-receiver"
           mkdir -p "$dir" && cd "$dir"
           bash "$(cygpath -u "$GITHUB_WORKSPACE")/packages/core/receiver/build.sh"
+      - name: Check the screen receiver's source
+        run: |
+          $source = @(Get-ChildItem -LiteralPath "$env:RUNNER_TEMP/mirror-receiver" -Filter 'capmac-mirror-receiver-*-source.zip')
+          if ($source.Count -ne 1) { throw 'The screen receiver has no source zip (packages/core/receiver/build.sh makes it).' }
+          if (-not (Select-String -LiteralPath "$env:RUNNER_TEMP/mirror-receiver/receiver/SOURCES.txt" -SimpleMatch $source[0].Name -Quiet)) {
+            throw "The receiver's SOURCES.txt doesn't name $($source[0].Name)."
+          }
       - name: Build Windows installers and portable executables
         run: npm run desktop:build
         env:
@@ -184,10 +194,19 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: ${{ runner.temp }}/capmac-${{ needs.version.outputs.version }}.tgz
-      # The VS Code extension: the same engine and agent, packaged as a .vsix.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mirror-receiver-source
+          overwrite: true
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          path: ${{ runner.temp }}/mirror-receiver/capmac-mirror-receiver-*-source.zip
+      # The VS Code extension: the same engine and agent, packaged as a .vsix, with the screen receiver.
       - name: Build the VS Code extension
         run: npm run vscode:package
         env:
+          CAPMAC_MIRROR_RECEIVER: ${{ runner.temp }}/mirror-receiver/receiver
           CAPMAC_RELEASE_NOTES_URL: ${{ vars.CAPMAC_RELEASE_NOTES_URL || format('https://github.com/{0}/releases/tag/v{{version}}', github.repository) }}
           CAPMAC_DEFAULT_SIGNAL_URL: ${{ vars.CAPMAC_DEFAULT_SIGNAL_URL }}
       - name: Check the VS Code extension
@@ -195,6 +214,16 @@ jobs:
           $vsix = "apps/vscode/capmac-vscode-$env:RELEASE_VERSION.vsix"
           if (-not (Test-Path -LiteralPath $vsix -PathType Leaf)) {
             throw "Missing release asset: $vsix"
+          }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $vsix))
+          try {
+            $names = $zip.Entries.FullName
+            foreach ($file in @('extension/dist/mirror-receiver/bin/uxplay.exe', 'extension/dist/mirror-receiver/SOURCES.txt')) {
+              if ($names -notcontains $file) { throw "The .vsix is missing the screen receiver ($file)." }
+            }
+          } finally {
+            $zip.Dispose()
           }
       - uses: actions/upload-artifact@v7
         with:
@@ -232,6 +261,11 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: vscode-extension
+          path: assets
+      # The screen receiver's complete source (GPL and LGPL), next to the apps that ship it.
+      - uses: actions/download-artifact@v8
+        with:
+          name: mirror-receiver-source
           path: assets
       - name: Commit version, tag and publish release
         id: release
@@ -271,6 +305,8 @@ jobs:
           Install CapMac for VS Code with: code --install-extension capmac-vscode-${VERSION}.vsix (or Extensions › … › Install from VSIX)
 
           The update feed and installer blockmaps are included for installed copies of Studio. Builds are unsigned unless repository signing settings are configured.
+
+          Studio and CapMac for VS Code include CapMac's screen-mirroring receiver for iPhones: UxPlay (GPL-3.0) with GStreamer and other libraries under the LGPL. Its complete source is $(basename assets/capmac-mirror-receiver-*-source.zip)
           EOF
           if ! gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$tag" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "CapMac $tag" --notes-file "$RUNNER_TEMP/release-notes.md"
