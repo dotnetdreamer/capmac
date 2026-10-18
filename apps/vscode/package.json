@@ -324,6 +324,12 @@
         "icon": "$(target)"
       },
       {
+        "command": "capmac.copyDeviceId",
+        "title": "%cmd.copyDeviceId%",
+        "category": "CapMac",
+        "icon": "$(copy)"
+      },
+      {
         "command": "capmac.runOnTarget",
         "title": "%cmd.runOnTarget%",
         "category": "CapMac",
@@ -402,6 +408,18 @@
         "icon": "$(circle-slash)"
       },
       {
+        "command": "capmac.remoteSettings",
+        "title": "%cmd.remoteSettings%",
+        "category": "CapMac",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "capmac.remoteServer",
+        "title": "%cmd.remoteServer%",
+        "category": "CapMac",
+        "icon": "$(server)"
+      },
+      {
         "command": "capmac.setupPc",
         "title": "%cmd.setupPc%",
         "category": "CapMac",
@@ -469,6 +487,11 @@
         "icon": "$(sparkle)"
       },
       {
+        "command": "capmac.removeSkill",
+        "title": "%cmd.removeSkill%",
+        "category": "CapMac"
+      },
+      {
         "command": "capmac.getStarted",
         "title": "%cmd.getStarted%",
         "category": "CapMac",
@@ -491,6 +514,10 @@
         },
         {
           "command": "capmac.useTarget",
+          "when": "false"
+        },
+        {
+          "command": "capmac.copyDeviceId",
           "when": "false"
         },
         {
@@ -551,6 +578,10 @@
         },
         {
           "command": "capmac.remoteOff",
+          "when": "capmac.hasMac"
+        },
+        {
+          "command": "capmac.remoteSettings",
           "when": "capmac.hasMac"
         },
         {
@@ -787,6 +818,11 @@
           "group": "2_sim@2"
         },
         {
+          "command": "capmac.copyDeviceId",
+          "when": "view == capmac.devices && viewItem =~ /^target\\.(simulator|device|pciphone)/",
+          "group": "9_copy@1"
+        },
+        {
           "command": "capmac.checkMac",
           "when": "view == capmac.devices && viewItem =~ /^mac\\./",
           "group": "inline@1"
@@ -817,9 +853,14 @@
           "group": "2_tools@2"
         },
         {
-          "command": "capmac.remoteOff",
+          "command": "capmac.remoteSettings",
           "when": "view == capmac.devices && viewItem =~ /^mac\\..*\\.remoteon/",
           "group": "2_tools@2"
+        },
+        {
+          "command": "capmac.remoteOff",
+          "when": "view == capmac.devices && viewItem =~ /^mac\\..*\\.remoteon/",
+          "group": "2_tools@3"
         },
         {
           "command": "capmac.unpairMac",
@@ -1134,6 +1175,11 @@
           "type": "boolean",
           "default": false,
           "markdownDescription": "%cfg.verbose%"
+        },
+        "capmac.problems.packageWarnings": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%cfg.packageWarnings%"
         },
         "capmac.codeLens": {
           "type": "boolean",

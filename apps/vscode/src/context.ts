@@ -49,7 +49,8 @@ export class ContextKeys implements vscode.Disposable {
     // Live actions: Flutter hot-reloads, React Native reloads through Metro, an Electron app reloads its windows; a Flutter app hot-restarts.
     this.set('capmac.canReload', live && Boolean(app && reloads(app)) && backend !== 'wsl');
     this.set('capmac.canHotRestart', live && framework === 'flutter' && backend !== 'wsl');
-    this.set('capmac.canRebuild', live && backend !== 'wsl');
+    // Rebuild and Clean Rebuild whenever the app can run, as in Studio: live reload on a Mac rebuilds in place, anything else starts again.
+    this.set('capmac.canRebuild', ready && Boolean(app));
     this.set('capmac.canRelaunch', live && backend !== 'wsl');
     // React Native (and Expo): DevTools for the app in live reload, and Run in release mode.
     const reactNative = isNative(framework ?? '');

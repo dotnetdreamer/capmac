@@ -56,11 +56,12 @@ Live actions (`src/session.ts`): `r` is `sessions.reload` for Flutter, React Nat
 | `src/ui/devicesTree.ts` | Devices view: Macs (simulators grouped by iOS version, devices, Mac desktop, health with fixes) and this PC |
 | `src/ui/statusBar.ts`, `codeLens.ts`, `diagnostics.ts` | Status bar, Run/Live above config files, Problems |
 | `src/ui/prompts.ts` | The engine's questions as input boxes, pick lists and dialogs; a "waiting" question (a browser sign-in) is a progress notification the engine can withdraw |
-| `src/ui/pickers.ts` | Choosing the app, where it runs, where it builds; pairing with Bonjour/Tailscale discovery |
+| `src/ui/pickers.ts` | Choosing the app, where it runs, where it builds; pairing with Bonjour/Tailscale discovery; Build an IPA's kinds, upload, team and folder (the team and folder kept per project in workspace state) |
+| `src/ui/remote.ts` | Remote access, as Studio's Mac card (`features/macs/RemoteAccess.tsx`): on (asking for the server first when there is none), route, relay, keep awake, test, the PCs (revoke), move to the saved server, off (on this PC only when the Mac can't be reached), and the server setting |
 | `src/pcSetup.ts` | This PC's setup (WSL backend) in a progress notification, and its health check |
 | `src/lm/tools.ts` | `capmac_status`, `capmac_run`, `capmac_stop`, `capmac_screenshot` (an image from VS Code 1.110), `capmac_logs` |
 | `src/terminal.ts` | `capmac` in VS Code's terminals (core's `launcherFiles`, appended to PATH), and on the extension host's own PATH for the agents other extensions start |
-| `src/skill.ts` | CapMac's skill for coding agents (core's `agent-skills.ts`): added by itself as `capmac.agents.addSkill` says, and **Add the CapMac Skill for AI Agents…** |
+| `src/skill.ts` | CapMac's skill for coding agents (core's `agent-skills.ts`): added by itself as `capmac.agents.addSkill` says, **Add the CapMac Skill for AI Agents…** and **Remove the CapMac Skill for AI Agents…** (core's `removeSkill`, which never removes a skill CapMac didn't write; the place is then remembered, so CapMac doesn't add it back by itself) |
 | `src/i18n.ts` | The extension's own words; Studio's are reused |
 
 ## The skill for coding agents
@@ -90,6 +91,10 @@ Checked on main after the merge: 31 unit tests (Studio's real host finds the Rea
 Activation: `workspaceContains` takes a pattern as a glob only when it has `*` or `?`, so a root pattern with braces alone (`metro.config.{js,ts}`) never matches; React Native folders activate on `metro.config.*`, Expo ones on `app.config.js|ts` or `eas.json` (else when the CapMac view opens). The patterns go two folders down (`*/*/capacitor.config.{json,ts,js}`): a monorepo's `apps/mobile` activates too (detection itself looks three levels down).
 
 Workspaces of several folders (checked live 2026-10-17 on IK's M1): three samples side by side, the Capacitor sample beside a web site, notes, a Cordova and a Tauri app (shown as not supported yet), only unsupported folders (the Run view says "these folders"), one folder holding several projects, and a monorepo. The current app follows the open file until one is picked in the Apps view; React Native Live and a Capacitor Run ran at once from two folders, each in its own debug session and Debug Console, and the Apps view marks every app that runs (the model remembers which app each session was started for: the engine's events name only the project).
+
+Studio parity (2026-10-18, checked live on IK's M1 in a test VS Code driven over CDP): the Mac tooltip with the health check's probe (macOS, Xcode, chip, simulators) and the paired date, Copy UDID from a simulator's menu, Build an IPA's options (the Team ID checked, saved in capitals, cleared again), the remote access commands up to the server question (no server here to go further), the sync size in the Apps view, the skill added to a project and removed again, the `capmac.problems.packageWarnings` setting. Not checked live: remote access with a server, an IPA upload, a run on this PC without building
+
+Left out on purpose: Studio's takeover of another CapMac's run (VS Code's debug sessions own their runs), its console view (the Debug Console is that) and its keyboard shortcuts (VS Code's keybindings are the user's)
 
 ## Not done yet
 

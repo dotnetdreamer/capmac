@@ -98,6 +98,8 @@ export const s = {
     pickPlaceholder: 'Run and Live use the app you pick. The capmac command does too',
     project: (name: string, rel: string) => (rel ? `${name} · ${rel}` : name),
     switched: (app: string) => `Run and Live use the ${app} now`,
+    /** What a sync copies to the Mac (Studio's project cards). */
+    syncSize: (files: string, size: string) => `A sync copies ${files} (${size}) to the Mac`,
   },
 
   devices: {
@@ -122,7 +124,6 @@ export const s = {
     defaultMac: 'default',
     latency: (ms: number) => `${ms} ms`,
     macTip: (label: string, host: string, detail: string) => `${label} (${host})\n${detail}`,
-    lastSeen: (xcode: string | null, macos: string | null) => [macos ? `macOS ${macos}` : null, xcode ? `Xcode ${xcode}` : null].filter(Boolean).join(' · '),
     remoteOn: 'Reachable from anywhere',
     fixIt: 'Fix it',
   },
@@ -204,13 +205,12 @@ export const s = {
     fixing: (label: string) => `${label}…`,
     fixed: 'Fixed',
     keychainUnlocked: 'Keychain unlocked',
-    remoteOn: (mac: string) => `${mac} is reachable from anywhere`,
-    remoteOff: (mac: string) => `Remote access is off for ${mac}`,
-    remoteNeedsServer: 'Remote access needs your own signaling server first',
-    remoteServerPrompt: 'Your signaling server (wss://…)',
-    remoteOffConfirm: (mac: string) => `Turn off remote access for ${mac}?`,
-    remoteOffDetail: 'This PC then reaches the Mac only on your network',
-    turnOff: 'Turn off',
+  },
+
+  /** The remote access server, as Studio's Settings has it. */
+  remote: {
+    builtIn: 'This one comes with CapMac. Type another to use your own',
+    emptyClears: 'Leave it empty to remove it',
   },
 
   session: {
@@ -261,6 +261,11 @@ export const s = {
     done: (name: string) => `IPA ready: ${name}`,
     reveal: 'Show in folder',
     copyPath: 'Copy path',
+    /** The Build an IPA pick: the team and folder below the kinds (Studio's dialog has them as fields). */
+    options: 'Options',
+    teamFromProject: 'From your Xcode project or capmac.json',
+    defaultFolder: 'The project’s build\\ios folder',
+    uploaded: (app: string) => `${app} is on its way to App Store Connect. It shows in TestFlight once Apple has processed it`,
   },
 
   pcSetup: {
@@ -357,6 +362,9 @@ export const s = {
   skill: {
     title: 'Add the CapMac skill for AI agents',
     wherePlaceholder: 'Where should the skill go?',
+    removeTitle: 'Remove the CapMac skill for AI agents',
+    removeWherePlaceholder: 'Remove it from where?',
+    removePlaceholder: 'Untick the agents that should keep it',
     thisProject: (name: string) => `This project (${name})`,
     projectDetail: 'Saved in the project. Commit it so your team’s agents get it too',
     agentsTitle: 'Which AI agents should know how to use CapMac?',

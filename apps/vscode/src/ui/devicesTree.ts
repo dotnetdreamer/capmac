@@ -4,10 +4,10 @@
  * (a Flutter app's Windows app) and the iPhones plugged into it (no Mac).
  */
 import * as vscode from 'vscode';
-import type { Check, MacSummary, Target } from '../../../desktop/src/shared/contract.js';
+import type { Check, MacSummary, ProbeResult, Target } from '../../../desktop/src/shared/contract.js';
 import { s, studio, tidy } from '../i18n.js';
 import { keyOf, pcReady, type Model, type WorkspaceApp } from '../state/model.js';
-import { macIcon, macState, targetState } from './format.js';
+import { macIcon, macState, targetHint, targetState, timeAgo } from './format.js';
 
 export type DeviceNode =
   | { kind: 'mac'; mac: MacSummary }
@@ -23,6 +23,21 @@ export type DeviceNode =
   | { kind: 'pcPhone'; app: WorkspaceApp; target: Target };
 
 const color = (id: string) => new vscode.ThemeColor(id);
+
+/** The Mac's details, as Studio's Macs screen lists them: the last check's, else what was last seen. */
+function macFacts(mac: MacSummary, probe: ProbeResult | null): string {
+  const f = studio.macs.facts;
+  const paired = Date.parse(mac.pairedAt);
+  const rows: [string, string | null | undefined][] = [
+    [f.macos, probe?.macos ?? mac.macos],
+    [f.xcode, probe?.xcode?.version ?? mac.xcode],
+    [f.chip, probe ? (probe.arch === 'arm64' ? studio.macs.appleSilicon : studio.macs.intel) : null],
+    [f.simulators, probe ? `${probe.simulators.devices} · ${probe.simulators.runtimes.join(', ') || studio.common.none}` : null],
+    [f.paired, Number.isFinite(paired) ? timeAgo(paired) : null],
+  ];
+  return rows.filter(([, value]) => value).map(([name, value]) => `${name}: ${value}`).join('  \n');
+}
+
 const LEVEL_ICONS: Record<string, vscode.ThemeIcon> = {
   ok: new vscode.ThemeIcon('pass', color('testing.iconPassed')),
   warn: new vscode.ThemeIcon('warning', color('editorWarning.foreground')),
@@ -171,7 +186,7 @@ export class DevicesTree implements vscode.TreeDataProvider<DeviceNode>, vscode.
         item.id = `mac:${mac.name}`;
         item.description = [macState(mac), mac.isDefault ? s.devices.defaultMac : null, mac.remote.enabled ? '🌐' : null].filter(Boolean).join(' · ');
         item.iconPath = macIcon(mac);
-        const facts = s.devices.lastSeen(mac.xcode, mac.macos);
+        const facts = macFacts(mac, this.model.health.get(mac.name)?.probe ?? null);
         item.tooltip = new vscode.MarkdownString(`**${mac.label}** (${mac.username}@${mac.host})\n\n${macState(mac)}${facts ? `\n\n${facts}` : ''}${mac.error ? `\n\n$(warning) ${tidy(mac.error)}` : ''}${mac.remote.enabled ? `\n\n$(globe) ${s.devices.remoteOn}` : ''}`, true);
         const online = mac.state === 'connected' || mac.state === 'restored';
         item.contextValue = `mac.${mac.isDefault ? 'default' : 'other'}.${online ? 'online' : 'offline'}.${mac.remote.enabled ? 'remoteon' : 'remoteoff'}`;
@@ -203,8 +218,10 @@ export class DevicesTree implements vscode.TreeDataProvider<DeviceNode>, vscode.
         const isCurrent = Boolean(current && this.model.destinationOf(current).target === target.udid);
         item.description = [target.os, targetState(target), isCurrent ? s.devices.current : null].filter(Boolean).join(' · ');
         const on = target.kind === 'simulator' ? target.state === 'Booted' : target.state === 'connected' || target.state === 'available';
-        item.iconPath = new vscode.ThemeIcon(isCurrent ? 'target' : 'device-mobile', on ? color('testing.iconPassed') : undefined);
-        item.tooltip = `${target.name} (${target.os})\n${targetState(target)}\n${target.udid}`;
+        // An iPhone that can't open the app yet says what to do (Developer Mode, Trust, the cable).
+        const hint = targetHint(target);
+        item.iconPath = new vscode.ThemeIcon(isCurrent ? 'target' : 'device-mobile', hint && on ? color('list.warningForeground') : on ? color('testing.iconPassed') : undefined);
+        item.tooltip = `${target.name} (${target.os})\n${targetState(target)}${hint ? `\n${hint}` : ''}\n${target.udid}`;
         const runnable = Boolean(current && current.app.id === 'ios');
         item.contextValue = `target.${target.kind}.${target.kind === 'simulator' ? (on ? 'on' : 'off') : 'device'}${runnable ? '.runnable' : ''}${on ? '.screen' : ''}`;
         item.command = runnable ? { command: 'capmac.useTarget', title: s.cmd.useTarget, arguments: [node] } : undefined;
@@ -280,8 +297,10 @@ export class DevicesTree implements vscode.TreeDataProvider<DeviceNode>, vscode.
         const item = new vscode.TreeItem(target.name);
         item.id = `pc:${target.udid}`;
         const isCurrent = this.model.destinationOf(app).target === target.udid && this.model.backendOf(app) === 'wsl';
-        item.description = [target.os, target.connection === 'network' ? studio.targets.state.wifi : studio.targets.state.usb, isCurrent ? s.devices.current : null].filter(Boolean).join(' · ');
-        item.iconPath = new vscode.ThemeIcon(isCurrent ? 'target' : 'device-mobile', color('testing.iconPassed'));
+        item.description = [target.os, targetState(target), isCurrent ? s.devices.current : null].filter(Boolean).join(' · ');
+        const hint = targetHint(target, true);
+        item.iconPath = new vscode.ThemeIcon(isCurrent ? 'target' : 'device-mobile', color(hint ? 'list.warningForeground' : 'testing.iconPassed'));
+        item.tooltip = `${target.name} (${target.os})\n${targetState(target)}${hint ? `\n${hint}` : ''}\n${target.udid}`;
         item.contextValue = 'target.pciphone.runnable';
         item.command = { command: 'capmac.useTarget', title: s.cmd.useTarget, arguments: [node] };
         return item;

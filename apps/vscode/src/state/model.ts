@@ -21,6 +21,7 @@ import type {
   ErrorInfo,
   MacSummary,
   MethodParams,
+  ProbeResult,
   ProjectApp,
   ProjectSummary,
   PromptRequest,
@@ -99,6 +100,8 @@ export interface HealthState {
   running: boolean;
   at: number | null;
   error: string | null;
+  /** What the last check found on the Mac (macOS, Xcode, chip, simulators). */
+  probe: ProbeResult | null;
 }
 
 export type Change = 'engine' | 'macs' | 'targets' | 'apps' | 'selection' | 'runs' | 'pc' | 'health';
@@ -310,7 +313,7 @@ export class Model implements vscode.Disposable {
           break;
         case 'check':
           if (scope.mac) {
-            const health = this.health.get(scope.mac) ?? { checks: [], running: true, at: null, error: null };
+            const health = this.health.get(scope.mac) ?? { checks: [], running: true, at: null, error: null, probe: null };
             health.checks = [...health.checks.filter((c) => c.id !== event.check.id), event.check];
             this.health.set(scope.mac, health);
             changes.add('health');
@@ -461,14 +464,17 @@ export class Model implements vscode.Disposable {
 
   async checkMac(mac: string): Promise<HealthState> {
     const current = this.current();
-    const health: HealthState = { checks: [], running: true, at: null, error: null };
+    // The Mac's details stay in the tooltip while it is checked again.
+    const health: HealthState = { checks: [], running: true, at: null, error: null, probe: this.health.get(mac)?.probe ?? null };
     this.health.set(mac, health);
     this.emit('health');
     const result = await this.client.call('macs.health', { name: mac, projectPath: current?.project.dir });
     health.running = false;
     health.at = Date.now();
-    if (result.ok) health.checks = result.value.checks;
-    else health.error = tidy(result.error.message);
+    if (result.ok) {
+      health.checks = result.value.checks;
+      health.probe = result.value.probe ?? health.probe;
+    } else health.error = tidy(result.error.message);
     this.emit('health');
     return health;
   }
@@ -694,7 +700,9 @@ export class Model implements vscode.Disposable {
       const picked = overrides.target ?? this.destinationOf(app).target;
       // Only an iPhone that is plugged in now; otherwise the engine asks which.
       const plugged = this.pc.get(keyOf(app.project.dir))?.devices?.devices.some((d) => d.udid === picked);
-      return { ...base, backend: 'wsl', target: plugged ? picked : undefined, options: { clean: options.clean, flutterMode: options.flutterMode } };
+      // What a run on this PC takes ("Run without building", a React Native release run): the Mac's own (OS logs, the Simulator app) stay out.
+      const { clean, webBuild, flutterMode, configuration } = options;
+      return { ...base, backend: 'wsl', target: plugged ? picked : undefined, options: { clean, webBuild, flutterMode, configuration } };
     }
     const target = overrides.target ?? this.destinationOf(app).target;
     return { ...base, backend: 'mac', mac: overrides.mac ?? dest.mac?.name, target: mode === 'sync' ? undefined : target, options: { ...options, osLogs: options.osLogs ?? this.hostSettings().osLogs } };

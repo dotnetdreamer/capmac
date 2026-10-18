@@ -6,11 +6,12 @@ import { s, studio, tidy } from './i18n.js';
 import { checkPc, setupPc } from './pcSetup.js';
 import { setStreamPreference, streamPreference, type ScreenPanel } from './screen/panel.js';
 import type { Sessions } from './session.js';
-import { addSkill } from './skill.js';
+import { addSkill, removeSkillFor } from './skill.js';
 import { errorText, type Model, type WorkspaceApp } from './state/model.js';
 import { appOfNode } from './ui/appsTree.js';
 import type { DeviceNode } from './ui/devicesTree.js';
-import { pairMac, pickApp, pickBackend, pickFlutterMode, pickIpaKind, pickSample, pickTarget } from './ui/pickers.js';
+import { pairMac, pickApp, pickBackend, pickFlutterMode, pickIpa, pickSample, pickTarget } from './ui/pickers.js';
+import { remoteServer, remoteSettings, turnRemoteOff, turnRemoteOn } from './ui/remote.js';
 
 export function registerCommands(context: vscode.ExtensionContext, model: Model, sessions: Sessions, screen: ScreenPanel, output: vscode.LogOutputChannel): void {
   /** The app a command is about: the one it was given (a tree item), else the current one. */
@@ -90,10 +91,10 @@ export function registerCommands(context: vscode.ExtensionContext, model: Model,
   register('capmac.buildIpa', async () => {
     const app = needApp();
     if (!app) return;
-    // On this PC the profile from setup decides; through the Mac, the kind of build.
-    const kind = model.backendOf(app) === 'wsl' ? null : await pickIpaKind();
-    if (kind === undefined) return;
-    await sessions.buildIpa(app, kind);
+    // On this PC the profile from setup decides; through the Mac, Studio's choices (its kind, upload, team, folder).
+    const choice = model.backendOf(app) === 'wsl' ? null : await pickIpa(app, context.workspaceState);
+    if (choice === undefined) return;
+    await sessions.buildIpa(app, choice);
   });
   register('capmac.reload', async () => {
     const app = needApp();
@@ -224,6 +225,11 @@ export function registerCommands(context: vscode.ExtensionContext, model: Model,
     await model.client.invoke('simulators.shutdown', { mac: node.mac.name, udid: node.target.udid });
     await model.refreshTargets(node.mac.name);
   });
+  register('capmac.copyDeviceId', async (node?: DeviceNode) => {
+    if (node?.kind !== 'target' && node?.kind !== 'pcPhone') return;
+    await vscode.env.clipboard.writeText(node.target.udid);
+    vscode.window.setStatusBarMessage(`$(copy) ${studio.devices.udidCopied}`, 3000);
+  });
 
   // ─── Macs ────────────────────────────────────────────────────────────────
   register('capmac.pairMac', () => pairMac(model));
@@ -284,28 +290,21 @@ export function registerCommands(context: vscode.ExtensionContext, model: Model,
     await model.client.invoke('macs.unlockKeychain', { name: mac.name });
     vscode.window.setStatusBarMessage(`$(unlock) ${s.macs.keychainUnlocked}`, 4000);
   });
+  // Remote access, as Studio's Mac card has it (ui/remote.ts): the Mac as it is now, not as the tree item saw it.
+  const current = (mac: MacSummary) => model.macs.find((m) => m.name === mac.name) ?? mac;
   register('capmac.remoteOn', async (node?: unknown) => {
     const mac = await macFrom(node);
-    if (!mac) return;
-    const server = await model.client.invoke('remote.server', {});
-    if (!server.url) {
-      const url = await vscode.window.showInputBox({ title: s.macs.remoteNeedsServer, prompt: s.macs.remoteServerPrompt, placeHolder: 'wss://signal.example.com', ignoreFocusOut: true, validateInput: (v) => (/^wss?:\/\/\S+$/.test(v.trim()) ? undefined : s.macs.remoteServerPrompt) });
-      if (!url) return;
-      await model.client.invoke('remote.setServer', { url: url.trim() });
-    }
-    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: studio.commands.remoteOn(mac.label) }, () => model.client.invoke('macs.remote.enable', { name: mac.name }));
-    await model.refreshMacs();
-    void vscode.window.showInformationMessage(s.macs.remoteOn(mac.label));
+    if (mac) await turnRemoteOn(model, current(mac));
   });
   register('capmac.remoteOff', async (node?: unknown) => {
     const mac = await macFrom(node);
-    if (!mac) return;
-    const answer = await vscode.window.showWarningMessage(s.macs.remoteOffConfirm(mac.label), { modal: true, detail: s.macs.remoteOffDetail }, s.macs.turnOff);
-    if (answer !== s.macs.turnOff) return;
-    await model.client.invoke('macs.remote.disable', { name: mac.name });
-    await model.refreshMacs();
-    vscode.window.setStatusBarMessage(s.macs.remoteOff(mac.label), 4000);
+    if (mac) await turnRemoteOff(model, current(mac));
   });
+  register('capmac.remoteSettings', async (node?: unknown) => {
+    const mac = await macFrom(node);
+    if (mac) await remoteSettings(model, current(mac));
+  });
+  register('capmac.remoteServer', () => remoteServer(model));
 
   // ─── This PC (no Mac) ────────────────────────────────────────────────────
   const iosApp = () => {
@@ -369,5 +368,6 @@ export function registerCommands(context: vscode.ExtensionContext, model: Model,
     await screen.reopen();
   });
   register('capmac.addSkill', () => addSkill(context, model));
+  register('capmac.removeSkill', () => removeSkillFor(context, model));
   register('capmac.getStarted', () => vscode.commands.executeCommand('workbench.action.openWalkthrough', `${context.extension.id}#capmac.start`, false));
 }

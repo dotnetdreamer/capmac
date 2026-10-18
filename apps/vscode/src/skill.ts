@@ -6,8 +6,9 @@
  * Antigravity), the agents' extensions in it (Claude Code, Codex, Gemini…),
  * the ones the project's own files name (CLAUDE.md, AGENTS.md, GEMINI.md…)
  * and the ones set up on this PC. A skill already there is never replaced
- * without asking, and each project gets it once: one the user removes stays
- * removed until **CapMac: Add the CapMac Skill for AI Agents…** adds it again.
+ * without asking, and each project gets it once: one the user removes (by hand,
+ * or with **CapMac: Remove the CapMac Skill for AI Agents…**) stays removed
+ * until **CapMac: Add the CapMac Skill for AI Agents…** adds it again.
  */
 import os from 'node:os';
 import path from 'node:path';
@@ -236,8 +237,40 @@ export async function addSkill(context: vscode.ExtensionContext, model: Model): 
   if (answer) await showSkill(write[0]!.dir);
 }
 
+// ─── CapMac: Remove the CapMac Skill for AI Agents… ──────────────────────────
+
+/** Asks where and for which agents (the ones with CapMac's skill there), then removes it. Someone else's skill named capmac stays. */
+export async function removeSkillFor(context: vscode.ExtensionContext, model: Model): Promise<void> {
+  const where = await pickWhere(model, true);
+  if (!where) return;
+  const { scope, root } = where;
+  const status = await skillStatus(VERSION, root);
+  const has = status.filter((agent) => {
+    const place = scope === 'global' ? agent.global : agent.project;
+    return place?.state === 'installed' || place?.state === 'outdated';
+  });
+  if (!has.length) {
+    void vscode.window.showInformationMessage(studio.skills.nothingToRemove);
+    return;
+  }
+  const items = has.map((agent) => ({ label: agent.name, description: stateOf(agent, scope) ?? undefined, picked: true, id: agent.id }));
+  const picked = await vscode.window.showQuickPick(items, { canPickMany: true, title: s.skill.removeTitle, placeHolder: s.skill.removePlaceholder, ignoreFocusOut: true });
+  if (!picked?.length) return;
+  try {
+    const changes = await removeSkill({ agents: picked.map((p) => p.id), scope, projectDir: root });
+    // Removed by hand: CapMac doesn't add it there again by itself.
+    if (root) await rememberProject(context, root);
+    else await context.globalState.update(STATE_PROFILE, { ...context.globalState.get<{ version?: string; added?: boolean }>(STATE_PROFILE, {}), added: true });
+    const removed = changes.filter((c) => c.result === 'removed');
+    const who = s.skill.list([...new Set(removed.flatMap((c) => c.agents))]);
+    vscode.window.setStatusBarMessage(`$(check) ${removed.length ? studio.skills.removed(who) : studio.skills.nothingToRemove}`, 4000);
+  } catch (err) {
+    void vscode.window.showErrorMessage((err as Error).message);
+  }
+}
+
 /** The projects of this workspace (its apps' first, then its folders'), and all projects. */
-async function pickWhere(model: Model): Promise<{ scope: SkillScope; root?: string } | undefined> {
+async function pickWhere(model: Model, removing = false): Promise<{ scope: SkillScope; root?: string } | undefined> {
   const roots = new Map<string, string>();
   for (const root of appRoots(model)) roots.set(keyOf(root), root);
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
@@ -246,18 +279,19 @@ async function pickWhere(model: Model): Promise<{ scope: SkillScope; root?: stri
     if (!roots.has(keyOf(root))) roots.set(keyOf(root), root);
   }
   type Where = vscode.QuickPickItem & { scope: SkillScope; root?: string };
+  // Where a new copy would go only matters when adding one.
   const items: Where[] = [
     ...[...roots.values()].map((root): Where => ({
       label: `$(folder) ${roots.size === 1 ? s.skill.thisProject(path.basename(root)) : path.basename(root)}`,
       description: root,
-      detail: s.skill.projectDetail,
+      detail: removing ? undefined : s.skill.projectDetail,
       scope: 'project',
       root,
     })),
-    { label: `$(account) ${studio.skills.global}`, detail: studio.skills.globalHint, scope: 'global' },
+    { label: `$(account) ${studio.skills.global}`, detail: removing ? undefined : studio.skills.globalHint, scope: 'global' },
   ];
   if (items.length === 1) return items[0];
-  return vscode.window.showQuickPick(items, { title: s.skill.title, placeHolder: s.skill.wherePlaceholder });
+  return vscode.window.showQuickPick(items, removing ? { title: s.skill.removeTitle, placeHolder: s.skill.removeWherePlaceholder } : { title: s.skill.title, placeHolder: s.skill.wherePlaceholder });
 }
 
 /** Every agent CapMac knows, the ones it found first and ticked, with why and whether they have the skill. */

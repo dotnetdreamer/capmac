@@ -2,8 +2,8 @@
  * Build errors and warnings in VS Code's Problems panel: Xcode's, Flutter's,
  * an Electron build's and the web build's, at the line in the project's own
  * files on this PC.
- * Warnings from packages (Pods, Swift packages, node_modules) stay out, as in
- * CapMac Studio's Problems list.
+ * Warnings from packages (Pods, Swift packages, node_modules) stay out unless
+ * `capmac.problems.packageWarnings` is on, as with CapMac Studio's setting.
  */
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -25,14 +25,23 @@ export class Problems implements vscode.Disposable {
   /** Per project: the run its problems belong to, and the files they were put on. */
   private readonly shown = new Map<string, { runNumber: number; count: number; files: vscode.Uri[] }>();
   private readonly disposable: vscode.Disposable;
+  private readonly settings: vscode.Disposable;
 
   constructor(private readonly model: Model) {
     this.disposable = model.onDidChange((change) => {
       if (change === 'runs') this.update();
     });
+    // Packages' warnings in or out: every run's problems again.
+    this.settings = vscode.workspace.onDidChangeConfiguration((e) => {
+      if (!e.affectsConfiguration('capmac.problems.packageWarnings')) return;
+      this.shown.clear();
+      this.collection.clear();
+      this.update();
+    });
   }
 
   private update(): void {
+    const packageWarnings = vscode.workspace.getConfiguration('capmac').get<boolean>('problems.packageWarnings', false);
     for (const [key, run] of this.model.runs) {
       const last = this.shown.get(key);
       if (last && last.runNumber === run.runNumber && last.count === run.diagnostics.length) continue;
@@ -42,7 +51,7 @@ export class Problems implements vscode.Disposable {
       const fallback = configFile(run.path);
       for (const d of run.diagnostics) {
         if (d.severity === 'note') continue;
-        if (d.severity === 'warning' && !d.own) continue;
+        if (d.severity === 'warning' && !d.own && !packageWarnings) continue;
         const file = d.file && isLocal(d.file) && existsSync(d.file) ? d.file : fallback;
         if (!file) continue;
         const uri = vscode.Uri.file(file);
@@ -71,6 +80,7 @@ export class Problems implements vscode.Disposable {
 
   dispose(): void {
     this.disposable.dispose();
+    this.settings.dispose();
     this.collection.dispose();
   }
 }

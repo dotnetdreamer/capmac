@@ -9,7 +9,7 @@ import * as vscode from 'vscode';
 import type { DetectedProject } from '../../../desktop/src/shared/contract.js';
 import { s, studio, tidy } from '../i18n.js';
 import { keyOf, type Model, type WorkspaceApp } from '../state/model.js';
-import { appIcon, appKind, frameworkName } from './format.js';
+import { appIcon, appKind, formatBytes, frameworkName } from './format.js';
 
 type Node = { kind: 'project'; project: DetectedProject; apps: WorkspaceApp[] } | { kind: 'app'; app: WorkspaceApp };
 
@@ -17,11 +17,30 @@ export class AppsTree implements vscode.TreeDataProvider<Node>, vscode.Disposabl
   private readonly changed = new vscode.EventEmitter<Node | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
   private readonly disposable: vscode.Disposable;
+  /** What a sync copies to the Mac, per project (Studio's project cards show it), asked once. */
+  private readonly sizes = new Map<string, { files: number; bytes: number } | 'asking'>();
 
   constructor(private readonly model: Model) {
     this.disposable = model.onDidChange((change) => {
+      if (change === 'apps') this.sizes.clear();
       if (change === 'apps' || change === 'selection' || change === 'runs') this.changed.fire(undefined);
     });
+  }
+
+  /** The project's sync size, once the engine has counted it (it asks the first time). */
+  private syncSize(dir: string): { files: number; bytes: number } | null {
+    const key = keyOf(dir);
+    const size = this.sizes.get(key);
+    if (size === undefined) {
+      this.sizes.set(key, 'asking');
+      void this.model.client.call('projects.syncSize', { path: dir }).then((result) => {
+        // Not counted (sizes are a nicety): not asked again until the apps change.
+        if (this.sizes.get(key) !== 'asking' || !result.ok) return;
+        this.sizes.set(key, result.value);
+        this.changed.fire(undefined);
+      });
+    }
+    return size && size !== 'asking' ? size : null;
   }
 
   getChildren(node?: Node): Node[] {
@@ -68,6 +87,10 @@ export class AppsTree implements vscode.TreeDataProvider<Node>, vscode.Disposabl
     else md.appendMarkdown(`${studio.apps.notYet}. ${studio.apps.notYetHint}\n\n`);
     if (app.app.hint) md.appendMarkdown(`→ ${tidy(app.app.hint)}\n\n`);
     if (app.app.version) md.appendMarkdown(`${studio.apps.version(frameworkName(app), app.app.version)}\n\n`);
+    // An app built on the Mac: how much of the project a sync copies there.
+    const onMac = app.runnable && (app.app.id === 'electron' || app.app.id === 'macos' || (app.app.id === 'ios' && this.model.backendOf(app) === 'mac'));
+    const size = onMac ? this.syncSize(app.project.dir) : null;
+    if (size) md.appendMarkdown(`${s.apps.syncSize(studio.count.files(size.files), formatBytes(size.bytes))}\n\n`);
     if (app.app.evidence.length) md.appendMarkdown(`_${studio.apps.foundFrom(app.app.evidence)}_`);
     if (isCurrent) md.appendMarkdown(`\n\n$(check) ${s.apps.current}`);
     item.tooltip = md;

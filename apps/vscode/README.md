@@ -72,6 +72,14 @@ The **Devices** view shows each paired Mac with its simulators (start and stop t
 
 Pick where the app runs from the status bar, the Run view, or by clicking a simulator.
 
+Hover a Mac to see its macOS, Xcode, chip and simulators. Right-click a simulator or iPhone to copy its UDID. When an iPhone needs something first, like Developer Mode or trusting this computer, the Devices view and the list of places to run say what to do
+
+**CapMac: Remote Access Settings…** lets you use a Mac from anywhere, like the Mac card in CapMac Studio: turn it on, choose how it connects, keep the Mac awake, test the connection, see which PCs can reach it, or turn it off. **CapMac: Set the Remote Access Server…** changes the server it goes through
+
+## IPA builds
+
+**CapMac: Build an IPA…** makes a signed build for your own devices, your testers, the App Store or your company, and copies the `.ipa` file to this PC. **Upload to TestFlight** sends it to App Store Connect instead. The same list has the Team ID and the folder it goes to, and CapMac remembers them for the project
+
 ## Run and Debug
 
 Every app is in the **Run and Debug** dropdown with no `launch.json`: *Live: Hello CapMac · iPhone 17 Pro*. Pick it once and **F5** starts it. In a `launch.json`:
@@ -118,6 +126,8 @@ Agents that work with commands (Claude Code, Codex, Gemini CLI, Cursor, Antigrav
 
 CapMac never replaces a skill that is already there without asking, and adds it once per project: one you remove stays removed. **CapMac: Add the CapMac Skill for AI Agents…** adds it again, in this project or for all your projects, for the agents you pick. The `capmac.agents.addSkill` setting says what CapMac does by itself: `project` (the default), `global` (once, for all your projects) or `off`.
 
+**CapMac: Remove the CapMac Skill for AI Agents…** takes it out again, for the agents you pick. A different skill named capmac stays where it is
+
 The `capmac` command is in VS Code's terminals and in the agents other extensions start, like the Claude Code and Codex panels (unless you installed it already). Your own scripts can use it too.
 
 ## Building without a Mac
@@ -127,6 +137,8 @@ The `capmac` command is in VS Code's terminals and in the agents other extension
 **CapMac: Set Up This PC for iPhones** installs the build tools, signs in to Apple once (in your browser), sets up signing and gets the iPhone SDK. Then pick an iPhone plugged into this PC as where the app runs. Setup can stop and continue later; **CapMac: Check This PC** shows what's in place.
 
 When something is missing (Visual Studio's C++ tools for a Windows app, Flutter on the Mac), CapMac says so and offers to add it.
+
+If setup stops, **Details** shows what Apple and the build tools said, with the last lines they printed
 
 ## Settings
 
@@ -142,6 +154,7 @@ When something is missing (Visual Studio's C++ tools for a Windows app, Flutter 
 | `capmac.codeLens` | Run and Live above `capacitor.config`, `pubspec.yaml`, `metro.config`, `app.json` and `capmac.json` |
 | `capmac.terminal.capmacCommand` | The `capmac` command in VS Code's terminals and in the agents VS Code starts |
 | `capmac.agents.addSkill` | Add CapMac's skill for AI agents by itself: in each `project` with an app (the default), once for all your projects (`global`), or `off` |
+| `capmac.problems.packageWarnings` | Warnings from Pods, Swift packages and `node_modules` in Problems too. Off by default, as in CapMac Studio |
 
 The screen stream (smooth video, or compatible pictures), your paired Macs and each project's choices (its app, where it builds) are shared with the `capmac` command and CapMac Studio.
 
