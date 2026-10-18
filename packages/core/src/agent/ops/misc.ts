@@ -5,7 +5,7 @@ import path from 'node:path';
 import { assertSafeRelPath, packArchive, type ArchiveFile } from '../../shared/archive.js';
 import type { ExecParams, ProjectRef, PullParams, RelayParams } from '../../shared/protocol.js';
 import { toolEnv } from '../env.js';
-import { locateIosProject } from '../ios-project.js';
+import { locateIosProject, locateXcodeProject } from '../ios-project.js';
 import type { AgentIO } from '../io.js';
 import { AgentError, exists, run } from '../proc.js';
 import { loadState, projectPaths, saveState, withProjectLock } from '../state.js';
@@ -110,10 +110,12 @@ export async function opClean(params: ProjectRef & { what: 'build' | 'all' }, io
   });
 }
 
-export async function opOpenXcode(params: ProjectRef & { iosDir?: string }): Promise<{ opened: string }> {
+/** `xcodeName`: a Flutter or React Native app's Xcode project, in `iosDir`; without it, Capacitor's ios/App. */
+export async function opOpenXcode(params: ProjectRef & { iosDir?: string; xcodeName?: string }): Promise<{ opened: string }> {
   const paths = projectPaths(params.projectId, params.projectRel);
-  const ios = await locateIosProject(paths.project, params.iosDir ?? 'ios');
-  const target = ios.workspace ?? ios.xcodeproj;
+  const target = params.xcodeName
+    ? await locateXcodeProject(paths.project, params.iosDir ?? 'ios', params.xcodeName)
+    : await locateIosProject(paths.project, params.iosDir ?? 'ios').then((ios) => ios.workspace ?? ios.xcodeproj);
   const r = await run('open', ['-a', 'Xcode', target], { env: await toolEnv(), timeoutMs: 30_000 });
   if (r.code !== 0) throw new AgentError(`Could not open Xcode: ${r.stderr.trim()}`, undefined, 'Opening Xcode needs someone logged in to the Mac desktop.');
   return { opened: target };

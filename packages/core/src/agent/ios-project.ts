@@ -22,6 +22,21 @@ async function listWithExtension(dir: string, ext: string): Promise<string[]> {
   }
 }
 
+/**
+ * What Xcode opens for a Flutter or React Native app: the workspace in its ios/ folder (CocoaPods
+ * makes a React Native app's), else the project. `name`'s ("Runner", the React Native app's) when
+ * there are several.
+ */
+export async function locateXcodeProject(projectDir: string, iosDirRel: string, name: string): Promise<string> {
+  const dir = path.join(projectDir, ...iosDirRel.split('/'));
+  for (const ext of ['.xcworkspace', '.xcodeproj']) {
+    const found = await listWithExtension(dir, ext);
+    const pick = found.includes(`${name}${ext}`) ? `${name}${ext}` : found[0];
+    if (pick) return path.join(dir, pick);
+  }
+  throw new AgentError(`No Xcode project in ${iosDirRel} on the Mac.`, 'NO_IOS_PLATFORM', 'Run the app once with CapMac, then open it in Xcode.');
+}
+
 /** Finds the Xcode project Capacitor generated (ios/App/App.xcodeproj by default). */
 export async function locateIosProject(projectDir: string, iosDirRel = 'ios'): Promise<IosProject> {
   const platformDir = path.join(projectDir, ...iosDirRel.split('/'));
