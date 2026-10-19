@@ -497,7 +497,7 @@ export const CapMacVSCodeIntro = () => {
     <Captions g={g}/>
     {CLICKS.map(click => <Sfx key={click} at={click}/>)}{SAVES.map(save => <Sfx key={`key-${save}`} at={save} sound="key"/>)}
     {SAVES.map(save => g >= save - 8 && g < save + 14 && <div key={save} style={{position: 'absolute', left: 0, right: 0, bottom: 44, display: 'flex', justifyContent: 'center', opacity: r(g, save - 8, save - 4) * (1 - r(g, save + 8, save + 14))}}><KeyCap down={g >= save && g < save + 6}>Ctrl + S</KeyCap></div>)}
-    {g >= 1372 && g < T.macApp && <Note boxed opacity={r(g, 1372, 1380)}>Building with no Mac is experimental · It needs WSL 2, an iPhone and a paid Apple Developer Program membership</Note>}
+    {g >= 1372 && g < T.macApp && <Note boxed opacity={r(g, 1372, 1380)}>Building with no Mac is experimental · It needs WSL 2, an iPhone and an Apple Account (a free one signs for 7 days)</Note>}
     <Sequence from={T.leave + 10} name="CapMac for VS Code"><Finale/></Sequence>
     <Cuts frame={g} at={[T.live]}/>
     <AbsoluteFill style={{pointerEvents: 'none', background: '#0b0d18', opacity: r(g, VS_DURATION - 18, VS_DURATION - 2)}}/>

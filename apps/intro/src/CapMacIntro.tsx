@@ -202,7 +202,7 @@ const NoMacScene = () => {
 const SETUP: {title: string; desc: string; from: number; to: number}[] = [
   {title: 'Build tools', desc: 'Installs the tools that build your app. The longest step on a new PC', from: 6, to: 30},
   {title: 'iPhone connection', desc: 'Lets this PC reach your iPhone over USB, with Apple’s free Apple Devices app', from: 30, to: 42},
-  {title: 'Apple sign-in', desc: 'Your Apple developer account, so CapMac can sign your app', from: 42, to: 82},
+  {title: 'Apple sign-in', desc: 'Your Apple Account, paid or free, so CapMac can sign your app', from: 42, to: 82},
   {title: 'Signing', desc: 'Apple’s permission for your app to run on your iPhone', from: 82, to: 94},
   {title: 'Xcode download', desc: 'Xcode 26.6 from Apple, about 3 GB. CapMac keeps only the iPhone parts', from: 94, to: 124},
   {title: 'iPhone SDK', desc: 'Takes the iPhone parts out of Xcode', from: 124, to: 138},
@@ -218,8 +218,12 @@ const setupSteps = (t: number): SetupStep[] => SETUP.map(step => {
 const SignInChoice = ({t}: {t: number}) => <div style={{position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', background: '#08091099', zIndex: 40, opacity: r(t, 0, 6) * (1 - r(t, 26, 32))}}>
   <div style={{width: 560, borderRadius: 11, background: '#20233a', border: '1px solid #ffffff24', boxShadow: '0 30px 80px #000c', padding: '20px 22px', fontFamily: '"Segoe UI", sans-serif'}}>
     <div style={{fontSize: 16, fontWeight: 650}}>Sign in to Apple</div>
-    <div style={{fontSize: 12.5, color: '#a9abc2', marginTop: 6}}>CapMac needs your Apple developer account to sign your app. Who should do the Apple part?</div>
-    {[['Let CapMac do it (recommended)', 'Sign in once on Apple’s website in Microsoft Edge. CapMac remembers it and does the rest, the certificate too'], ['Do it myself', 'Sign in here in CapMac. You may need to make the certificate yourself on Apple’s website']].map(([label, hint], i) => <div key={label} style={{marginTop: 12, padding: '12px 14px', borderRadius: 8, border: `1px solid ${i === 0 ? '#bcaafa88' : '#ffffff18'}`, background: i === 0 ? (t >= 18 ? '#4a3d78' : '#33294f') : '#262a40'}}>
+    <div style={{fontSize: 12.5, color: '#a9abc2', marginTop: 6}}>CapMac signs your app with your Apple Account. A paid Apple developer account works best, and a free Apple Account works too, with limits. Who should do the Apple part?</div>
+    {[
+      ['Let CapMac do it (paid account, recommended)', 'Sign in once on Apple’s website in Microsoft Edge. CapMac remembers it and does the rest, the certificate too'],
+      ['Do it myself (paid account)', 'Sign in here in CapMac. You may need to make the certificate yourself on Apple’s website'],
+      ['Use a free Apple Account (experimental)', 'No paid program. Sign in to it on your iPhone first. Signs for 7 days at a time, and some app features won’t work'],
+    ].map(([label, hint], i) => <div key={label} style={{marginTop: 12, padding: '12px 14px', borderRadius: 8, border: `1px solid ${i === 0 ? '#bcaafa88' : '#ffffff18'}`, background: i === 0 ? (t >= 18 ? '#4a3d78' : '#33294f') : '#262a40'}}>
       <div style={{fontSize: 13.5, fontWeight: 600}}>{label}</div><div style={{fontSize: 11.5, color: '#b3b4c8', marginTop: 4}}>{hint}</div>
     </div>)}
   </div>
@@ -275,7 +279,7 @@ const PcScene = () => {
       <Cursor frame={f} size={22} keys={[{at: 0, x: 1180, y: 700}, {at: 52, x: 960, y: 622}, {at: 62, x: 960, y: 622}, {at: 112, x: 1120, y: 770}, {at: 141, x: 1262, y: 826}, {at: 150, x: 1262, y: 826}, {at: 164, x: 926, y: 386}, {at: 210, x: 940, y: 400}]} clicks={[62, 147, 166]}/>{[62, 147, 166].map(click => <Sfx key={click} at={click}/>)}
     </Camera>
     <Caption frame={f < 156 ? f : f < 250 ? f - 156 : f - 250} text={f < 156 ? 'One setup, one Apple sign-in' : f < 250 ? 'Press Live. This PC builds it' : 'Your app, on your iPhone'} detail={f < 156 ? 'CapMac installs the tools, signs your app and gets the iPhone SDK' : f < 250 ? 'Built and signed on Windows, installed over USB' : 'It reloads as you save, over USB or Wi-Fi'}/>
-    <Note>{f < 150 ? 'Sped up · The first setup takes a while' : 'Experimental · Needs WSL 2, an iPhone and a paid Apple Developer Program membership'}</Note>
+    <Note>{f < 150 ? 'Sped up · The first setup takes a while' : 'Experimental · Needs WSL 2, an iPhone and an Apple Account (a free one signs for 7 days)'}</Note>
   </AbsoluteFill>;
 };
 
