@@ -20,8 +20,8 @@ const SETUP_STEPS = [
 
 const gb = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
 
-/** Where Apple's Developer Program is joined (Studio's setup dialog links to it). */
-const DEVELOPER_PROGRAM_URL = 'https://developer.apple.com/programs/enroll/';
+/** Apple's page about its paid Developer Program (Studio's setup dialog links to it). */
+const DEVELOPER_PROGRAM_URL = 'https://developer.apple.com/programs/';
 
 type SetupResult = { ok: boolean; cancelled: boolean; error?: string; hint?: string; details?: string[] };
 
@@ -31,9 +31,9 @@ export async function setupPc(model: Model, app: WorkspaceApp, options: { appleL
     return false;
   }
   const projectPath = app.project.dir;
-  // Before the Apple sign-in has worked, as Studio's dialog says up front: a free Apple Account stops there, after the long tools step.
+  // Before the Apple sign-in has worked, as Studio's dialog says up front: a free Apple Account signs too, within Apple's limits.
   if (!model.pc.get(keyOf(projectPath))?.status?.signing) {
-    void vscode.window.showInformationMessage(`${studio.pc.paid.title}. ${studio.pc.paid.body}`, studio.pc.paid.join).then((answer) => {
+    void vscode.window.showInformationMessage(`${studio.pc.account.title}. ${studio.pc.account.body}`, studio.pc.account.join).then((answer) => {
       if (answer) void vscode.env.openExternal(vscode.Uri.parse(DEVELOPER_PROGRAM_URL));
     });
   }

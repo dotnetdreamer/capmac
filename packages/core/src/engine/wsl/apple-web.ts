@@ -836,31 +836,40 @@ export async function signInOnAppleWebsite(ctx: EngineContext, options: AppleWeb
   progress(ctx, 'Signed in on Apple’s website. Reading your developer teams…');
   const session = await loginAppleAccountWithCookies(ctx, cookies, { signal: options.signal });
   if (session) return session;
-  throw new UserError('Apple didn’t accept the sign-in from its website here.', 'Run setup again and choose “Let CapMac do it with a fresh sign-in”, or “Do it myself” to sign in here in CapMac.');
+  // A free Apple Account ends up here too: Apple's developer website is only for paid members.
+  throw new UserError('Apple didn’t accept the sign-in from its website here.', 'Apple’s website only works for paid Apple Developer accounts. With a free Apple Account, run setup again and choose “Use a free Apple Account”. With a paid one, choose “Let CapMac do it with a fresh sign-in”, or “Do it myself” to sign in here in CapMac.');
 }
 
-export type AppleSignInChoice = { way: 'password' } | { way: 'website'; fresh: boolean };
+export type AppleSignInChoice = { way: 'password' } | { way: 'website'; fresh: boolean } | { way: 'free' };
 
 /**
  * Setup asks first how to sign in to Apple: on Apple's website, after which CapMac
- * does everything (the certificate Apple's API won't make too), or here in CapMac
- * with a password, making that certificate by hand on the website when needed.
- * Without a browser CapMac can drive there's nothing to ask.
+ * does everything (the certificate Apple's API won't make too), here in CapMac
+ * with a password (the paid program, making that certificate by hand when needed),
+ * or with a free Apple Account (no paid program, signs for 7 days at a time).
  */
 export async function chooseAppleSignIn(ctx: EngineContext, options: AppleWebOptions = {}): Promise<AppleSignInChoice> {
   const browser = options.browser ?? await findWebBrowser().catch(() => undefined);
-  if (!browser) return { way: 'password' };
-  const saved = hasAppleWebSignIn(options);
-  const way = await ctx.prompter.choose<'web' | 'web-fresh' | 'password'>({
+  const saved = browser ? hasAppleWebSignIn(options) : false;
+  // Apple shows a free account's code only on an iPhone it's signed in on, so that comes first.
+  const free = { label: 'Use a free Apple Account (experimental)', value: 'free' as const, hint: 'No paid program. Sign in to it on your iPhone first. Signs for 7 days at a time, and some app features won’t work' };
+  // Without a browser CapMac can drive, the website options drop away but the rest remain.
+  // Apple's developer website is only for paid members, so those options say so, like "Do it myself".
+  const webItems = browser ? [
+    { label: 'Let CapMac do it (paid account, recommended)', value: 'web' as const, hint: saved ? 'Uses your saved sign-in to Apple’s website. Nothing to type' : `Sign in once on Apple’s website in ${browser.name}. CapMac remembers it and does the rest, the certificate too` },
+    ...saved ? [{ label: 'Let CapMac do it with a fresh sign-in (paid account)', value: 'web-fresh' as const, hint: 'Forgets the saved sign-in, then you sign in to Apple again' }] : [],
+  ] : [];
+  const way = await ctx.prompter.choose<'web' | 'web-fresh' | 'password' | 'free'>({
     message: 'Sign in to Apple',
-    detail: 'CapMac needs your paid Apple developer account to sign your app. Who should do the Apple part?',
+    detail: 'CapMac signs your app with your Apple Account. A paid Apple developer account works best, and a free Apple Account works too, with limits. Who should do the Apple part?',
     items: [
-      { label: 'Let CapMac do it (recommended)', value: 'web', hint: saved ? 'Uses your saved sign-in to Apple’s website. Nothing to type' : `Sign in once on Apple’s website in ${browser.name}. CapMac remembers it and does the rest, the certificate too` },
-      ...saved ? [{ label: 'Let CapMac do it with a fresh sign-in', value: 'web-fresh' as const, hint: 'Forgets the saved sign-in, then you sign in to Apple again' }] : [],
-      { label: 'Do it myself', value: 'password', hint: 'Sign in here in CapMac. You may need to make the certificate yourself on Apple’s website' },
+      ...webItems,
+      { label: 'Do it myself (paid account)', value: 'password', hint: 'Sign in here in CapMac. You may need to make the certificate yourself on Apple’s website' },
+      free,
     ],
   });
-  return way === 'password' ? { way } : { way: 'website', fresh: way === 'web-fresh' };
+  if (way === 'free') return { way: 'free' };
+  return way === 'password' ? { way: 'password' } : { way: 'website', fresh: way === 'web-fresh' };
 }
 
 /** What signing setup uses; tests pass their own. */

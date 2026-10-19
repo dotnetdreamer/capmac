@@ -1229,7 +1229,7 @@ export const en = {
     apple: 'Apple Account password',
     appleWhy: 'CapMac signs in to Apple to set up signing and download Xcode. Your password isn’t saved',
     appleEmail: 'Sign in to Apple',
-    appleEmailWhy: 'Use the Apple Account of your Apple Developer team. Your password and codes are never saved',
+    appleEmailWhy: 'Use your Apple developer account, or a free Apple Account. Your password and codes are never saved',
     appleEmailLabel: 'Apple Account email',
     appleCode: 'Enter the verification code',
     appleCodeLabel: 'Verification code',
@@ -1344,16 +1344,16 @@ export const en = {
     show: 'Show',
     title: 'Build on this PC',
     intro: 'CapMac builds and signs your iPhone app on this PC, then installs it on your iPhone over USB. No Mac needed',
-    /** Signing here needs Apple's paid program: a free Apple Account has no developer team. */
-    paid: {
-      title: 'You need a paid Apple developer account',
-      body: 'Apple’s Developer Program costs US$99 a year. A free Apple Account can’t sign apps here yet',
-      join: 'Join the Developer Program',
+    /** Before the sign-in: a free Apple Account signs too, within Apple's limits. The paid program has none. */
+    account: {
+      title: 'A free Apple Account works too',
+      body: 'It signs your app for 7 days at a time, for up to 3 apps on an iPhone, and must also be signed in on that iPhone. A paid Apple developer account (US$99 a year) has no such limits',
+      join: 'About the paid program',
     },
     steps: {
       tools: { title: 'Build tools', desc: 'Installs the tools that build your app. The longest step on a new PC' },
       devices: { title: 'iPhone connection', desc: 'Lets this PC reach your iPhone over USB, with Apple’s free Apple Devices app' },
-      signIn: { title: 'Apple sign-in', desc: 'Your paid Apple developer account, so CapMac can sign your app' },
+      signIn: { title: 'Apple sign-in', desc: 'Your Apple Account, paid or free, so CapMac can sign your app' },
       signing: { title: 'Signing', desc: 'Apple’s permission for your app to run on your iPhone' },
       download: { title: 'Xcode download', desc: 'Xcode 26.6 from Apple, about 3 GB. CapMac keeps only the iPhone parts' },
       sdk: { title: 'iPhone SDK', desc: 'Takes the iPhone parts out of Xcode' },
@@ -1370,7 +1370,7 @@ export const en = {
     continue: 'Continue setup',
     stop: 'Stop setup',
     signInAgain: 'Sign in to Apple again',
-    signInAgainHint: 'After adding a plugin that needs a new capability, like push notifications',
+    signInAgainHint: 'After adding a plugin that needs a new capability, or when free signing ends after 7 days',
     check: 'Check this PC',
     checksTitle: 'Health check',
     details: 'Details',

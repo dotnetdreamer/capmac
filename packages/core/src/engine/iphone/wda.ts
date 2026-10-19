@@ -21,7 +21,7 @@ import path from 'node:path';
 import { CancelledError, UserError } from '../errors.js';
 import { trackChild } from '../../agent/proc.js';
 import { hostRun } from '../wsl/bootstrap.js';
-import { deviceHelperCommand, installWslApp, mountWslDeveloperImage, OVER_WIFI, type WslDevice, type WslDeviceOptions } from '../wsl/device.js';
+import { deviceHelperCommand, installWslApp, mountWslDeveloperImage, OVER_WIFI, TRUST_DEVELOPER_STEPS, type WslDevice, type WslDeviceOptions } from '../wsl/device.js';
 import { MjpegParser } from './mjpeg.js';
 import runnerScript from './wda-runner.py';
 
@@ -331,7 +331,7 @@ export class WdaControl {
     if (/automation mode|UI Automation/i.test(text)) return { hint: 'Your iPhone asks for its passcode before touch can start: enter it on the iPhone. If it doesn’t ask, open Settings, tap Developer, then turn on Enable UI Automation.', retry: true };
     if (/Locked|passcode/i.test(text)) return { hint: 'Unlock the iPhone, then try again.', retry: true };
     // Not just "verify": the Wi-Fi tunnel's own log lines talk about its pair verification.
-    if (/untrusted|not trusted|0xe8008018|Unable to Verify|no longer valid|invalid code signature/i.test(text)) return { hint: 'On the iPhone, open Settings › General › VPN & Device Management and trust your developer app, then try again.', retry: true };
+    if (/untrusted|not trusted|0xe8008018|Unable to Verify|no longer valid|invalid code signature/i.test(text)) return { hint: `${TRUST_DEVELOPER_STEPS} Then try again.`, retry: true };
     return { hint: wifi ? 'Unlock the iPhone and keep it on this Wi-Fi, then try again.' : 'Unlock the iPhone and keep it plugged in, then try again.', retry: true };
   }
 

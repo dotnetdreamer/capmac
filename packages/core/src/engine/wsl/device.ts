@@ -39,6 +39,9 @@ export function wslDeviceTarget(device: WslDevice): Target {
 /** Where to turn on Developer Mode, for the CLI and run messages (Studio shows its own steps). */
 export const DEVELOPER_MODE_STEPS = 'On your iPhone, open Settings, tap Privacy & Security, then Developer Mode. Turn it on and tap Restart. After it restarts, unlock it and tap Turn On.';
 
+/** Where to trust the developer: iOS opens apps signed with a free Apple Account only after this, once. */
+export const TRUST_DEVELOPER_STEPS = 'On your iPhone, open Settings, tap General, then VPN & Device Management. Tap your Apple Account, then Trust.';
+
 /** The iPhone tools keep a device's Wi-Fi pairing (RemotePairing) here. */
 const pairingFolder = () => path.join(os.homedir(), '.pymobiledevice3');
 /** iPhones seen over the cable, so one reached over Wi-Fi can be named. */
@@ -346,9 +349,16 @@ export async function deviceHelperCommand(options: WslDeviceOptions = {}, udid?:
 /** A Wi-Fi tunnel the iPhone dropped: locked or asleep in the middle of a command. */
 const DROPPED = /terminated abruptly|transport closed|ConnectionResetError|ConnectionTerminatedError|did not come back on this Wi-Fi/i;
 
+/**
+ * iOS installed the app but wouldn't open it: an app from a free Apple Account before the developer
+ * trusts it, or a locked iPhone. The tools wrap long lines, hence \s+.
+ */
+const LAUNCH_REFUSED = /Failed\s+to\s+launch\s+process|Request\s+to\s+launch\s+\S+\s+failed|explicitly\s+trusted|inadequate\s+entitlements/i;
+
 function commandError(action: string, output: ProcessOutput): UserError {
   const text = `${output.stderr}\n${output.stdout}`;
   let hint = 'Check the device output, unlock the iPhone, and retry.';
+  let details = text.trim().split(/\r?\n/).filter(Boolean).slice(-25);
   if (DROPPED.test(text)) {
     // First: the tools' Wi-Fi log lines name "RemotePairing", which is no Trust problem.
     hint = 'The iPhone dropped the Wi-Fi connection. Keep it unlocked and on this Wi-Fi, or plug it in.';
@@ -356,6 +366,12 @@ function commandError(action: string, output: ProcessOutput): UserError {
     hint = `Developer Mode is off. ${DEVELOPER_MODE_STEPS}`;
   } else if (/DeveloperDiskImage|personalized.*image|InvalidService|InvalidServiceError/i.test(text)) {
     hint = 'Enable Settings → Privacy & Security → Developer Mode on the iPhone and finish its restart/confirmation. The developer disk image must mount successfully.';
+  } else if (LAUNCH_REFUSED.test(text)) {
+    // Before the pairing check: Apple's reason says the profile isn't "trusted", which is no pairing problem.
+    hint = `The iPhone won’t open the app yet. If it’s signed with a free Apple Account, trust it once. ${TRUST_DEVELOPER_STEPS} Keep the iPhone unlocked, then run again.`;
+    // Apple's one line, not the tools' traceback around it.
+    const said = /Request\s+to\s+launch\s+(\S+)\s+failed/i.exec(text);
+    if (said) details = [`The iPhone said: Request to launch ${said[1]} failed.`];
   } else if (/Pairing|pairing|Trust|trust|UserDenied|PasswordProtected|DeviceLocked|InvalidHostID|GetProhibited/i.test(text)) {
     hint = 'Unlock the iPhone, accept “Trust This Computer”, and retry with the device unlocked.';
   } else if (/tunnel|RSD|CoreDeviceProxy|ConnectionRefused|connect call failed/i.test(text)) {
@@ -365,11 +381,12 @@ function commandError(action: string, output: ProcessOutput): UserError {
   } else if (/ApplicationVerificationFailed|provision|0xe800801|signature|certificate/i.test(text)) {
     hint = 'Use a valid development signature and provisioning profile that includes this iPhone and matches the app bundle identifier.';
   }
-  return new UserError(`${action} failed (exit ${output.code ?? 'signal'}).`, hint, text.trim().split(/\r?\n/).filter(Boolean).slice(-25));
+  return new UserError(`${action} failed (exit ${output.code ?? 'signal'}).`, hint, details);
 }
 
 async function runDevice(
-  args: string[], options: WslDeviceOptions, settings: { udid?: string; timeoutMs?: number; stream?: boolean; wifi?: boolean } = {},
+  args: string[], options: WslDeviceOptions,
+  settings: { udid?: string; timeoutMs?: number; stream?: boolean; wifi?: boolean; action?: string } = {},
 ): Promise<string> {
   const python = await requirePython(options);
   // Over Wi-Fi, the tunnel waits for an asleep iPhone and says so once.
@@ -378,7 +395,7 @@ async function runDevice(
     const output = await execute(python, [...(settings.wifi ? ['-c', WIFI_COMMAND] : ['-m', 'pymobiledevice3']), '--no-color', ...args], { ...options, onLog }, settings);
     if (output.code === 0) return output.stdout;
     // A locked or asleep iPhone drops the Wi-Fi tunnel mid-command: ask for it, then try again.
-    if (!settings.wifi || settings.stream || attempt >= 3 || !DROPPED.test(`${output.stderr}\n${output.stdout}`)) throw commandError('The iPhone command', output);
+    if (!settings.wifi || settings.stream || attempt >= 3 || !DROPPED.test(`${output.stderr}\n${output.stdout}`)) throw commandError(settings.action ?? 'The iPhone command', output);
     options.onLocked?.();
   }
 }
@@ -621,7 +638,7 @@ export async function launchWslApp(bundleId: string, device: WslDevice, options:
   const command = atLeast(device.productVersion!, '17.0.0')
     ? ['developer', 'core-device', 'launch-application', ...transport, bundleId, ...args]
     : ['developer', 'dvt', 'launch', ...transport, [bundleId, ...args].map(shellWord).join(' ')];
-  await runDevice(command, options, { udid: device.udid, timeoutMs: 60_000 });
+  await runDevice(command, options, { udid: device.udid, timeoutMs: 60_000, action: 'Opening the app' });
 }
 
 /** Exact bundle lookup avoids pkill's substring matching, which can kill another app. */

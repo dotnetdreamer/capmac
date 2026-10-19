@@ -13,8 +13,10 @@ import { savedCertificatePassword, setUpAutomaticSigning } from '../wsl/apple-au
 import { prepareAppleSigningDirectory } from '../wsl/apple-signing.js';
 import { signWslApplication } from '../wsl/compiler.js';
 import {
-  DEVELOPER_MODE_STEPS, ensureWslWifiPairing, isIphoneUdid, knownIphones, selectWslDevice, wifiPairedIphone, type WslDevice, type WslDeviceOptions,
+  DEVELOPER_MODE_STEPS, deviceHelperCommand, ensureWslWifiPairing, isIphoneUdid, knownIphones, selectWslDevice, wifiPairedIphone, type WslDevice, type WslDeviceOptions,
 } from '../wsl/device.js';
+import { ensureFreeSigningSupport, FreeApple } from '../wsl/free/free-apple.js';
+import { freeCodeMessage, setUpFreeSigning } from '../wsl/free/free-signing.js';
 import { toolchainConfig } from '../wsl/index.js';
 import { loadWslOptions, type WslOptions } from '../wsl/settings.js';
 import { inspectWslToolchain, WslExecutor } from '../wsl/toolchain.js';
@@ -27,6 +29,27 @@ export type TouchState = { bundleId: string } | { unavailable: string; canSetUp:
 /** Where a team's WebDriverAgent profile is kept (next to the app's profiles). */
 async function wdaProfilePath(teamId: string): Promise<string> {
   return path.join(await prepareAppleSigningDirectory(), teamId, `${wdaBundleId(teamId)}.mobileprovision`);
+}
+
+/** Signs WebDriverAgent with the app's free Apple Account (the team the app was signed with). */
+async function setUpFreeWda(team: string, bundleId: string, device: WslDevice, options: WslOptions, ctx: EngineContext, signal: AbortSignal): Promise<string> {
+  const python = await deviceHelperCommand({ python: options.python, signal });
+  const runner = new FreeApple({ stateDir: path.join(await prepareAppleSigningDirectory(), 'free-auth'), python, signal, onLog: (line) => log(ctx, 'info', line) });
+  try {
+    await ensureFreeSigningSupport(python, { signal });
+    log(ctx, 'info', 'Sign in with your free Apple Account to sign WebDriverAgent. It must also be signed in on your iPhone, where Apple shows the code. Your password is not saved.');
+    const email = (await ctx.prompter.text({ purpose: 'apple-email', message: 'Apple Account email:' })).trim();
+    if (!email || /[\r\n\0]/.test(email)) throw new UserError('Enter your Apple Account email address.');
+    const password = await ctx.prompter.password({ purpose: 'apple', message: 'Apple Account password:', user: email });
+    if (!password) throw new UserError('An Apple Account password is required to sign in.');
+    const result = await runner.login(email, password, async (mode, again) => (await ctx.prompter.text({ purpose: 'apple-code', message: freeCodeMessage(mode, again) })).trim());
+    const freeTeam = result.teams.find((candidate) => candidate.id === team);
+    if (!freeTeam) throw new UserError(`This Apple account doesn’t have the app’s team (${team}).`, 'Sign in with the free Apple Account that signed this app.');
+    const signing = await setUpFreeSigning(runner, freeTeam, [{ name: 'WebDriverAgent', bundleIdentifier: bundleId, extension: false, entitlements: {} }], ctx, {
+      signal, connectedDevice: { udid: device.udid, name: device.name },
+    });
+    return signing.profile;
+  } finally { runner.close(); }
 }
 
 /** Whether touch is on for this app's team and this iPhone, read from files only. */
@@ -112,12 +135,19 @@ export async function setUpIphoneTouch(input: { cwd: string; udid: string }, ctx
   let profile = await wdaProfilePath(team);
   if (!existsSync(profile) || !await profileCovers(profile, device.udid)) {
     const choice = await chooseAppleSignIn(ctx);
-    const account = choice.way === 'website' ? await signInOnAppleWebsite(ctx, { signal, fresh: choice.fresh }) : await loginAppleAccount(ctx, { signal });
-    if (account.team.id !== team) throw new UserError(`That Apple account’s team is ${account.team.name}, not the app’s team (${team}).`, 'Sign in with the account that signs this app.');
-    const signing = await setUpAutomaticSigning(account, [{ name: 'WebDriverAgent', bundleIdentifier: bundleId, extension: false, entitlements: {} }], ctx, {
-      signal, executor, connectedDevices: [{ udid: device.udid, name: device.name }],
-    });
-    profile = signing.profile;
+    if (choice.way === 'free') {
+      // Touch is signed with the same free Apple Account as the app, like the paid path below.
+      profile = await setUpFreeWda(team, bundleId, device, options, ctx, signal);
+    } else {
+      const account = choice.way === 'website' ? await signInOnAppleWebsite(ctx, { signal, fresh: choice.fresh }) : await loginAppleAccount(ctx, { signal });
+      try {
+        if (account.team.id !== team) throw new UserError(`That Apple account’s team is ${account.team.name}, not the app’s team (${team}).`, 'Sign in with the account that signs this app.');
+        const signing = await setUpAutomaticSigning(account, [{ name: 'WebDriverAgent', bundleIdentifier: bundleId, extension: false, entitlements: {} }], ctx, {
+          signal, executor, connectedDevices: [{ udid: device.udid, name: device.name }],
+        });
+        profile = signing.profile;
+      } finally { account.close(); }
+    }
   }
 
   const password = process.env.CAPMAC_IOS_PASSWORD ?? await savedCertificatePassword(certificate)

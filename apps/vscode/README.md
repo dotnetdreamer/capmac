@@ -25,12 +25,12 @@ its screen shows up in a tab beside your code, and every save updates it.
 | **A debug session like any other** | Every run is a VS Code debug session: Stop, Restart and Hot Reload on the debug toolbar, F5 to start, and the app's console (`console.log`, Dart's `print`, native logs) in the Debug Console with links to the line that logged. |
 | **Errors where your code is** | Xcode, Swift and Dart errors from the Mac, and TypeScript and Vite errors from the web build, land in **Problems**, at the line in your files on this PC. |
 | **Every step in sight** | The Run view shows each build step as it happens, with its time: copy to the Mac, packages, Xcode build, install, open. |
-| **No Mac? This PC builds it** | With a paid Apple Developer Program membership, CapMac can build and sign your iPhone app on this PC and put it on an iPhone plugged in with a cable (then over Wi-Fi). One setup does it all, one Apple sign-in included. |
+| **No Mac? This PC builds it** | CapMac can build and sign your iPhone app on this PC and put it on an iPhone plugged in with a cable (then over Wi-Fi). One setup does it all, one Apple sign-in included. A paid Apple Developer Program membership signs without limits, and a free Apple Account works too (experimental), for 7 days at a time. |
 | **AI agents run it too** | Copilot's agent mode (and any agent with VS Code's tools) can run your app, read its console and look at its screen. |
 
 ## Get started
 
-1. **Choose where your app builds.** Pair your Mac with **CapMac: Pair a Mac**: CapMac finds it on your network (turn on *Remote Login* on the Mac first). No Mac? Run **CapMac: Set Up This PC for iPhones** instead. It needs a paid Apple Developer Program membership (US$99 a year), since a free Apple Account can't sign apps there yet.
+1. **Choose where your app builds.** Pair your Mac with **CapMac: Pair a Mac**: CapMac finds it on your network (turn on *Remote Login* on the Mac first). No Mac? Run **CapMac: Set Up This PC for iPhones** instead. A paid Apple Developer Program membership (US$99 a year) works best. With a free Apple Account, sign in to it on your iPhone first, then choose **Use a free Apple Account** when setup asks.
 2. **Open your app's folder.** The one with your `capacitor.config` file, your Flutter app's `pubspec.yaml`, or your React Native or Electron app's `package.json`. No app yet? **CapMac: Try a Sample App** copies one for you.
 3. **Press ⚡ Live** in the CapMac view, on the status bar, or above your config file.
 

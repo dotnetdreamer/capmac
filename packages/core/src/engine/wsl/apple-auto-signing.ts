@@ -36,7 +36,7 @@ export interface AutomaticSigningResult {
 }
 
 /** Entitlements that only need their capability turned on for the App ID. */
-const CAPABILITY_FOR_ENTITLEMENT: Record<string, string> = {
+export const CAPABILITY_FOR_ENTITLEMENT: Record<string, string> = {
   'aps-environment': 'PUSH_NOTIFICATIONS',
   'com.apple.developer.aps-environment': 'PUSH_NOTIFICATIONS',
   'com.apple.developer.applesignin': 'APPLE_ID_AUTH',
@@ -61,10 +61,12 @@ const CAPABILITY_FOR_ENTITLEMENT: Record<string, string> = {
   'com.apple.developer.authentication-services.autofill-credential-provider': 'AUTOFILL_CREDENTIAL_PROVIDER',
   'com.apple.developer.ClassKit-environment': 'CLASSKIT',
   'com.apple.developer.pass-type-identifiers': 'WALLET',
+  'inter-app-audio': 'INTER_APP_AUDIO',
+  'com.apple.external-accessory.wireless-configuration': 'WIRELESS_ACCESSORY_CONFIGURATION',
 };
-const APP_GROUPS = 'com.apple.security.application-groups';
+export const APP_GROUPS = 'com.apple.security.application-groups';
 /** These need identifiers (containers, merchant IDs) that are made in the developer portal. */
-const PORTAL_ONLY: Record<string, string> = {
+export const PORTAL_ONLY: Record<string, string> = {
   'com.apple.developer.icloud-container-identifiers': 'iCloud',
   'com.apple.developer.icloud-services': 'iCloud',
   'com.apple.developer.ubiquity-container-identifiers': 'iCloud',
@@ -72,7 +74,7 @@ const PORTAL_ONLY: Record<string, string> = {
   'com.apple.developer.in-app-payments': 'Apple Pay',
 };
 /** Signing fills these in itself; they are not App ID capabilities. */
-const NOT_CAPABILITIES = new Set(['application-identifier', 'com.apple.developer.team-identifier', 'get-task-allow', 'keychain-access-groups', 'beta-reports-active']);
+export const NOT_CAPABILITIES = new Set(['application-identifier', 'com.apple.developer.team-identifier', 'get-task-allow', 'keychain-access-groups', 'beta-reports-active']);
 const CAPABILITY_NAMES: Record<string, string> = {
   PUSH_NOTIFICATIONS: 'Push Notifications', APPLE_ID_AUTH: 'Sign in with Apple', GAME_CENTER: 'Game Center', ASSOCIATED_DOMAINS: 'Associated Domains', APP_GROUPS: 'App Groups',
 };
@@ -141,7 +143,7 @@ export function signingNeeds(target: SigningTarget): { capabilities: string[]; a
 }
 
 /** Entitlement values with unresolved variables, such as $(AppIdentifierPrefix), are filled in at signing time. */
-function checkableEntitlements(entitlements: Record<string, plist.PlistValue>): Record<string, plist.PlistValue> {
+export function checkableEntitlements(entitlements: Record<string, plist.PlistValue>): Record<string, plist.PlistValue> {
   return Object.fromEntries(Object.entries(entitlements).filter(([key, value]) => !NOT_CAPABILITIES.has(key) && !JSON.stringify(value).includes('$(')));
 }
 

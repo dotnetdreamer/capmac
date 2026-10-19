@@ -20,12 +20,12 @@ npm run intro:poster:vscode
 
 | Film | Length | Video | Poster |
 | --- | --- | --- | --- |
-| CapMac | 84 seconds | `out/capmac-intro-v5.mp4` | `out/capmac-poster-v4.png` |
-| CapMac for VS Code | 68 seconds | `out/capmac-vscode-intro-v1.mp4` | `out/capmac-vscode-poster-v1.png` |
+| CapMac | 84 seconds | `out/capmac-intro-v6.mp4` | `out/capmac-poster-v4.png` |
+| CapMac for VS Code | 68 seconds | `out/capmac-vscode-intro-v2.mp4` | `out/capmac-vscode-poster-v1.png` |
 
 The project README plays the film from a copy uploaded to GitHub
 
-Where a page can't play video, `npm --prefix apps/intro run readme` renders `out/capmac-intro-v5.jpg`, the poster with a play button, to link to it instead
+Where a page can't play video, `npm --prefix apps/intro run readme` renders `out/capmac-intro-v6.jpg`, the poster with a play button, to link to it instead
 
 `npm --prefix apps/intro run previews -- CapMacIntro` exports a film's review frames into `out/previews/CapMacIntro/`, and `CapMacVSCodeIntro` does the same for the other film
 
@@ -86,7 +86,7 @@ Setup with no Mac is shown sped up, with a note, because the first setup takes a
 
 With no Mac, Studio shows no simulator: the app runs on the iPhone itself, which is what the film shows
 
-The films carry the requirements as notes: a Mac with Xcode and Remote Login, and for building with no Mac, WSL 2, an iPhone and a paid Apple Developer Program membership
+The films carry the requirements as notes: a Mac with Xcode and Remote Login, and for building with no Mac, WSL 2, an iPhone and an Apple Account (a free one signs for 7 days at a time)
 
 ## Edit
 
