@@ -27,7 +27,7 @@ export function otherPortalHost(address: string): string {
 export type AppleRequestContext = AuthState['context'];
 type Fetch = typeof fetch;
 /** The session's tough-cookie jar. Only these two callback methods are used. */
-interface CookieJarLike {
+export interface CookieJarLike {
   getCookieString(url: string, callback: (error: Error | null, cookies?: string) => void): void;
   setCookie(cookie: string, url: string, options: { ignoreError: boolean }, callback: (error: Error | null) => void): void;
 }
@@ -220,7 +220,7 @@ async function signIn(ctx: EngineContext, signal: AbortSignal | undefined, via: 
       expo.Teams.selectTeamAsync = async (props = {}) => {
         throwIfAborted(signal);
         const teams = await expo.Teams.getTeamsAsync(props.restoringSession);
-        if (!teams.length) throw new UserError('This Apple Account has no developer team.', 'A free Apple Account can’t sign apps here yet. Join the Apple Developer Program (US$99 a year) at developer.apple.com/programs, then run setup again.');
+        if (!teams.length) throw new UserError('This Apple Account has no paid developer team.', 'Run setup again and choose “Use a free Apple Account” to sign for 7 days at a time, or join the Apple Developer Program (US$99 a year) at developer.apple.com/programs for full signing.');
         chosenTeam = props.teamId ? teams.find((team) => team.teamId === props.teamId) : teams.length === 1 ? teams[0] : await ctx.prompter.choose({
           message: 'Choose your Apple developer team:', items: teams.map((team) => ({ label: `${team.name} (${team.teamId})`, value: team })),
         });
@@ -301,6 +301,99 @@ function appleDownloadUrl(value: string): URL {
   const url = new URL(value, 'https://download.developer.apple.com');
   if (url.origin !== 'https://download.developer.apple.com' || url.username || url.password || url.search || url.hash || !url.pathname.startsWith('/Developer_Tools/') || !/\.xip$/i.test(url.pathname)) throw new UserError('Apple returned an invalid Xcode download URL.');
   return url;
+}
+
+/**
+ * The managed Xcode's archive, for a sign-in that can't read Apple's download list: a free Apple
+ * Account has only the Xcode sign-in, and the list wants the website's. Apple names it this way
+ * in its catalog (Apple silicon archives hold the same iPhoneOS SDK as universal ones).
+ */
+export function pinnedXcodeDownload(version: string): AppleXcodeDownload {
+  if (!/^\d+\.\d+(?:\.\d+)?$/.test(version)) throw new UserError('Choose a stable Xcode version such as 26.6.');
+  const fileName = `Xcode_${version}_Apple_silicon.xip`;
+  return { version, name: `Xcode ${version}`, url: appleDownloadUrl(`/Developer_Tools/Xcode_${version}/${fileName}`).href, fileName };
+}
+
+/**
+ * A cookie jar for a download granted to the free sign-in: Apple's ADCDownloadAuth cookie, plus
+ * any its download hosts set on the way. Only https apple.com hosts are sent them.
+ */
+export function downloadGrantJar(cookies: string[]): CookieJarLike {
+  const held = new Map<string, string>();
+  const keep = (cookie: string) => {
+    const pair = cookie.split(';', 1)[0] ?? '';
+    const at = pair.indexOf('=');
+    if (at > 0) held.set(pair.slice(0, at).trim(), pair.slice(at + 1).trim());
+  };
+  const apple = (url: string) => { const { protocol, hostname } = new URL(url); return protocol === 'https:' && (hostname === 'apple.com' || hostname.endsWith('.apple.com')); };
+  for (const cookie of cookies) keep(cookie);
+  return {
+    getCookieString(url, callback) { callback(null, apple(url) ? [...held].map(([name, value]) => `${name}=${value}`).join('; ') : ''); },
+    setCookie(cookie, url, _options, callback) { if (apple(url)) keep(cookie); callback(null); },
+  };
+}
+
+/** The free sign-in's Xcode download: Apple's grant comes from the Xcode sign-in (FreeApple.downloadGrant). */
+export async function downloadXcodeWithGrant(cookies: string[], download: AppleXcodeDownload, destination: string,
+  options: XcodeDownloadOptions & { fetch?: Fetch } = {}): Promise<string> {
+  try { return await fetchXcodeArchive(options.fetch ?? fetch, downloadGrantJar(cookies), download, destination, options); }
+  catch (error) { throw safeError(error, options.signal, 'Apple Xcode download'); }
+}
+
+/** `onProgress`'s `resumedFrom`: the bytes an interrupted download had already, when it continues. */
+export interface XcodeDownloadOptions { signal?: AbortSignal; onProgress?: (received: number, total?: number, resumedFrom?: number) => void }
+
+/**
+ * Fetches an Xcode archive with Apple's download grant already in `jar`, continuing an interrupted
+ * download, and publishes it at `destination` only once it is whole and an archive.
+ */
+async function fetchXcodeArchive(transport: Fetch, jar: CookieJarLike, download: AppleXcodeDownload, destination: string,
+  options: XcodeDownloadOptions = {}): Promise<string> {
+  const url = appleDownloadUrl(download.url);
+  if (!path.isAbsolute(destination)) throw new UserError('The Xcode archive destination must be an absolute path.');
+  const directory = path.dirname(destination);
+  await mkdir(directory, { recursive: true });
+  // A fixed partial name lets an interrupted multi-gigabyte download continue on the next run.
+  const partial = path.join(directory, `.capmac-${path.basename(destination)}.part`);
+  let offset = await stat(partial).then((info) => info.isFile() ? info.size : 0, () => 0);
+  const response = await openAppleDownload(transport, jar, url, { Accept: '*/*', ...(offset ? { Range: `bytes=${offset}-` } : {}) }, options.signal);
+  if (response.status !== 200 && response.status !== 206) { await response.body?.cancel().catch(() => undefined); throw new UserError(`Apple did not send the Xcode archive (HTTP ${response.status}).`, AGREEMENT_HINT); }
+  if (/text\/html|application\/json/i.test(response.headers.get('content-type') ?? '')) { await response.body?.cancel().catch(() => undefined); throw new UserError('Apple returned a sign-in page instead of the Xcode archive.', AGREEMENT_HINT); }
+  // Apple may ignore the range and send the whole file again.
+  if (response.status === 200) offset = 0;
+  const range = /^bytes \d+-\d+\/(\d+)$/.exec(response.headers.get('content-range') ?? '');
+  const length = Number(response.headers.get('content-length'));
+  const total = range ? Number(range[1]) : Number.isSafeInteger(length) && length > 0 ? offset + length : download.size;
+  if (!response.body) throw new UserError('Apple sent an empty Xcode download.');
+  let received = offset;
+  const resumedFrom = offset || undefined;
+  options.onProgress?.(received, total, resumedFrom);
+  // Abort a stalled transfer; the partial file is kept for the next run.
+  const idle = new AbortController();
+  let timer = setTimeout(() => idle.abort(), 120_000);
+  const progress = new Transform({ transform(chunk: Buffer, _encoding, callback) {
+    clearTimeout(timer); timer = setTimeout(() => idle.abort(), 120_000);
+    received += chunk.length; options.onProgress?.(received, total, resumedFrom); callback(null, chunk);
+  } });
+  try {
+    await pipeline(Readable.fromWeb(response.body as WebReadableStream<Uint8Array>), progress, createWriteStream(partial, { flags: offset ? 'a' : 'w' }),
+      { signal: AbortSignal.any([idle.signal, ...(options.signal ? [options.signal] : [])]) });
+  } catch (error) {
+    if (options.signal?.aborted) throw new CancelledError();
+    throw new UserError(idle.signal.aborted ? 'Apple stopped sending the Xcode download.' : 'The Xcode download stopped before it finished.', 'Run capmac wsl setup again; the download continues where it stopped.', [(error as Error)?.name ?? 'Error']);
+  } finally { clearTimeout(timer); }
+  if (total && received !== total) throw new UserError('The Xcode download stopped before it finished.', 'Run capmac wsl setup again; the download continues where it stopped.');
+  const header = Buffer.alloc(4);
+  const file = await open(partial, 'r');
+  try { await file.read(header, 0, 4, 0); } finally { await file.close(); }
+  if (header.toString('ascii') !== 'xar!') {
+    await unlink(partial).catch(() => undefined);
+    throw new UserError('Apple did not send a valid Xcode archive.', 'Run capmac wsl setup again to download it once more.');
+  }
+  // Hard-link publication is atomic and cannot overwrite an existing download.
+  await link(partial, destination);
+  await unlink(partial);
+  return destination;
 }
 
 /** Parse Apple's authenticated download catalog, rather than guessing a URL. */
@@ -402,8 +495,7 @@ export class AppleAccountSession {
       throw new UserError(`Apple did not return its list of downloads (${failures.join('; ')}).`, AGREEMENT_HINT);
     }, signal, 'Apple Xcode catalog request');
   }
-  /** `onProgress`'s `resumedFrom`: the bytes an interrupted download had already, when it continues. */
-  async downloadXcode(download: AppleXcodeDownload, destination: string, options: { signal?: AbortSignal; onProgress?: (received: number, total?: number, resumedFrom?: number) => void } = {}): Promise<string> {
+  async downloadXcode(download: AppleXcodeDownload, destination: string, options: XcodeDownloadOptions = {}): Promise<string> {
     const url = appleDownloadUrl(download.url);
     if (!path.isAbsolute(destination)) throw new UserError('The Xcode archive destination must be an absolute path.');
     return this.#withJar(async (jar) => {
@@ -417,49 +509,7 @@ export class AppleAccountSession {
       const onward = granted.headers.get('location');
       const toFile = !!onward && new URL(onward, authorization).hostname === url.hostname;
       if (granted.status >= 400 || (granted.status >= 300 && !toFile)) throw new UserError(`Apple did not allow this Xcode download (HTTP ${granted.status}).`, AGREEMENT_HINT);
-      const directory = path.dirname(destination);
-      await mkdir(directory, { recursive: true });
-      // A fixed partial name lets an interrupted multi-gigabyte download continue on the next run.
-      const partial = path.join(directory, `.capmac-${path.basename(destination)}.part`);
-      let offset = await stat(partial).then((info) => info.isFile() ? info.size : 0, () => 0);
-      const response = await openAppleDownload(this.#fetch, jar, url, { Accept: '*/*', ...(offset ? { Range: `bytes=${offset}-` } : {}) }, options.signal);
-      if (response.status !== 200 && response.status !== 206) { await response.body?.cancel().catch(() => undefined); throw new UserError(`Apple did not send the Xcode archive (HTTP ${response.status}).`, AGREEMENT_HINT); }
-      if (/text\/html|application\/json/i.test(response.headers.get('content-type') ?? '')) { await response.body?.cancel().catch(() => undefined); throw new UserError('Apple returned a sign-in page instead of the Xcode archive.', AGREEMENT_HINT); }
-      // Apple may ignore the range and send the whole file again.
-      if (response.status === 200) offset = 0;
-      const range = /^bytes \d+-\d+\/(\d+)$/.exec(response.headers.get('content-range') ?? '');
-      const length = Number(response.headers.get('content-length'));
-      const total = range ? Number(range[1]) : Number.isSafeInteger(length) && length > 0 ? offset + length : download.size;
-      if (!response.body) throw new UserError('Apple sent an empty Xcode download.');
-      let received = offset;
-      const resumedFrom = offset || undefined;
-      options.onProgress?.(received, total, resumedFrom);
-      // Abort a stalled transfer; the partial file is kept for the next run.
-      const idle = new AbortController();
-      let timer = setTimeout(() => idle.abort(), 120_000);
-      const progress = new Transform({ transform(chunk: Buffer, _encoding, callback) {
-        clearTimeout(timer); timer = setTimeout(() => idle.abort(), 120_000);
-        received += chunk.length; options.onProgress?.(received, total, resumedFrom); callback(null, chunk);
-      } });
-      try {
-        await pipeline(Readable.fromWeb(response.body as WebReadableStream<Uint8Array>), progress, createWriteStream(partial, { flags: offset ? 'a' : 'w' }),
-          { signal: AbortSignal.any([idle.signal, ...(options.signal ? [options.signal] : [])]) });
-      } catch (error) {
-        if (options.signal?.aborted) throw new CancelledError();
-        throw new UserError(idle.signal.aborted ? 'Apple stopped sending the Xcode download.' : 'The Xcode download stopped before it finished.', 'Run capmac wsl setup again; the download continues where it stopped.', [(error as Error)?.name ?? 'Error']);
-      } finally { clearTimeout(timer); }
-      if (total && received !== total) throw new UserError('The Xcode download stopped before it finished.', 'Run capmac wsl setup again; the download continues where it stopped.');
-      const header = Buffer.alloc(4);
-      const file = await open(partial, 'r');
-      try { await file.read(header, 0, 4, 0); } finally { await file.close(); }
-      if (header.toString('ascii') !== 'xar!') {
-        await unlink(partial).catch(() => undefined);
-        throw new UserError('Apple did not send a valid Xcode archive.', 'Run capmac wsl setup again to download it once more.');
-      }
-      // Hard-link publication is atomic and cannot overwrite an existing download.
-      await link(partial, destination);
-      await unlink(partial);
-      return destination;
+      return fetchXcodeArchive(this.#fetch, jar, download, destination, options);
     }, options.signal, 'Apple Xcode download');
   }
   async planAppGroupAssignments(requirements: AppleAppGroupRequirement[], signal?: AbortSignal): Promise<AppleAppGroupPlan> {

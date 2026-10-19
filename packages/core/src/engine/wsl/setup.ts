@@ -5,18 +5,21 @@
 import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { log, throwIfAborted, withStep, type EngineContext } from '../context.js';
-import { UserError } from '../errors.js';
+import { log, throwIfAborted, withStep, type EngineContext, type StepHandle } from '../context.js';
+import { CancelledError, UserError } from '../errors.js';
 import { WSL_SETUP_PHASES, type WslSetupPhase } from '../events.js';
 import type { WslSetupState, WslSetupStatus } from '../../shared/wsl-setup.js';
 
 export type { WslSetupState, WslSetupStatus } from '../../shared/wsl-setup.js';
 import { loadProject, type ProjectInfo } from '../project.js';
-import { loginAppleAccount } from './apple-account.js';
+import { downloadXcodeWithGrant, loginAppleAccount, pinnedXcodeDownload } from './apple-account.js';
 import { readSigningTargets, setUpAutomaticSigning } from './apple-auto-signing.js';
+import { inspectAppleProfileContent, prepareAppleSigningDirectory } from './apple-signing.js';
 import { chooseAppleSignIn, signInOnAppleWebsite } from './apple-web.js';
 import { installAppleDevices, startAppleDeviceServer } from './apple-devices.js';
-import { listWslDevices } from './device.js';
+import { deviceHelperCommand, listWslDevices } from './device.js';
+import { ensureFreeSigningSupport, FreeApple } from './free/free-apple.js';
+import { chooseFreeTeam, freeCodeMessage, setUpFreeSigning } from './free/free-signing.js';
 import { bootstrapWslDependencies, devicePythonCurrent, ensureManagedWslDistro, MANAGED_XCODE_VERSION } from './bootstrap.js';
 import { setupSDKFromXcode } from './sdk.js';
 import { SDK_IMPORT_VERSION } from './sdk-runtime.js';
@@ -58,14 +61,27 @@ export async function readWslSetupStatus(cwd: string): Promise<WslSetupStatus | 
   }
 }
 
-function setupNeeds(options: WslOptions, cwd: string) {
+/** A provisioning profile is only "set up" while it hasn't expired — free profiles last 7 days. */
+async function profilesCurrent(cwd: string, profiles: (string | undefined)[]): Promise<boolean> {
+  for (const file of profiles) {
+    if (!file) continue;
+    try {
+      const content = await fs.readFile(path.resolve(cwd, file));
+      if (inspectAppleProfileContent(content.toString('base64')).expirationDate.getTime() <= Date.now()) return false;
+    } catch { /* Unparseable here: leave readiness to the files-exist check and the build's own validation. */ }
+  }
+  return true;
+}
+
+async function setupNeeds(options: WslOptions, cwd: string) {
   // An SDK imported for another Xcode release does not match the managed Linux Swift, and
   // one CapMac took out of Xcode with an older importer is taken out again.
   const extracted = !!options.sdk && options.sdk.includes('/capmac/apple-sdk/');
   const sdk = !!options.sdk && (!options.xcodeVersion || options.xcodeVersion === MANAGED_XCODE_VERSION)
     && (!extracted || options.sdkImporter === String(SDK_IMPORT_VERSION));
-  const signingFiles = [options.certificate, options.profile, ...Object.values(options.extensionProfiles ?? {})];
-  const signing = signingFiles.every((file) => !!file && existsSync(path.resolve(cwd, file)));
+  const profileFiles = [options.profile, ...Object.values(options.extensionProfiles ?? {})];
+  const signingFiles = [options.certificate, ...profileFiles];
+  const signing = signingFiles.every((file) => !!file && existsSync(path.resolve(cwd, file))) && await profilesCurrent(cwd, profileFiles);
   const tools = !!(options.distro && options.swift && options.linker && options.signer) && devicePythonCurrent(options.python);
   return { sdk, signing, tools };
 }
@@ -75,7 +91,7 @@ export async function wslSetupState(cwd: string): Promise<WslSetupState> {
   let project: ProjectInfo | undefined;
   try { project = await loadProject(cwd); cwd = project.capDir; } catch { /* Tools can be set up outside an app. */ }
   const options = await loadWslOptions({}, cwd).catch(() => ({} as WslOptions));
-  const ready = setupNeeds(options, cwd);
+  const ready = await setupNeeds(options, cwd);
   const partial = ready.sdk ? undefined : await partialXcodeDownload();
   return { status: await readWslSetupStatus(cwd), ...ready, inApp: hasIosApp(project), partialDownload: partial ? { bytes: partial } : null };
 }
@@ -117,12 +133,12 @@ export async function guidedWslSetup(input: WslOptions, cwd: string, ctx: Engine
   let project: ProjectInfo | undefined;
   try { project = await loadProject(cwd); } catch { /* Outside an app, setup prepares only the tools. */ }
   if (!hasIosApp(project)) project = undefined;
-  const ready = setupNeeds(options, cwd);
+  const ready = await setupNeeds(options, cwd);
   let archive = input.xcode ? path.resolve(cwd, input.xcode) : !ready.sdk ? await findDownloadedXcode() : undefined;
   const needsDownload = !ready.sdk && !archive;
   const needsSigning = !!project && (!!input.appleLogin || !ready.signing);
-  // A free Apple Account stops at the sign-in, after the long tools step: say so first.
-  if (input.appleLogin || needsDownload || needsSigning) log(ctx, 'info', 'Building on this PC needs a paid Apple Developer Program membership (US$99 a year). A free Apple Account can’t sign apps here yet.');
+  // Signing needs an Apple account: say up front what each kind gives.
+  if (input.appleLogin || needsDownload || needsSigning) log(ctx, 'info', 'Building on this PC needs an Apple account to sign the app. A paid Apple Developer Program membership (US$99 a year) signs without limits; a free Apple Account works too, signing for 7 days at a time (experimental).');
 
   // 1. Tools first: no sign-in needed, and the longest step on a new PC.
   const output = (text: string, stream: 'stdout' | 'stderr') => ctx.emit({ type: 'tool-output', text, stream });
@@ -146,11 +162,87 @@ export async function guidedWslSetup(input: WslOptions, cwd: string, ctx: Engine
   }, (state) => (state === 'skipped' ? 'Not installed' : undefined));
   if (devices === 'skipped') log(ctx, 'info', 'Skipped Apple Devices. Install it from the Microsoft Store before running on your iPhone.');
 
+  // The Xcode download's progress, for either sign-in. Chunks arrive many times a second: report a few times a second.
+  const xcodeProgress = (step: StepHandle) => {
+    let shown = 0;
+    return (received: number, total?: number, resumedFrom?: number) => {
+      const now = Date.now();
+      if (now - shown < 250 && received !== total) return;
+      shown = now;
+      step.update(`${gigabytes(received)} GB${total ? ` of ${gigabytes(total)} GB` : ''}${resumedFrom ? ` · continued from ${gigabytes(resumedFrom)} GB` : ''}`, total ? received / total : undefined);
+      ctx.emit({ type: 'wsl-setup', phase: 'apple-download', state: 'running', bytes: { received, ...(total ? { total } : {}), ...(resumedFrom ? { resumedFrom } : {}) } });
+    };
+  };
+
+  // The free Apple Account path: its own sign-in, signing and Xcode download.
+  const freeAppleSetup = async (): Promise<void> => {
+    const python = await deviceHelperCommand({ python: options.python, signal });
+    const signingRoot = await prepareAppleSigningDirectory();
+    const runner = new FreeApple({ stateDir: path.join(signingRoot, 'free-auth'), python, signal, onLog: (line) => output(line + '\n', 'stderr') });
+    try {
+      const team = await track('apple-sign-in', async () => {
+        await ensureFreeSigningSupport(python, { onOutput: output, signal });
+        log(ctx, 'info', 'Sign in with your free Apple Account. It must also be signed in on your iPhone, where Apple shows the verification code. Your password is not saved.');
+        const email = (await ctx.prompter.text({ purpose: 'apple-email', message: 'Apple Account email:' })).trim();
+        if (!email || /[\r\n\0]/.test(email)) throw new UserError('Enter your Apple Account email address.');
+        const password = await ctx.prompter.password({ purpose: 'apple', message: 'Apple Account password:', user: email });
+        if (!password) throw new UserError('An Apple Account password is required to sign in.');
+        const result = await runner.login(email, password, async (mode, again) => (await ctx.prompter.text({ purpose: 'apple-code', message: freeCodeMessage(mode, again) })).trim());
+        return chooseFreeTeam(result.teams, ctx);
+      }, (chosen) => chosen.name);
+      if (needsSigning && project) {
+        await track('signing', async () => {
+          const targets = await withStep(ctx, 'Reading the app’s signing settings', 'deps', () => readSigningTargets(project!, executor, {
+            ruby: options.ruby, scheme: options.scheme, configuration: options.configuration, signal,
+          }));
+          const connected = await listWslDevices({ python: options.python, signal }).catch((error) => { if (error instanceof CancelledError) throw error; return []; });
+          // A free account registers at most 3 iPhones, so register the one the developer means.
+          const saved = options.target?.toLowerCase();
+          const chosen = connected.find((item) => item.udid.toLowerCase() === saved)
+            ?? (connected.length > 1 && ctx.prompter.interactive
+              ? await ctx.prompter.choose({ message: 'Which iPhone will you run the app on?', items: connected.map((item) => ({ label: item.name, hint: item.productVersion, value: item })) })
+              : connected[0]);
+          const device = chosen ? { udid: chosen.udid, name: chosen.name } : undefined;
+          const signing = await setUpFreeSigning(runner, team, targets, ctx, { signal, connectedDevice: device });
+          options = { ...options, ...signing };
+          await saveWslOptions(options, cwd);
+          log(ctx, 'success', `Free iPhone signing is set up for ${targets.map((target) => target.bundleIdentifier).join(' and ')}.`);
+        });
+      } else if (project) report('signing', 'done', 'Already set up');
+      else report('signing', 'skipped', 'Not in an app');
+      report('apple-catalog', 'skipped');
+      if (needsDownload) {
+        // Apple's download list wants the website sign-in, but Apple grants the managed Xcode's
+        // archive to the Xcode sign-in, the way Xcode itself downloads (any Apple Account may).
+        const download = pinnedXcodeDownload(MANAGED_XCODE_VERSION);
+        const directory = path.join(os.homedir(), 'Downloads');
+        await fs.mkdir(directory, { recursive: true });
+        const destination = path.join(directory, download.fileName);
+        archive = await track('apple-download', () => withStep(ctx, 'Downloading Xcode from Apple (about 3 GB)', 'deps', async (step) => {
+          let cookies: string[];
+          try { cookies = await runner.downloadGrant(new URL(download.url).pathname); }
+          catch (error) {
+            if (error instanceof CancelledError) throw error;
+            // Turned away: the archive can still come by hand, and setup picks it up from Downloads.
+            throw new UserError('Apple didn’t let CapMac download Xcode on this free sign-in.',
+              `Download it free with the same Apple Account: open developer.apple.com/download/all, sign in, accept Apple’s free developer agreement, download “Xcode ${MANAGED_XCODE_VERSION}” (the .xip file), and leave it in your Downloads folder. Then run free setup again.`,
+              error instanceof UserError ? [error.message, ...(error.details ?? [])] : undefined);
+          }
+          return downloadXcodeWithGrant(cookies, download, destination, { signal, onProgress: xcodeProgress(step) });
+        }));
+      } else report('apple-download', 'done', archive ? 'Already downloaded' : 'Already in place');
+    } finally { runner.close(); }
+  };
+
   // 2. One Apple sign-in covers signing and the Xcode download: on Apple's website, where
-  // CapMac then does everything, or here with a password (the certificate may be by hand).
+  // CapMac then does everything, here with a password (the certificate may be by hand),
+  // or with a free Apple Account (a separate path that signs for 7 days at a time).
   if (input.appleLogin || needsDownload || needsSigning) {
+    const choice = await chooseAppleSignIn(ctx);
+    if (choice.way === 'free') {
+      await freeAppleSetup();
+    } else {
     const account = await track('apple-sign-in', async () => {
-      const choice = await chooseAppleSignIn(ctx);
       if (choice.way === 'website') return signInOnAppleWebsite(ctx, { signal, fresh: choice.fresh });
       log(ctx, 'info', 'Sign in to Apple. Apple then sends a verification code to your devices. Your password is not saved.');
       return loginAppleAccount(ctx, { signal });
@@ -175,25 +267,15 @@ export async function guidedWslSetup(input: WslOptions, cwd: string, ctx: Engine
         const directory = path.join(os.homedir(), 'Downloads');
         await fs.mkdir(directory, { recursive: true });
         archive = path.join(directory, download.fileName);
-        await track('apple-download', () => withStep(ctx, 'Downloading Xcode from Apple (about 3 GB)', 'deps', (step) => {
-          let shown = 0;
-          return account.downloadXcode(download, archive!, {
-            signal, onProgress: (received, total, resumedFrom) => {
-              // Chunks arrive many times a second: report a few times a second.
-              const now = Date.now();
-              if (now - shown < 250 && received !== total) return;
-              shown = now;
-              step.update(`${gigabytes(received)} GB${total ? ` of ${gigabytes(total)} GB` : ''}${resumedFrom ? ` · continued from ${gigabytes(resumedFrom)} GB` : ''}`, total ? received / total : undefined);
-              ctx.emit({ type: 'wsl-setup', phase: 'apple-download', state: 'running', bytes: { received, ...(total ? { total } : {}), ...(resumedFrom ? { resumedFrom } : {}) } });
-            },
-          });
-        }));
+        await track('apple-download', () => withStep(ctx, 'Downloading Xcode from Apple (about 3 GB)', 'deps', (step) =>
+          account.downloadXcode(download, archive!, { signal, onProgress: xcodeProgress(step) })));
       } else {
         // A step done earlier shows as done, not as "not needed".
         report('apple-catalog', 'skipped');
         report('apple-download', 'done', archive ? 'Already downloaded' : 'Already in place');
       }
     } finally { account.close(); }
+    }
   } else {
     for (const phase of ['apple-sign-in', 'apple-catalog'] as const) report(phase, 'skipped', 'Not needed');
     if (project) report('signing', 'done', 'Already set up');

@@ -36,9 +36,11 @@ describe('how setup signs in to Apple', () => {
     expect(await chooseAppleSignIn(silentContext(ask), { root, browser: brave })).toEqual({ way: 'website', fresh: false });
     const question = ask.choose.mock.calls[0]![0] as { message: string; items: { label: string; hint?: string; value: string }[] };
     expect(question.message).toBe('Sign in to Apple');
-    expect(question.items.map((item) => [item.label, item.value])).toEqual([['Let CapMac do it (recommended)', 'web'], ['Do it myself', 'password']]);
+    // Apple's developer website is only for paid members, so every option but the free one says so.
+    expect(question.items.map((item) => [item.label, item.value])).toEqual([['Let CapMac do it (paid account, recommended)', 'web'], ['Do it myself (paid account)', 'password'], ['Use a free Apple Account (experimental)', 'free']]);
     expect(question.items[0]!.hint).toContain('Sign in once on Apple’s website in Brave');
     expect(await chooseAppleSignIn(silentContext(picking('password')), { root, browser: brave })).toEqual({ way: 'password' });
+    expect(await chooseAppleSignIn(silentContext(picking('free')), { root, browser: brave })).toEqual({ way: 'free' });
   });
 
   it('with a saved sign-in, offers to use it or to start fresh', async () => {
@@ -46,17 +48,20 @@ describe('how setup signs in to Apple', () => {
     const ask = picking('web-fresh');
     expect(await chooseAppleSignIn(silentContext(ask), { root, browser: brave })).toEqual({ way: 'website', fresh: true });
     const question = ask.choose.mock.calls[0]![0] as { items: { label: string; hint?: string; value: string }[] };
-    expect(question.items.map((item) => item.value)).toEqual(['web', 'web-fresh', 'password']);
+    expect(question.items.map((item) => item.value)).toEqual(['web', 'web-fresh', 'password', 'free']);
+    expect(question.items[1]!.label).toBe('Let CapMac do it with a fresh sign-in (paid account)');
     expect(question.items[0]!.hint).toContain('saved sign-in');
   });
 
-  it('without a browser CapMac can drive, signs in here without asking', async () => {
+  it('without a browser CapMac can drive, offers signing in here or a free Apple Account', async () => {
     const before = process.env.CAPMAC_BROWSER;
     process.env.CAPMAC_BROWSER = path.join(root, 'missing.exe');
     try {
-      const ask = picking('web');
+      const ask = picking('password');
       expect(await chooseAppleSignIn(silentContext(ask), { root })).toEqual({ way: 'password' });
-      expect(ask.choose).not.toHaveBeenCalled();
+      const question = ask.choose.mock.calls[0]![0] as { items: { value: string }[] };
+      expect(question.items.map((item) => item.value)).toEqual(['password', 'free']);
+      expect(await chooseAppleSignIn(silentContext(picking('free')), { root })).toEqual({ way: 'free' });
     } finally { if (before === undefined) delete process.env.CAPMAC_BROWSER; else process.env.CAPMAC_BROWSER = before; }
   });
 });

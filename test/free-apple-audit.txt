@@ -1,0 +1,290 @@
+FREE APPLE ACCOUNT IMPLEMENTATION AUDIT
+Date: 2026-10-18 (Europe/Amsterdam)
+Worktree: C:/Users/ik/Documents/GitHub/capmac-free-apple-id
+Branch: feature/free-apple-id; HEAD: 32774f9
+Scope: staged experimental free-account implementation and its setup, build,
+device, WebDriverAgent, policy, subprocess and storage integration.
+
+VERDICT
+
+The implementation is not ready for a live account or device demonstration.
+The original green tests reproduce, but cannot substantiate the functional claims.
+Windows process creation fails before sign-in; certificate export also fails;
+provisioning can attempt to revoke unrelated team certificates.
+
+No real credentials were used and no Apple account resources were changed.
+Product code was not edited by this audit. New acceptance tests deliberately fail
+on unmet behavior; they are ordinary assertions, not expected-failure annotations.
+An unrelated unstaged Xcode-download guidance edit appeared in setup.ts during the
+audit and was preserved. Current findings include the current copy of that file.
+
+VERIFICATION
+
+Original npm test: 990 passed, 22 skipped, no failures (82 files passed, 5 skipped).
+Repository-wide npm run typecheck: PASS, including desktop and VS Code projects.
+CLI npm run build: PASS; source is bundled, including apple-free.py.
+Python source compilation: PASS.
+
+New TypeScript acceptance checks: 23 total, 5 passed, 18 failed.
+  wsl-free-audit-runner.test.ts:      9 total, 3 passed, 6 failed.
+  wsl-free-audit-integration.test.ts: 5 total, 0 passed, 5 failed.
+  wsl-free-audit-signing.test.ts:     5 total, 1 passed, 4 failed.
+  wsl-free-audit-setup.test.ts:       4 total, 1 passed, 3 failed.
+New Python acceptance checks: 13 total, 5 passed, 4 failed, 4 errors.
+Combined new checks: 36 total, 10 passed, 26 failed or errored.
+Failure counts are checks, not counts of distinct defects.
+
+Passing controls establish that:
+- Real subprocess pipes handle fragmented Unicode JSON, code prompts and replies.
+- Pending requests receive real process-exit diagnostics; explicit close cancels.
+- The real profile parser detects a missing entitlement when actually asked to.
+- The happy setup branch hands the free result to settings and closes its runner.
+- SRP agrees with an independently implemented server for s2k and legacy s2k_fo,
+  including server proof and negotiation HMAC checks.
+- AES-GCM app-token decryption authenticates payloads and detects tampering.
+- anisette 1.2.4 accepts the generated library archive, saves/loads its state and
+  exposes the header API used by the backend (local fakes for OTP, no provisioning).
+
+Additional real, unauthenticated boundary checks:
+- Apple's public Apple Music APK range download succeeded. Both requested files
+  are ELF64 AArch64: libCoreADI.so (1,792,592 bytes) and
+  libstoreservicescore.so (2,388,480 bytes).
+- The real libraries load in anisette 1.2.4 / Unicorn 2.1.4 on Windows with socket
+  connections disabled. No machine provisioning, OTP request or login was run.
+- Cryptography runtime used for backend probes: 44.0.1.
+
+CONFIRMED FINDINGS (highest impact first)
+
+1. P1: Unrelated certificates can be revoked.
+   packages/core/src/engine/wsl/free/apple-free.py:473
+   _make_certificate DELETEs every listed certificate whenever no reusable local
+   key/certificate is found. It checks neither ownership, certificate type,
+   expiry nor free-team status. chooseFreeTeam can select a paid team when no free
+   team exists. The signing confirmation promises creation, not blanket revocation.
+   Probe trace: DELETE OTHER_PC_VALID_DEV; DELETE PAID_DISTRIBUTION; POST new cert.
+   Remove blanket deletion. Preserve other identities and handle actual quota
+   errors with a concrete, explicitly reviewed revocation choice.
+
+2. P1: The shipped helper cannot launch on Windows.
+   packages/core/src/engine/wsl/free/free-apple.ts:75
+   The entire 32,154-character Python source is passed through python -c. Windows
+   argument quoting pushes the command past CreateProcess's limit. Actual managed
+   Python and Node launch probes throw spawn ENAMETOOLONG before any Apple request.
+   Materialize a protected script and launch its path, or use another transport
+   that keeps source out of the command line.
+
+3. P1: Fresh and cached PKCS#12 export both crash.
+   packages/core/src/engine/wsl/free/apple-free.py:468 and :499
+   pkcs12.BestAvailableEncryption does not exist; it belongs to serialization.
+   Both real cryptography export probes raise AttributeError. On first use this
+   occurs after certificate deletion/creation and key persistence.
+   Use the supported serialization encryption API and prove a real PKCS#12
+   decode round trip with the returned password and matching certificate/key.
+
+4. P1: Profile acceptance ignores requested grants and the selected iPhone.
+   packages/core/src/engine/wsl/free/free-signing.ts:127
+   appleProfileCovers is called with entitlements: {}. A HealthKit request with a
+   returned profile lacking HealthKit is accepted. A profile for another phone
+   is also accepted. Backend _ensure_device at apple-free.py:512 turns registration
+   errors into notes and proceeds if any older registered phone exists.
+   Tests reproduce a quota-denied current phone falling back to another phone.
+   Require the requested entitlement values and selected UDID before success;
+   propagate failure to register the requested device. Also verify certificate/
+   team consistency when validating the complete signing artifact set.
+
+5. P1: App Group identifiers are lost and never assigned.
+   packages/core/src/engine/wsl/free/free-signing.ts:82
+   need.appGroups is reduced to APP_GROUPS in the capability list. The requested
+   group names never reach FreeProvisionTarget or Python; no group creation or
+   app/extension assignment operation exists. The test shows group.com.example.audit
+   disappearing before runner.provision. Forward and provision actual group
+   identifiers, then validate the resulting profile's group grants.
+
+6. P1: Free WebDriverAgent signing is not wired.
+   packages/core/src/engine/iphone/touch.ts:115
+   The shared sign-in menu can now return way:'free', but touch setup sends every
+   nonwebsite choice into paid loginAppleAccount and always calls paid automatic
+   signing. The test proves a free choice calls paidLogin. Touch and the cable
+   picture therefore do not gain the claimed free signing path. Wire free sign-in
+   and provisioning here with the app's team and certificate lifecycle.
+
+7. P1 operational gap: Normal setup does not renew expired profiles.
+   packages/core/src/engine/wsl/setup.ts:71 and :126
+   Existing signing files are treated as valid without reading expiry. A profile
+   that expired in 2020 still produces signing:true. With the SDK in place, running
+   ordinary setup again skips signing, contrary to free-signing.ts:137's renewal
+   instruction. The readiness logic predates this feature, but now needs explicit
+   seven-day renewal handling. Currently --apple-login forces re-signing.
+
+8. P1 protocol mismatch: SMS two-factor handling is incomplete.
+   packages/core/src/engine/wsl/free/apple-free.py:293
+   SMS uses GET secondaryAuth followed by GET validateCode with a security-code
+   header. The claimed xtool reference uses SMS-specific POST requests with plist
+   bodies and a distinct phone-code verification endpoint. Request-capture tests
+   prove the mismatch. Implement the phone/SMS flow and phone selection/fallback.
+   This is a confirmed upstream compatibility gap, not a claim that a live Apple
+   server rejection was observed during this audit.
+
+9. P1: Advertised compressed API responses cannot be parsed.
+   packages/core/src/engine/wsl/free/apple-free.py:389 and :416
+   Requests advertise gzip, deflate; urllib returns compressed bytes and the code
+   sends them directly to json.loads. Real gzip and zlib fixtures both raise
+   UnicodeDecodeError. Decode Content-Encoding, including error responses, or
+   avoid advertising encodings that the client cannot handle.
+
+10. P1: Failed provisioning validation overwrites a working local identity.
+    packages/core/src/engine/wsl/free/free-signing.ts:121
+    The certificate/password are replaced before returned profiles are parsed or
+    checked. An invalid profile causes setup to fail after the existing identity
+    has been replaced, leaving old settings/profiles with a new identity.
+    The local preservation test reproduces the overwrite. Validate and stage the
+    complete result before committing any replacement; preserve a recoverable
+    previous artifact set if commit fails.
+
+11. P2: Capability policy permits paid-only features and rejects valid free ones.
+    packages/core/src/engine/wsl/free/free-capabilities.ts:21
+    NETWORK_EXTENSIONS is allowed, but Apple's current free column is empty.
+    Personal VPN is also paid-only; the whitelist comment is incorrect.
+    Conversely, free-signing.ts:46 treats every unknown com.apple entitlement as
+    paid-only. The shared mapping omits free-supported Data Protection and Wireless
+    Accessory Configuration; both are rejected with a paid-membership hint.
+    inter-app-audio is unmapped and silently requests no capability. Reconcile the
+    actual entitlement-to-capability mapping with Apple's table; do not infer
+    membership requirements solely from an absent mapping.
+
+12. P2: Interrupted sign-in library download poisons future attempts.
+    packages/core/src/engine/wsl/free/apple-free.py:102 and :126
+    The ZIP is written directly to its final cache path. Failure fetching the
+    second library leaves a partial archive, and future logins skip refetching
+    because the path exists. The interruption test reproduces this. Use a
+    temporary path, verify both libraries and atomically publish the cache;
+    detect and recover existing incomplete archives.
+
+13. P2: A persistent plaintext signing key bypasses DPAPI protection.
+    packages/core/src/engine/wsl/free/apple-free.py:494
+    free-development.key is an unencrypted PKCS8 private key. Encrypting only the
+    PKCS#12 password does not protect this alternate copy. The existing paid path
+    protects its pending private key with DPAPI. The signing directory's user-only
+    ACL still restricts access, so this is not a claim of public readability.
+    Protect the cached key as well or reuse only protected identity material.
+
+14. P2: Failed login/team selection leaks the running helper.
+    packages/core/src/engine/wsl/setup.ts:157
+    The cleanup try/finally starts after the awaited sign-in/team selection.
+    A login error or missing team bypasses runner.close; the process remains waiting
+    on stdin. The test proves close is called zero times on failure. Put cleanup
+    around the entire lifetime, including dependency prep, login and team choice.
+
+15. P2: Cancellation can start dependency installation anyway.
+    packages/core/src/engine/wsl/free/free-apple.ts:189
+    No pre-abort check exists. Mid-probe abort kills the probe; its nonzero exit
+    then triggers pip install, whose newly attached listener misses the already
+    fired signal. Tests prove both paths can resolve successfully after cancellation.
+    Check cancellation before every spawn and after each await, reject as cancelled,
+    and remove settled-process abort listeners.
+
+16. P2: Valid JSON with the wrong shape can crash the host process.
+    packages/core/src/engine/wsl/free/free-apple.ts:109 and :114
+    A stdout line null parses successfully, then asynchronous dispatch reads
+    message.event. Its rejected promise is discarded. An isolated real Node host
+    exits 1 with TypeError. Validate an object-shaped protocol message and handle
+    dispatch failures at the transport boundary.
+
+17. P2: Process lifecycle allows hangs and cross-process request failures.
+    packages/core/src/engine/wsl/free/free-apple.ts:90 and :141
+    error/close rejects current requests but retains #child. A later request can
+    write to the dead helper and remain pending forever. A delayed close from a
+    previous helper also rejects the replacement helper's shared pending map.
+    Tests reproduce both. Clear only the matching child on exit; scope responses,
+    events and requests to a process generation. Add bounded request deadlines.
+    The stdout framing buffer is also unbounded, and response payload shapes are
+    unchecked casts/defaults; these are further robustness gaps seen in code review.
+
+18. P2: Free sign-in ignores configured Python and discovery cancellation.
+    packages/core/src/engine/wsl/setup.ts:154
+    deviceHelperCommand() receives neither options.python nor signal although
+    bootstrap and device listing honor both. The test shows an empty call when a
+    custom interpreter is configured. Pass the current interpreter and signal.
+
+19. P2: Download failure is not persisted as a failed setup phase.
+    packages/core/src/engine/wsl/setup.ts:184
+    The free branch emits an apple-download failure event but never calls the
+    persistent status writer for that failure. After the exception, setup-status
+    still says signing/running (or the previous running phase). The status test
+    reproduces this. Use the same tracked failure handling as other setup phases.
+
+20. P2: Setup chooses only the first connected phone.
+    packages/core/src/engine/wsl/setup.ts:174
+    The free path silently selects connected[0], whereas paid setup passes every
+    connected phone. It neither asks which phone nor matches the intended run
+    target. Handle device choice explicitly or provision all intended devices
+    within free-account limits. Do not swallow discovery/cancellation errors into
+    an empty list and then report another device's provisioning as success.
+
+21. P2: Existing product text still says free signing is impossible.
+    packages/core/src/engine/wsl/setup.ts:128
+    Also apps/desktop/src/shared/i18n/en.ts:1349, shown in Studio and VS Code;
+    apps/vscode/src/pcSetup.ts:35; packages/core/src/engine/skill-content.ts:89;
+    README.md:28/87/154; docs/wsl-ios.md:19; docs/guide.md:211.
+    Update setup messaging, generated agent instructions and docs together with
+    the implemented limits so users are not told they must buy membership.
+
+WHY THE ORIGINAL TESTS MISSED THIS
+
+The three original runner tests replace the entire process and emit complete,
+well-formed JSON. They never launch the Windows command line. Original signing
+tests replace both profile parsing and coverage with unconditional success, and
+use noncertificate/nonprofile byte strings. Capability tests assert the same
+whitelist the implementation declares. No original test executes the Python
+backend, exercises cryptography, checks SMS requests, or traverses free touch
+setup. Typechecking cannot validate dynamically imported Python APIs.
+
+UNVERIFIED / STILL REQUIRED AFTER FIXES
+
+- Actual Apple acceptance of the GSA client identity and headers, trusted-device
+  and SMS authentication, Apple agreements, session expiry and locked-account
+  recovery. Source/API compatibility does not establish live server acceptance.
+- Actual free-team certificate/device/App ID creation and capability grants,
+  App Groups for app plus extension, quotas and profile renewal. The backend
+  always POSTs a profile and does not examine existing profiles; upstream free
+  profile lifecycle differs. Exact duplicate/name/quota behavior needs live proof.
+- Collection pagination is not implemented. Large team inventories may hide
+  existing identifiers/devices/certificates; this needs bounded paging coverage.
+- anisette's timestamp formatting differs from upstream xtool UTC formatting;
+  Apple tolerance was not established.
+- A real signed build, certificate/profile cryptographic consistency, install,
+  launch, trust/Developer Mode flow, extension behavior and seven-day expiry on
+  an iPhone, plus a separately free-signed WebDriverAgent for touch/cable use.
+- Free-path Xcode acquisition remains manual. The public download limitation is
+  a CapMac integration limitation, not an Apple requirement to pay for Xcode.
+
+RERUN
+
+From this worktree:
+
+npm run typecheck
+npm run build
+npx vitest run test/unit/wsl-free-audit-runner.test.ts test/unit/wsl-free-audit-signing.test.ts test/unit/wsl-free-audit-integration.test.ts test/unit/wsl-free-audit-setup.test.ts --reporter=json --outputFile=test/free-apple-audit-results.json
+
+Python (requires cryptography; installed anisette is optional):
+python test/fixtures/free-apple-backend-audit.py
+
+For the two installed-anisette checks in the audit environment, PowerShell:
+$env:CAPMAC_AUDIT_ANISETTE_PATH = Join-Path $env:TEMP 'capmac-free-backend-audit-deps'
+python test/fixtures/free-apple-backend-audit.py
+
+The acceptance commands currently return failure by design because the product
+does not meet the asserted requirements. npm test now includes the new failing
+TypeScript acceptance files; 990 passes describes the original suite before them.
+
+PRIMARY REFERENCES
+
+Apple capability table (checked raw HTML because extracted text omits checkmarks):
+https://developer.apple.com/help/account/reference/supported-capabilities-ios/
+https://developer.apple.com/documentation/BundleResources/Entitlements/com.apple.developer.default-data-protection
+https://developer.apple.com/documentation/BundleResources/Entitlements/com.apple.external-accessory.wireless-configuration
+
+The implementation's claimed xtool 1.22.2 reference resolves to commit
+65bf3cc5a1240fea53ac0748d29a01878222a6ce. SMS request/validation sources:
+https://github.com/xtool-org/xtool/blob/65bf3cc5a1240fea53ac0748d29a01878222a6ce/Sources/XKit/GrandSlam/Requests/Concrete/GrandSlamTrustedDeviceRequest.swift#L35
+https://github.com/xtool-org/xtool/blob/65bf3cc5a1240fea53ac0748d29a01878222a6ce/Sources/XKit/GrandSlam/Requests/Concrete/GrandSlamValidateRequest.swift#L29

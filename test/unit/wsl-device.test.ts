@@ -247,6 +247,21 @@ describe('install and launch', () => {
     expect(commands()).toHaveLength(1);
   });
 
+  it('says to trust a free Apple Account when iOS installed the app but won’t open it', async () => {
+    // The iPhone 8's (iOS 16) answer to a free account's first launch, wrapped the way the tools print it.
+    boundary.replies.push({}, { code: 1, stderr: [
+      'DTXNsError: com.apple.dt.deviceprocesscontrolservice (code 2,',
+      "user_info={'NSLocalizedDescription': 'Request to launch",
+      "com.example.app failed.', 'NSLocalizedFailureReason': 'The request to open \"com.example.app\" failed. : Failed to launch",
+      "process with bundle identifier \\'com.example.app\\'.'})",
+    ].join('\n') });
+    await expect(launchWslApp('com.example.app', { ...device, productVersion: '16.7.11' }, options)).rejects.toMatchObject({
+      message: 'Opening the app failed (exit 1).',
+      hint: expect.stringContaining('VPN & Device Management. Tap your Apple Account, then Trust.'),
+      details: ['The iPhone said: Request to launch com.example.app failed.'],
+    });
+  });
+
   it('fails the run when launch fails and explains a missing iOS 17 tunnel', async () => {
     boundary.replies.push({}, { code: 1, stderr: 'ConnectionRefused: tunneld is unavailable' });
     await expect(launchWslApp('com.example.app', { ...device, productVersion: '17.2' }, options)).rejects.toMatchObject({ message: expect.stringContaining('failed'), hint: expect.stringContaining('administrator') });
