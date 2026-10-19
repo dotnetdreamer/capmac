@@ -86,7 +86,7 @@ With remote access on, CapMac reaches the Mac over the internet when it is not o
 ## Leave these to the user
 
 - Anything that needs the Mac's password or a hand on a device: \`capmac pair\`, \`capmac keychain\` (unlocks code signing for iPhones and .ipa exports), \`capmac doctor --fix\` when it asks for a password, plugging in an iPhone and tapping Trust.
-- \`capmac wsl setup\`: it signs in to Apple with the user's password and a two-factor code, which you must never ask for or type. It needs a paid Apple Developer Program membership (US$99 a year): a free Apple Account can't sign apps on this PC yet, so tell the user before they start.
+- \`capmac wsl setup\`: it signs in to Apple with the user's password and a two-factor code, which you must never ask for or type. A paid Apple Developer Program membership (US$99 a year) signs without limits. A free Apple Account works too (the "Use a free Apple Account" choice): the app stays signed for 7 days, that account must also be signed in on the user's iPhone (Apple shows the code there), and the first launch needs the user to trust their Apple Account on the iPhone under Settings, General, VPN & Device Management. Tell the user before they start.
 - Ask before you run \`capmac clean --all\` (deletes the project's copy on the Mac), \`capmac unpair\`, \`capmac takeover off\`, or a \`capmac remote\` command that changes settings (\`on\`, \`off\`, \`set\`, \`server\`, \`revoke\`).
 
 Every command and option is listed in [references/commands.md](references/commands.md).

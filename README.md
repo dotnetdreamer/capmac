@@ -25,7 +25,7 @@ https://github.com/user-attachments/assets/cea942bc-a90b-4a7b-bb6c-0837361bfee8
 </div>
 
 > [!IMPORTANT]
-> **Building with no Mac needs a paid Apple developer account.** That's an [Apple Developer Program](https://developer.apple.com/programs/) membership (US$99 a year). A free Apple Account can't sign apps this way yet
+> **Building with no Mac needs an Apple Account to sign your app.** A paid [Apple Developer Program](https://developer.apple.com/programs/) membership (US$99 a year) signs without limits. A free Apple Account works too (experimental): your app stays signed for 7 days, and that account must also be signed in on your iPhone
 
 ## Why CapMac
 
@@ -84,7 +84,7 @@ capmac dev      # live reload as you save
 **Or run it with no Mac** (experimental). You need WSL 2 (`wsl --install --no-distribution` adds it) and an iPhone
 
 > [!IMPORTANT]
-> **You need a paid Apple developer account.** Building with no Mac needs an [Apple Developer Program](https://developer.apple.com/programs/) membership (US$99 a year). A free Apple Account can't sign apps this way yet
+> **You need an Apple Account to sign your app.** A paid [Apple Developer Program](https://developer.apple.com/programs/) membership (US$99 a year) works best. With a free Apple Account, sign in to it on your iPhone first, then choose **Use a free Apple Account** when setup asks. See [Free Apple Account](docs/wsl-ios.md#free-apple-account)
 
 ```powershell
 cd my-app
@@ -110,7 +110,7 @@ In CapMac Studio it's all buttons. Pair your Mac or pick **This PC (no Mac)**, a
 Apple's simulator only runs on macOS, but your iPhone doesn't care where its app was built. CapMac's no-Mac mode builds, signs and installs the app from Windows
 
 - **No Linux to learn.** CapMac sets up its own Ubuntu in WSL and installs every tool in it. Your own WSL setup stays as it is
-- **One Apple sign-in.** You sign in once on Apple's website, with your paid developer account. CapMac makes the certificate, App IDs and profiles, and downloads Xcode to take the iPhone SDK from it
+- **One Apple sign-in.** With a paid developer account, you sign in once on Apple's website. CapMac makes the certificate, App IDs and profiles, and downloads Xcode to take the iPhone SDK from it. A free Apple Account signs in right in CapMac and signs your app for 7 days at a time
 - **USB or Wi-Fi.** Plug the iPhone in for the first run. After that, it works over Wi-Fi too
 - **Live reload.** Capacitor apps reload as you save and React Native apps get Fast Refresh. Flutter apps rebuild and reopen
 
@@ -151,7 +151,7 @@ With a Mac, CapMac sends only the files that changed, builds with Xcode, and str
 ## FAQ
 
 **Is it free?**
-Yes. CapMac is open source under the MIT license. The simulator on your Mac needs no Apple account. Building with no Mac needs a paid Apple Developer Program membership (US$99 a year), and a free Apple Account can't sign apps that way yet
+Yes. CapMac is open source under the MIT license. The simulator on your Mac needs no Apple account. Building with no Mac works with a free Apple Account too (experimental, your app stays signed for 7 days). A paid Apple Developer Program membership (US$99 a year) removes Apple's limits
 
 **Does my code go anywhere?**
 Only to your own Mac, over SSH. Without a Mac, it stays on your PC. There's no CapMac account, no CapMac server and no telemetry. CapMac even turns off Flutter's analytics

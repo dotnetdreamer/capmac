@@ -16,7 +16,7 @@ This remains an experimental build backend, not a guarantee that every Xcode fea
 
 ## Start here
 
-You need WSL 2, an iPhone and a paid [Apple Developer Program](https://developer.apple.com/programs/) membership (US$99 a year). A free Apple Account can't sign apps here yet, so setup would stop at the Apple sign-in
+You need WSL 2, an iPhone and an Apple Account to sign the app. A paid [Apple Developer Program](https://developer.apple.com/programs/) membership (US$99 a year) signs without limits. A free Apple Account works too, within Apple's limits: see [Free Apple Account](#free-apple-account)
 
 You can set up and build either in CapMac Studio or in PowerShell. Both run the same setup, save it in the same files, and share the project's choice of where it builds.
 
@@ -36,8 +36,9 @@ Setup does everything in one run:
 1. **Build tools.** It creates a separate `CapMac-Ubuntu` WSL distribution (your own distributions are untouched) and installs Swift 6.3.3 (signature-checked), the linker, the code signer, CocoaPods and the asset/storyboard compilers inside it. On Windows it also brings its own Python for the iPhone tools: python.org's 3.13 build (checksum-checked) with [pymobiledevice3](https://github.com/doronz88/pymobiledevice3), in `%LOCALAPPDATA%\CapMac\device-tools`, so there is no Python to install and yours is not touched. On a new PC this is the longest step, and it needs no sign-in.
 2. **iPhone connection.** Windows talks to an iPhone over USB through Apple's own device server. If the Apple Devices app is missing, setup offers to install it from the Microsoft Store, then starts its device server in the background without opening a window. After the first run over the cable, the iPhone also runs over Wi-Fi (see [Connect the iPhone](#connect-the-iphone)).
 3. **One Apple sign-in.** Setup first asks who does the Apple part:
-   - **Let CapMac do it** (recommended). CapMac opens Apple's website in your default browser when it is Chromium-based (Edge, Chrome, Brave, Vivaldi), else in Edge, on a profile of its own under `%LOCALAPPDATA%\CapMac\AppleWeb`, apart from your everyday one. You sign in there the way you always sign in to Apple (CapMac never sees the password or the code); the dialog closes by itself once you are in, and CapMac closes the window. Everything after that happens without a window: CapMac's Apple session is made from that browser's sign-in, and what Apple makes only on its website for some accounts (certificates, profiles, new iPhones: its API answers HTTP 421) is made there, in a hidden copy of the browser. The sign-in is kept, protected for your Windows user, so later setups need no sign-in at all. **Restart** in the waiting dialog, or "with a fresh sign-in" in the choice, forgets it and opens a clean window. Closing the window stops setup. If a step on the website fails, the dialog says why and offers another try or doing it by hand, and CapMac keeps notes and a picture of Apple's page (never its sign-in page) in `AppleWeb\last-attempt`.
-   - **Do it myself.** Enter your Apple Account email and password, then the two-factor code, in the terminal or in CapMac Studio's dialogs; they are kept in memory only. When Apple won't make the certificate for this sign-in, you make it on Apple's website from the request CapMac saves in Downloads, and CapMac picks the certificate up from there.
+   - **Let CapMac do it** (paid account, recommended). CapMac opens Apple's website in your default browser when it is Chromium-based (Edge, Chrome, Brave, Vivaldi), else in Edge, on a profile of its own under `%LOCALAPPDATA%\CapMac\AppleWeb`, apart from your everyday one. You sign in there the way you always sign in to Apple (CapMac never sees the password or the code); the dialog closes by itself once you are in, and CapMac closes the window. Everything after that happens without a window: CapMac's Apple session is made from that browser's sign-in, and what Apple makes only on its website for some accounts (certificates, profiles, new iPhones: its API answers HTTP 421) is made there, in a hidden copy of the browser. The sign-in is kept, protected for your Windows user, so later setups need no sign-in at all. **Restart** in the waiting dialog, or "with a fresh sign-in" in the choice, forgets it and opens a clean window. Closing the window stops setup. If a step on the website fails, the dialog says why and offers another try or doing it by hand, and CapMac keeps notes and a picture of Apple's page (never its sign-in page) in `AppleWeb\last-attempt`.
+   - **Do it myself** (paid account). Enter your Apple Account email and password, then the two-factor code, in the terminal or in CapMac Studio's dialogs; they are kept in memory only. When Apple won't make the certificate for this sign-in, you make it on Apple's website from the request CapMac saves in Downloads, and CapMac picks the certificate up from there.
+   - **Use a free Apple Account** (experimental). No paid program, within Apple's limits for free accounts. See [Free Apple Account](#free-apple-account)
 
    If you belong to several developer teams, you pick one. The sign-in covers:
    - **Signing**, like Xcode's "Automatically manage signing". Setup reads your app and its extensions (such as widgets) from the Xcode project, shows the account changes it is about to make, and asks first: a development certificate for this PC, missing App IDs, capabilities such as Push Notifications or App Groups, and a plugged-in iPhone the team does not know yet. Nothing is removed or revoked. The certificate is kept in `%LOCALAPPDATA%\CapMac\Signing\<team>`, with its password protected for your Windows user, so builds never ask for it; its private key never leaves this PC. A certificate Apple already made from CapMac's request (say, in an earlier run) is found and used without asking again.
@@ -57,6 +58,28 @@ Xcode's archive keeps a linked file's contents at its first link only and gives 
 ### How the two-factor code is asked
 
 `@expo/apple-utils` (the maintained Apple sign-in CapMac uses) asks for the two-factor code with its own terminal prompts, which live in a part of the package that can't be replaced. Its sign-in skips them when Apple's sign-in request succeeds. So while signing in, CapMac watches that request on the package's own HTTP client: when Apple answers that a code is needed, CapMac asks for it through its own prompts (the terminal, or Studio's dialogs), sends it to the same Apple endpoints the package would use, asks Apple to trust the session, and lets the sign-in continue. Every other request passes through untouched, and the watcher is removed when the sign-in ends.
+
+## Free Apple Account
+
+A free Apple Account signs your app too, the way Xcode's free Personal Team does (experimental). When setup asks who does the Apple part, choose **Use a free Apple Account**, in PowerShell or in CapMac Studio
+
+Before you start:
+
+- **Sign in to that Apple Account on your iPhone.** Apple shows the sign-in code there, and since October 2026 it won't text a code to this kind of sign-in. Signing in with it as the iPhone's Apple Account works. To keep your own, you can add it in Mail instead: open Settings, tap Apps, then Mail, then Mail Accounts, then Add Account, then iCloud
+- **Give your app a bundle ID of your own.** An app ID belongs to one Apple team, so an ID another team already has (your paid team too) can't be used
+- **Use a spare Apple Account if you can.** CapMac signs in the way Xcode does, with Apple's own sign-in library running on this PC, and Apple sometimes locks accounts used with free-signing tools
+
+Setup asks for the account's email and password, then the code your iPhone shows (only the first time on this PC). It lists what it will make and asks first: a development certificate for this PC, the plugged-in iPhone, the App IDs and a 7-day profile for each. The password isn't saved
+
+Apple's limits for a free Apple Account:
+
+- Your app stays signed for 7 days. Run `capmac wsl setup` again, or **Sign in to Apple again** in CapMac Studio, to sign it for 7 more
+- Up to 3 of your own apps on an iPhone at once, 10 new App IDs a week and 3 iPhones
+- Only these capabilities: App Groups, Background Modes, Data Protection, HealthKit, HomeKit, Inter-App Audio, Keychain Sharing, Maps and Wireless Accessory Configuration. If your app uses another one, such as push notifications, Sign in with Apple or iCloud, setup stops and names it
+
+The first time, iOS won't open the app until you trust its developer. On the iPhone, open Settings, tap General, then VPN & Device Management, tap your Apple Account, then Trust. CapMac says so when the iPhone refuses to open the app
+
+Setup downloads Xcode 26.6 with the free sign-in too, the way Xcode itself downloads (about 2.3 GB, once, into Downloads). If Apple turns that download down, setup says so: download Xcode 26.6 (the .xip file, free with any Apple Account) from [developer.apple.com/download/all](https://developer.apple.com/download/all/), leave it in Downloads and run setup again
 
 ## Building in CapMac Studio
 
