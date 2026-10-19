@@ -15,7 +15,7 @@ import { Icon, type IconName } from '../../ui/Icon';
 import { CheckList } from '../macs/CheckList';
 
 const gigabytes = (bytes: number) => `${(bytes / 1_000_000_000).toFixed(1)} GB`;
-const DEVELOPER_PROGRAM_URL = 'https://developer.apple.com/programs/enroll/';
+const DEVELOPER_PROGRAM_URL = 'https://developer.apple.com/programs/';
 const STATE_ICON: Record<StepState, IconName> = { waiting: 'circle', running: 'hourglass', done: 'checkCircle', failed: 'errorCircle', skipped: 'subtractCircle' };
 
 /** "1.2 GB of 3.0 GB · Continued from 0.8 GB". */
@@ -121,17 +121,17 @@ export function PcSetupDialog({ path, open, onClose }: { path: string; open: boo
       }
     >
       <p className="muted">{t.pc.intro}</p>
-      {/* Before the sign-in has worked: a free Apple Account stops there, after the long tools step. */}
+      {/* Before the sign-in has worked: a free Apple Account signs too, and its limits are best known up front. */}
       {!ready && steps.signIn.state !== 'done' && (
         <InfoBar
-          title={t.pc.paid.title}
+          title={t.pc.account.title}
           actions={
             <Button size="sm" icon="open" onClick={() => void window.capmac.invoke('app:open-external', { url: DEVELOPER_PROGRAM_URL })}>
-              {t.pc.paid.join}
+              {t.pc.account.join}
             </Button>
           }
         >
-          {t.pc.paid.body}
+          {t.pc.account.body}
         </InfoBar>
       )}
       {ready && !entry.running && <InfoBar tone="success" title={t.pc.isReady} />}
