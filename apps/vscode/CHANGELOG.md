@@ -10,7 +10,7 @@ What CapMac Studio could do and CapMac for VS Code couldn't yet
 - The Apps view: how much a sync copies to the Mac
 - Building on this PC: Run without building and a React Native release run work there too. Rebuild and Clean Rebuild work whenever the app can run
 - Setting up this PC: the paid Apple developer account note up front, and Details when setup stops
-- Building on this PC with a free Apple Account (experimental): setup signs in the way Xcode does, downloads Xcode with that sign-in and signs your app for 7 days at a time. The account must also be signed in on your iPhone, where Apple shows the code. When iOS won't open the app the first time, CapMac says how to trust your Apple Account on the iPhone
+- Building on this PC with a free Apple Account (experimental): setup signs in the way Xcode does and signs your app for 7 days at a time. Xcode comes from Apple's download site, where you sign in once in your browser. The account must also be signed in on your iPhone, where Apple shows the code. When iOS won't open the app the first time, CapMac says how to trust your Apple Account on the iPhone
 - **Remove the CapMac Skill for AI Agents…**
 - The `capmac.problems.packageWarnings` setting
 

@@ -209,19 +209,6 @@ export class FreeApple {
     };
   }
 
-  /**
-   * Apple's ADCDownloadAuth cookie for one Xcode archive, on this sign-in (apple-free.py asks
-   * developerservices2 the way Xcode does). The engine's own downloader then fetches the file.
-   */
-  async downloadGrant(remotePath: string): Promise<string[]> {
-    const result = await this.#request('download-grant', { path: remotePath });
-    const cookies = Array.isArray(result.cookies)
-      ? result.cookies.filter((cookie): cookie is string => typeof cookie === 'string' && /^ADCDownloadAuth=[^;\s]+$/.test(cookie))
-      : [];
-    if (!cookies.length) throw new UserError('Apple did not allow the Xcode download.');
-    return cookies;
-  }
-
   close(): void {
     this.#generation++;
     const child = this.#child;

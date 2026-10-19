@@ -22,9 +22,9 @@
 #   -> {"id":N,"ok":true,"result":{"certificate":{"serial","notAfter"},
 #                                   "p12":"<base64>","password":..,
 #                                   "profiles":{"<bundleId>":"<base64 mobileprovision>"},"notes":[..]}}
-#   <- {"id":N,"op":"download-grant","path":"/Developer_Tools/…/Xcode_….xip"}
-#   -> {"id":N,"ok":true,"result":{"cookies":["ADCDownloadAuth=…"],"location":..}}  (the engine downloads)
 #   <- {"op":"shutdown"}
+# Xcode itself is downloaded through Apple's website (apple-web.ts): developerservices2 turns the
+# Xcode sign-in's download request away (HTTP 403, checked live 2026-10-19).
 # Every reply to an op carrying an id is {ok:true,result} or {ok:false,error,code?,hint?}.
 from __future__ import annotations
 
@@ -665,13 +665,6 @@ class DsError(Exception):
         self.code = code
 
 
-class _KeepRedirect(urllib.request.HTTPRedirectHandler):
-    """Hands a redirect back instead of following it: a download grant's cookie comes on that answer."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001, ANN201 - urllib's signature
-        return None
-
-
 class DeveloperServices:
     def __init__(self, anisette: Anisette, token: dict[str, Any]) -> None:
         self._ani = anisette
@@ -761,35 +754,6 @@ class DeveloperServices:
                 detail = f"HTTP {error.code}"
             raise DsError(detail or f"HTTP {error.code}", error.code) from error
         return json.loads(raw) if raw else {}
-
-    def download_grant(self, path: str) -> dict[str, Any]:
-        """Apple's permission to download one Xcode archive, asked the way Xcode asks: the
-        ADCDownloadAuth cookie developerservices2 sets for the Xcode sign-in. Any Apple Account may
-        download Xcode; Apple's downloads page wants the website sign-in instead, which a free
-        account may not have. Only that cookie is handed back, and only for an Xcode archive."""
-        if not (path.startswith("/Developer_Tools/") and path.endswith(".xip")) or ".." in path or "?" in path:
-            raise DsError("CapMac only asks Apple for Xcode archives.")
-        url = f"{DS2}/download?path={urllib.parse.quote(path)}"
-        req = urllib.request.Request(url, headers={"Accept": "*/*", **self._auth_headers()}, method="GET")
-        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=self._ssl), _KeepRedirect)
-        try:
-            with opener.open(req, timeout=60) as r:
-                status, headers, body = r.status, r.headers, read_body(r)
-        except urllib.error.HTTPError as error:  # a redirect lands here too, with its cookie
-            status, headers, body = error.code, error.headers, read_body(error)
-        cookies = [part.split(";", 1)[0].strip() for part in (headers.get_all("Set-Cookie") or [])]
-        grant = [c for c in cookies if c.startswith("ADCDownloadAuth=") and len(c) > len("ADCDownloadAuth=")]
-        if grant and status < 400:
-            return {"cookies": grant, "location": headers.get("Location")}
-        detail = None
-        try:
-            answer = load_plist(body) if body.strip() else {}
-            if isinstance(answer, dict):
-                detail = answer.get("userString") or answer.get("resultString")
-        except Exception:  # noqa: BLE001 - an HTML page
-            detail = None
-        log(f"download grant: HTTP {status}, {len(cookies)} cookies, {describe_reply(body)}")
-        raise DsError(detail or f"Apple did not allow the Xcode download (HTTP {status}).", status)
 
     # -- team listing (classic) --------------------------------------------------------------
     def teams(self) -> list[dict[str, Any]]:
@@ -1053,11 +1017,6 @@ def main() -> int:
                                    raw.get("targets", []), raw.get("device"),
                                    str(raw.get("dir") or state_dir))
                 reply({"id": rid, "ok": True, "result": result})
-            elif op == "download-grant":
-                if anisette is None or token is None:
-                    raise DsError("Sign in before downloading.")
-                grant = DeveloperServices(anisette, {**token, "teamId": ""}).download_grant(str(raw.get("path") or ""))
-                reply({"id": rid, "ok": True, "result": grant})
             else:
                 reply({"id": rid, "ok": False, "error": f"Unknown request: {op}"})
         except (GsaError, DsError) as error:

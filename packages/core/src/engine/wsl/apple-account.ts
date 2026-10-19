@@ -33,7 +33,7 @@ export interface CookieJarLike {
 }
 const CATALOG_HOSTS = ['https://developer.apple.com', 'https://developer-mdn.apple.com'];
 const CATALOG_PATH = '/services-account/QH65B2/downloadws/listDownloads.action';
-/** The grant Apple's downloads page uses. (developerservices2's, Xcode's own, wants Xcode's sign-in: 403.) */
+/** The grant Apple's downloads page uses. (developerservices2's, Xcode's own, answers 403, to Xcode's sign-in too.) */
 const DOWNLOAD_AUTH = 'https://developer.apple.com/services-account/download';
 const AGREEMENT_HINT = 'Open developer.apple.com/download in a browser, sign in once and accept any terms Apple shows, then run capmac wsl setup again.';
 let queue: Promise<unknown> = Promise.resolve();
@@ -304,19 +304,9 @@ function appleDownloadUrl(value: string): URL {
 }
 
 /**
- * The managed Xcode's archive, for a sign-in that can't read Apple's download list: a free Apple
- * Account has only the Xcode sign-in, and the list wants the website's. Apple names it this way
- * in its catalog (Apple silicon archives hold the same iPhoneOS SDK as universal ones).
- */
-export function pinnedXcodeDownload(version: string): AppleXcodeDownload {
-  if (!/^\d+\.\d+(?:\.\d+)?$/.test(version)) throw new UserError('Choose a stable Xcode version such as 26.6.');
-  const fileName = `Xcode_${version}_Apple_silicon.xip`;
-  return { version, name: `Xcode ${version}`, url: appleDownloadUrl(`/Developer_Tools/Xcode_${version}/${fileName}`).href, fileName };
-}
-
-/**
- * A cookie jar for a download granted to the free sign-in: Apple's ADCDownloadAuth cookie, plus
- * any its download hosts set on the way. Only https apple.com hosts are sent them.
+ * A cookie jar for a download Apple's website granted (xcodeDownloadOnAppleWebsite): Apple's
+ * ADCDownloadAuth cookie, plus any its download hosts set on the way. Only https apple.com hosts
+ * are sent them.
  */
 export function downloadGrantJar(cookies: string[]): CookieJarLike {
   const held = new Map<string, string>();
@@ -333,7 +323,7 @@ export function downloadGrantJar(cookies: string[]): CookieJarLike {
   };
 }
 
-/** The free sign-in's Xcode download: Apple's grant comes from the Xcode sign-in (FreeApple.downloadGrant). */
+/** A free Apple Account's Xcode download, with the permission Apple's website gave (xcodeDownloadOnAppleWebsite). */
 export async function downloadXcodeWithGrant(cookies: string[], download: AppleXcodeDownload, destination: string,
   options: XcodeDownloadOptions & { fetch?: Fetch } = {}): Promise<string> {
   try { return await fetchXcodeArchive(options.fetch ?? fetch, downloadGrantJar(cookies), download, destination, options); }

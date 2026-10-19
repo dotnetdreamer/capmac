@@ -9,7 +9,7 @@ import { UserError } from '../../packages/core/src/engine/errors.js';
 const boundary = vi.hoisted(() => ({
   options: vi.fn(), save: vi.fn(), project: vi.fn(), login: vi.fn(), close: vi.fn(),
   python: vi.fn(), support: vi.fn(), provision: vi.fn(), directory: vi.fn(), devices: vi.fn(),
-  grant: vi.fn(), download: vi.fn(), sdk: vi.fn(),
+  website: vi.fn(), download: vi.fn(), sdk: vi.fn(),
 }));
 vi.mock('../../packages/core/src/engine/wsl/settings.js', () => ({
   loadWslOptions: boundary.options, saveWslOptions: boundary.save,
@@ -26,12 +26,10 @@ vi.mock('../../packages/core/src/engine/wsl/apple-devices.js', () => ({
 }));
 vi.mock('../../packages/core/src/engine/wsl/toolchain.js', () => ({ WslExecutor: class {} }));
 vi.mock('../../packages/core/src/engine/wsl/apple-web.js', () => ({
-  chooseAppleSignIn: async () => ({ way: 'free' }), signInOnAppleWebsite: vi.fn(),
+  chooseAppleSignIn: async () => ({ way: 'free' }), signInOnAppleWebsite: vi.fn(), xcodeDownloadOnAppleWebsite: boundary.website,
 }));
 vi.mock('../../packages/core/src/engine/wsl/apple-account.js', () => ({
   loginAppleAccount: vi.fn(), downloadXcodeWithGrant: boundary.download,
-  pinnedXcodeDownload: (version: string) => ({ version, name: `Xcode ${version}`, fileName: `Xcode_${version}_Apple_silicon.xip`,
-    url: `https://download.developer.apple.com/Developer_Tools/Xcode_${version}/Xcode_${version}_Apple_silicon.xip` }),
 }));
 vi.mock('../../packages/core/src/engine/wsl/apple-auto-signing.js', () => ({
   readSigningTargets: async () => [{ name: 'App', bundleIdentifier: 'com.example.audit', extension: false, entitlements: {} }],
@@ -43,7 +41,7 @@ vi.mock('../../packages/core/src/engine/wsl/device.js', () => ({
 }));
 vi.mock('../../packages/core/src/engine/wsl/free/free-apple.js', () => ({
   ensureFreeSigningSupport: boundary.support,
-  FreeApple: class { login = boundary.login; close = boundary.close; downloadGrant = boundary.grant; },
+  FreeApple: class { login = boundary.login; close = boundary.close; },
 }));
 vi.mock('../../packages/core/src/engine/wsl/free/free-signing.js', () => ({
   chooseFreeTeam: async (teams: unknown[]) => teams[0], freeCodeMessage: () => 'Audit code',
@@ -79,32 +77,50 @@ afterEach(async () => { vi.restoreAllMocks(); await rm(directory, { recursive: t
 
 describe('Xcode for a free Apple Account', () => {
   const archive = () => path.join(directory, 'Downloads', 'Xcode_26.6_Apple_silicon.xip');
-
-  it('downloads the managed Xcode with the free sign-in’s grant when this PC has none', async () => {
-    boundary.options.mockResolvedValue({ python: configuredPython }); // no iPhone SDK yet, none in Downloads
-    boundary.grant.mockResolvedValue(['ADCDownloadAuth=grant']);
+  const download = { version: '26.6', name: 'Xcode 26.6', fileName: 'Xcode_26.6_Apple_silicon.xip',
+    url: 'https://download.developer.apple.com/Developer_Tools/Xcode_26.6/Xcode_26.6_Apple_silicon.xip' };
+  const downloads = () => {
+    boundary.website.mockResolvedValue({ download, cookies: ['ADCDownloadAuth=grant'] });
     boundary.download.mockImplementation(async (_cookies: unknown, _download: unknown, destination: string) => destination);
     boundary.sdk.mockResolvedValue({ sdkPath: '/audit/iPhoneOS.sdk', swiftResourcePath: '/audit/swift', xcodeVersion: '26.6' });
-    await guidedWslSetup({}, directory, context(), new AbortController().signal);
-    expect(boundary.grant).toHaveBeenCalledWith('/Developer_Tools/Xcode_26.6/Xcode_26.6_Apple_silicon.xip');
-    expect(boundary.download).toHaveBeenCalledWith(['ADCDownloadAuth=grant'], expect.objectContaining({ fileName: 'Xcode_26.6_Apple_silicon.xip' }),
-      archive(), expect.objectContaining({ onProgress: expect.any(Function) }));
+  };
+
+  it('downloads the managed Xcode through Apple’s website when this PC has none', async () => {
+    boundary.options.mockResolvedValue({ python: configuredPython }); // no iPhone SDK yet, none in Downloads
+    downloads();
+    const signal = new AbortController().signal;
+    const ctx = context();
+    await guidedWslSetup({}, directory, ctx, signal);
+    // Xcode's own sign-in is turned away from Apple's downloads (HTTP 403), so the website gives the permission.
+    expect(boundary.website).toHaveBeenCalledWith('26.6', ctx, { signal });
+    expect(boundary.download).toHaveBeenCalledWith(['ADCDownloadAuth=grant'], download, archive(), expect.objectContaining({ signal, onProgress: expect.any(Function) }));
     // The archive then goes on to the SDK import like a paid account's.
     expect(boundary.sdk).toHaveBeenCalledWith(expect.anything(), archive(), expect.anything());
     expect(boundary.save).toHaveBeenLastCalledWith(expect.objectContaining({ sdk: '/audit/iPhoneOS.sdk', xcodeVersion: '26.6' }), directory);
-    expect(boundary.close).toHaveBeenCalled();
+    // The free sign-in was for signing, and its helper has ended before the long download.
+    expect(boundary.login).toHaveBeenCalledOnce();
+    expect(boundary.close.mock.invocationCallOrder[0]).toBeLessThan(boundary.download.mock.invocationCallOrder[0]!);
   });
 
-  it('says how to get it by hand when Apple won’t grant the download', async () => {
+  it('asks for no free sign-in when only Xcode is missing', async () => {
+    boundary.project.mockRejectedValue(new Error('not an app')); // outside an app: nothing to sign
     boundary.options.mockResolvedValue({ python: configuredPython });
-    boundary.grant.mockRejectedValue(new UserError('Apple did not allow the Xcode download (HTTP 403).'));
-    await expect(guidedWslSetup({}, directory, context(), new AbortController().signal)).rejects.toMatchObject({
-      message: 'Apple didn’t let CapMac download Xcode on this free sign-in.',
-      hint: expect.stringContaining('developer.apple.com/download/all'),
-      details: ['Apple did not allow the Xcode download (HTTP 403).'],
-    });
+    downloads();
+    await guidedWslSetup({}, directory, context(), new AbortController().signal);
+    expect(boundary.python).not.toHaveBeenCalled();
+    expect(boundary.login).not.toHaveBeenCalled();
+    expect(boundary.download).toHaveBeenCalledWith(['ADCDownloadAuth=grant'], download, archive(), expect.anything());
+  });
+
+  it('stops with the website’s own message when Apple won’t allow the download', async () => {
+    boundary.options.mockResolvedValue({ python: configuredPython });
+    const refused = new UserError('Apple didn’t allow the Xcode download.', 'Or download it yourself: open developer.apple.com/download/all');
+    boundary.website.mockRejectedValue(refused);
+    await expect(guidedWslSetup({}, directory, context(), new AbortController().signal)).rejects.toBe(refused);
     expect(boundary.download).not.toHaveBeenCalled();
-    expect(boundary.close).toHaveBeenCalled();
+    expect(boundary.close).toHaveBeenCalledOnce();
+    const status = JSON.parse(await readFile(path.join(directory, '.capmac', 'wsl', 'setup-status.json'), 'utf8'));
+    expect(status).toMatchObject({ phase: 'apple-catalog', state: 'failed', message: 'Apple didn’t allow the Xcode download.' });
   });
 });
 
@@ -149,8 +165,9 @@ describe('free signing setup acceptance audit', () => {
 
   it('persists the actual failing download phase when free setup has no SDK or Xcode archive', async () => {
     boundary.options.mockResolvedValue({ python: configuredPython });
-    // Free setup now downloads Xcode itself; here Apple turns the download away.
-    boundary.grant.mockRejectedValue(new UserError('Apple did not allow the Xcode download (HTTP 403).'));
+    // Free setup downloads Xcode itself; here the transfer stops.
+    boundary.website.mockResolvedValue({ download: { version: '26.6', name: 'Xcode 26.6', fileName: 'Xcode_26.6_Apple_silicon.xip', url: 'https://download.developer.apple.com/Developer_Tools/Xcode_26.6/Xcode_26.6_Apple_silicon.xip' }, cookies: ['ADCDownloadAuth=grant'] });
+    boundary.download.mockRejectedValue(new UserError('The Xcode download stopped before it finished.'));
     await expect(guidedWslSetup({}, directory, context(), new AbortController().signal)).rejects.toBeInstanceOf(UserError);
     const status = JSON.parse(await readFile(path.join(directory, '.capmac', 'wsl', 'setup-status.json'), 'utf8'));
     expect(status).toMatchObject({ phase: 'apple-download', state: 'failed' });

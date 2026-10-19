@@ -12,10 +12,10 @@ import type { WslSetupState, WslSetupStatus } from '../../shared/wsl-setup.js';
 
 export type { WslSetupState, WslSetupStatus } from '../../shared/wsl-setup.js';
 import { loadProject, type ProjectInfo } from '../project.js';
-import { downloadXcodeWithGrant, loginAppleAccount, pinnedXcodeDownload } from './apple-account.js';
+import { downloadXcodeWithGrant, loginAppleAccount } from './apple-account.js';
 import { readSigningTargets, setUpAutomaticSigning } from './apple-auto-signing.js';
 import { inspectAppleProfileContent, prepareAppleSigningDirectory } from './apple-signing.js';
-import { chooseAppleSignIn, signInOnAppleWebsite } from './apple-web.js';
+import { chooseAppleSignIn, signInOnAppleWebsite, xcodeDownloadOnAppleWebsite } from './apple-web.js';
 import { installAppleDevices, startAppleDeviceServer } from './apple-devices.js';
 import { deviceHelperCommand, listWslDevices } from './device.js';
 import { ensureFreeSigningSupport, FreeApple } from './free/free-apple.js';
@@ -174,8 +174,8 @@ export async function guidedWslSetup(input: WslOptions, cwd: string, ctx: Engine
     };
   };
 
-  // The free Apple Account path: its own sign-in, signing and Xcode download.
-  const freeAppleSetup = async (): Promise<void> => {
+  // The free Apple Account path: its own sign-in for signing, and Xcode from Apple's website.
+  const freeAppleSigning = async (): Promise<void> => {
     const python = await deviceHelperCommand({ python: options.python, signal });
     const signingRoot = await prepareAppleSigningDirectory();
     const runner = new FreeApple({ stateDir: path.join(signingRoot, 'free-auth'), python, signal, onLog: (line) => output(line + '\n', 'stderr') });
@@ -210,28 +210,28 @@ export async function guidedWslSetup(input: WslOptions, cwd: string, ctx: Engine
         });
       } else if (project) report('signing', 'done', 'Already set up');
       else report('signing', 'skipped', 'Not in an app');
-      report('apple-catalog', 'skipped');
-      if (needsDownload) {
-        // Apple's download list wants the website sign-in, but Apple grants the managed Xcode's
-        // archive to the Xcode sign-in, the way Xcode itself downloads (any Apple Account may).
-        const download = pinnedXcodeDownload(MANAGED_XCODE_VERSION);
-        const directory = path.join(os.homedir(), 'Downloads');
-        await fs.mkdir(directory, { recursive: true });
-        const destination = path.join(directory, download.fileName);
-        archive = await track('apple-download', () => withStep(ctx, 'Downloading Xcode from Apple (about 3 GB)', 'deps', async (step) => {
-          let cookies: string[];
-          try { cookies = await runner.downloadGrant(new URL(download.url).pathname); }
-          catch (error) {
-            if (error instanceof CancelledError) throw error;
-            // Turned away: the archive can still come by hand, and setup picks it up from Downloads.
-            throw new UserError('Apple didn’t let CapMac download Xcode on this free sign-in.',
-              `Download it free with the same Apple Account: open developer.apple.com/download/all, sign in, accept Apple’s free developer agreement, download “Xcode ${MANAGED_XCODE_VERSION}” (the .xip file), and leave it in your Downloads folder. Then run free setup again.`,
-              error instanceof UserError ? [error.message, ...(error.details ?? [])] : undefined);
-          }
-          return downloadXcodeWithGrant(cookies, download, destination, { signal, onProgress: xcodeProgress(step) });
-        }));
-      } else report('apple-download', 'done', archive ? 'Already downloaded' : 'Already in place');
     } finally { runner.close(); }
+  };
+  const freeAppleSetup = async (): Promise<void> => {
+    if (needsSigning || input.appleLogin) await freeAppleSigning();
+    else {
+      report('apple-sign-in', 'skipped', 'Not needed');
+      if (project) report('signing', 'done', 'Already set up');
+      else report('signing', 'skipped', 'Not in an app');
+    }
+    if (needsDownload) {
+      // Apple's downloads want a sign-in on its website, which any Apple Account may use; Xcode's own
+      // sign-in is turned away there (HTTP 403). CapMac then downloads the file itself.
+      const granted = await track('apple-catalog', () => xcodeDownloadOnAppleWebsite(MANAGED_XCODE_VERSION, ctx, { signal }), (value) => value.download.name);
+      const directory = path.join(os.homedir(), 'Downloads');
+      await fs.mkdir(directory, { recursive: true });
+      archive = path.join(directory, granted.download.fileName);
+      await track('apple-download', () => withStep(ctx, 'Downloading Xcode from Apple (about 3 GB)', 'deps', (step) =>
+        downloadXcodeWithGrant(granted.cookies, granted.download, archive!, { signal, onProgress: xcodeProgress(step) })));
+    } else {
+      report('apple-catalog', 'skipped');
+      report('apple-download', 'done', archive ? 'Already downloaded' : 'Already in place');
+    }
   };
 
   // 2. One Apple sign-in covers signing and the Xcode download: on Apple's website, where

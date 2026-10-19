@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nonInteractivePrompter, silentContext, type ConfirmRequest, type Prompter } from '../../packages/core/src/engine/context.js';
-import { AppleWebsite, chromiumBrowser, findWebBrowser, makeCertificateOnAppleWeb, WebPage, type WebBrowser } from '../../packages/core/src/engine/wsl/apple-web.js';
+import { AppleWebsite, chromiumBrowser, findWebBrowser, makeCertificateOnAppleWeb, WebPage, xcodeDownloadOnAppleWebsite, type WebBrowser } from '../../packages/core/src/engine/wsl/apple-web.js';
 
 const live = process.env.CAPMAC_LIVE_BROWSER;
 const TEAM = 'ABCDE12345';
@@ -25,7 +25,10 @@ const site = {
   apiCreates: [] as { csrf?: string; body: { data?: { attributes?: { csrContent?: string; teamId?: string; certificateType?: string } } } }[],
   otherCreates: [] as { type: string; csrf?: string; body: { data?: { attributes?: Record<string, unknown>; relationships?: Record<string, unknown> } } }[],
   pageCreates: [] as string[], addLoads: 0, made: false,
+  /** The downloads page's requests: its list, and the permission for a file. */
+  grants: true, downloadAsks: [] as string[],
 };
+const XCODE_26_6 = '/Developer_Tools/Xcode_26.6/Xcode_26.6_Apple_silicon.xip';
 let certificate: Buffer;
 let other: Buffer;
 
@@ -63,7 +66,22 @@ function answer(request: IncomingMessage, body: string) {
     return html(`<h1>Sign In</h1><script>setTimeout(() => { document.cookie = 'signedin=1; max-age=86400; path=/'; location.href = ${JSON.stringify(url.searchParams.get('path') ?? '/account')}; }, 1500);</script>`);
   }
   if (url.pathname.startsWith('/account') && !signedIn) return { status: 302, body: '', headers: { location: `/signin?path=${encodeURIComponent(url.pathname)}` } };
+  if (url.pathname === '/account') return html('<h1>Account</h1>');
   if (url.pathname === '/account/resources/certificates/list') return html('<h1>Certificates</h1>');
+  if (url.pathname === '/services-account/QH65B2/downloadws/listDownloads.action' && request.method === 'POST') {
+    site.downloadAsks.push(`list ${request.headers['content-type']} ${body}`);
+    const file = (remotePath: string, fileSize: number) => ({ remotePath, filename: remotePath.split('/').pop(), fileSize });
+    return json(200, { resultCode: 0, downloads: [
+      { name: 'Xcode 26.5', files: [file('/Developer_Tools/Xcode_26.5/Xcode_26.5_Apple_silicon.xip', 2_200_000_000)] },
+      { name: 'Xcode 26.6', files: [file('/Developer_Tools/Xcode_26.6/Xcode_26.6_Universal.xip', 2_965_708_631), file(XCODE_26_6, 2_318_258_791)] },
+    ] });
+  }
+  if (url.pathname === '/services-account/download') {
+    site.downloadAsks.push(`permission ${url.searchParams.get('path')}`);
+    // As Apple answers: its cookie, and on to the file (which the browser must not fetch).
+    if (site.grants) return { status: 302, body: '', headers: { 'set-cookie': 'ADCDownloadAuth=stand-in-grant; Path=/; HttpOnly', location: `https://download.developer.apple.com${url.searchParams.get('path')}` } };
+    return json(403, { resultCode: 1100, userString: 'Downloads are not available for this account.' });
+  }
   if (url.pathname === '/account/resources/certificates/add') { site.addLoads++; return ADD_PAGE(); }
   if (url.pathname === '/services-account/v1/certificates' && request.method === 'POST') {
     if (!signedIn) return json(401, { errors: [{ status: '401', title: 'Unauthorized' }] });
@@ -137,7 +155,7 @@ describe.skipIf(!live)('Apple’s website in a real browser (stand-in site)', ()
   });
   afterAll(async () => { await new Promise((resolve) => server?.close(resolve)); });
   beforeEach(async () => {
-    Object.assign(site, { team: TEAM, apiMakes: false, needsSignIn: false, apiCreates: [], otherCreates: [], pageCreates: [], addLoads: 0, made: false });
+    Object.assign(site, { team: TEAM, apiMakes: false, needsSignIn: false, apiCreates: [], otherCreates: [], pageCreates: [], addLoads: 0, made: false, grants: true, downloadAsks: [] });
     root = await mkdtemp(path.join(os.tmpdir(), 'capmac-apple-web-'));
     const { writeFile } = await import('node:fs/promises');
     await writeFile(request().csrFile, request().csr);
@@ -194,6 +212,28 @@ describe.skipIf(!live)('Apple’s website in a real browser (stand-in site)', ()
     ]);
   }, 60_000);
 
+  it('gets the Xcode download’s permission as Apple’s downloads page does, hidden', async () => {
+    await signedInBefore();
+    const ask = prompter();
+    const got = await xcodeDownloadOnAppleWebsite('26.6', silentContext(ask), { root, browser, site: base });
+    expect(got).toEqual({
+      download: { version: '26.6', name: 'Xcode 26.6', url: `https://download.developer.apple.com${XCODE_26_6}`, fileName: 'Xcode_26.6_Apple_silicon.xip', size: 2_318_258_791 },
+      cookies: ['ADCDownloadAuth=stand-in-grant'],
+    });
+    // The list as the page asks for it, then the permission for the Apple silicon archive only.
+    expect(site.downloadAsks).toEqual(['list application/json;charset=UTF-8 {}', `permission ${XCODE_26_6}`]);
+    expect(ask.confirm).not.toHaveBeenCalled();
+  }, 60_000);
+
+  it('says how to download Xcode by hand when Apple won’t allow it', async () => {
+    await signedInBefore();
+    site.grants = false;
+    await expect(xcodeDownloadOnAppleWebsite('26.6', silentContext(prompter()), { root, browser, site: base })).rejects.toMatchObject({
+      message: 'Apple didn’t allow the Xcode download.', hint: expect.stringContaining('developer.apple.com/download/all'),
+      details: expect.arrayContaining(['Apple answered HTTP 403', 'Downloads are not available for this account.']),
+    });
+  }, 60_000);
+
   it('puts back saved apple.com cookies the profile lacks, session cookies included', async () => {
     const page = await WebPage.launch(browser, path.join(root, 'Profiles', 'cookies'), false);
     try {
@@ -238,6 +278,18 @@ describe.skipIf(!live)('Apple’s website in a real browser (stand-in site)', ()
       const made = await makeCertificateOnAppleWeb(request(), silentContext(ask), undefined, { root, browser, site: base });
       expect(made.id).toBe('NEWCERT');
       expect(ask.confirm).toHaveBeenCalledTimes(2);
+    }, 120_000);
+
+    it('signs in for the Xcode download with any Apple Account, saying why', async () => {
+      site.needsSignIn = true;
+      const ask = prompter();
+      const got = await xcodeDownloadOnAppleWebsite('26.6', silentContext(ask), { root, browser, site: base });
+      expect(got.cookies).toEqual(['ADCDownloadAuth=stand-in-grant']);
+      expect(ask.confirm).toHaveBeenCalledOnce();
+      const question = ask.confirm.mock.calls[0]![0] as ConfirmRequest;
+      expect(question.detail).toContain('Xcode comes from Apple’s website, which needs its own sign-in');
+      expect(question.detail).toContain('Sign in there with your Apple Account (a free one works)');
+      expect(question.detail).toContain('closes the window and downloads Xcode');
     }, 120_000);
 
     it('Cancel stops without asking anything else', async () => {

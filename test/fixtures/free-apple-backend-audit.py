@@ -10,7 +10,6 @@ from __future__ import annotations
 import ast
 import base64
 import datetime as dt
-import email.message
 import gzip
 import hashlib
 import hmac
@@ -464,66 +463,6 @@ F54759B65E372FCD68EF20FA7111F9E4AFF73""".replace("\n", ""), 16)
         ])
         self.assertEqual(plistlib.loads(requests[1].data), {"securityCode.code": "123456",
                          "serverInfo": {"mode": "sms", "phoneNumber.id": "1"}})
-
-    XCODE = "/Developer_Tools/Xcode_26.6/Xcode_26.6_Apple_silicon.xip"
-
-    @staticmethod
-    def _headers(*pairs):
-        message = email.message.Message()
-        for name, value in pairs:
-            message[name] = value  # appends: Set-Cookie may come more than once
-        return message
-
-    def _grant(self, answer, path=XCODE):
-        """download_grant against a stand-in opener that answers `answer` (a Response, or an HTTPError)."""
-        ds = backend.DeveloperServices(FakeAnisette(), {"adsid": "fake", "token": "fake-gs-token", "teamId": ""})
-        opened = []
-
-        class Opener:
-            def open(self, req, timeout=None):
-                opened.append(req)
-                if isinstance(answer, Exception):
-                    raise answer
-                return answer
-        with patch.object(backend.urllib.request, "build_opener", return_value=Opener()):
-            return ds.download_grant(path), opened
-
-    def test_download_grant_asks_developer_services_the_way_xcode_does(self):
-        # The free sign-in can't read Apple's download list (the website's), so CapMac asks for the
-        # managed Xcode's archive by name, with the Xcode token, and keeps only Apple's grant cookie.
-        answer = Response(b"", self._headers(("Set-Cookie", "dslang=US-EN; Domain=apple.com; Path=/"),
-                                             ("Set-Cookie", "ADCDownloadAuth=grant-ok; Domain=apple.com; Path=/; Secure")))
-        grant, opened = self._grant(answer)
-        self.assertEqual(grant, {"cookies": ["ADCDownloadAuth=grant-ok"], "location": None})
-        self.assertEqual(opened[0].full_url, "https://developerservices2.apple.com/services/download?path=" + self.XCODE)
-        self.assertEqual(opened[0].get_header("X-apple-gs-token"), "fake-gs-token")
-        self.assertEqual(opened[0].get_header("X-apple-app-info"), "com.apple.gs.xcode.auth")
-
-    def test_download_grant_takes_the_cookie_from_a_redirect(self):
-        file = "https://download.developer.apple.com" + self.XCODE
-        found = backend.urllib.error.HTTPError("https://developerservices2.apple.com/services/download", 302, "Found",
-                                               self._headers(("Set-Cookie", "ADCDownloadAuth=grant-302; Domain=apple.com"),
-                                                             ("Location", file)), io.BytesIO(b""))
-        grant, _ = self._grant(found)
-        self.assertEqual(grant, {"cookies": ["ADCDownloadAuth=grant-302"], "location": file})
-
-    def test_a_refused_download_grant_is_a_clear_error(self):
-        refused = backend.urllib.error.HTTPError("https://developerservices2.apple.com/services/download", 403, "Forbidden",
-                                                 self._headers(), io.BytesIO(b"<html>Forbidden</html>"))
-        with patch.object(backend, "log"), self.assertRaises(backend.DsError) as caught:
-            self._grant(refused)
-        self.assertEqual(caught.exception.code, 403)
-        self.assertIn("did not allow the Xcode download", str(caught.exception))
-        with patch.object(backend, "log"), self.assertRaises(backend.DsError):
-            self._grant(Response(b"", self._headers(("Content-Type", "text/plain"))))  # no grant cookie at all
-
-    def test_download_grant_asks_only_for_xcode_archives(self):
-        ds = backend.DeveloperServices(FakeAnisette(), {"adsid": "fake", "token": "fake", "teamId": ""})
-        for path in ("/etc/passwd", "/Developer_Tools/../secret.xip", "/Developer_Tools/Xcode.xip?x=1", "/Other/Xcode.xip"):
-            with self.subTest(path=path), patch.object(backend.urllib.request, "build_opener") as opener:
-                with self.assertRaises(backend.DsError):
-                    ds.download_grant(path)
-                opener.assert_not_called()
 
     def test_an_app_id_another_team_has_says_to_pick_your_own(self):
         # The sample app's dev.capmac.hello belongs to the user's paid team, so their free team can't have it.

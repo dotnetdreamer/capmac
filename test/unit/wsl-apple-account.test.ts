@@ -7,7 +7,7 @@ import { createServer } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nonInteractivePrompter, silentContext, type Prompter } from '../../packages/core/src/engine/context.js';
 import { UserError } from '../../packages/core/src/engine/errors.js';
-import { AppleAccountSession, cookieJarOf, downloadGrantJar, downloadXcodeWithGrant, loginAppleAccount, loginAppleAccountWithCookies, pinnedXcodeDownload, selectAppleXcodeDownload } from '../../packages/core/src/engine/wsl/apple-account.js';
+import { AppleAccountSession, cookieJarOf, downloadGrantJar, downloadXcodeWithGrant, loginAppleAccount, loginAppleAccountWithCookies, selectAppleXcodeDownload } from '../../packages/core/src/engine/wsl/apple-account.js';
 
 const mock = vi.hoisted(() => {
   const client = { defaults: {}, interceptors: { request: { use: vi.fn(() => 4), eject: vi.fn() }, response: { use: vi.fn(() => 7), eject: vi.fn() } }, request: vi.fn() };
@@ -261,11 +261,8 @@ describe('authenticated official Xcode downloads', () => {
     await expect(session(elsewhere.fetcher).downloadXcode(download26(), path.join(temporary, 'Xcode.xip'))).rejects.toThrow('unexpected address');
     expect(await readdir(temporary)).toEqual([]);
   });
-  it('downloads for a free Apple Account by name, with the grant from the Xcode sign-in', async () => {
+  it('downloads for a free Apple Account with the permission Apple’s website gave', async () => {
     temporary = await mkdtemp(path.join(os.tmpdir(), 'capmac-apple-download-'));
-    // The free sign-in can't read Apple's download list, so it names the managed Xcode's archive.
-    expect(pinnedXcodeDownload('26.6')).toEqual({ version: '26.6', name: 'Xcode 26.6', url: ARCHIVE, fileName: 'Xcode_26.6_Apple_silicon.xip' });
-    expect(() => pinnedXcodeDownload('26.6 beta')).toThrow(UserError);
     const data = Buffer.from('xar!fake-test-archive');
     const CDN = 'https://download-cdn.apple.com/Xcode_26.6_Apple_silicon.xip';
     const { fetcher, calls } = transport({
@@ -274,7 +271,7 @@ describe('authenticated official Xcode downloads', () => {
       [CDN]: () => new Response(data, { status: 200, headers: { 'content-type': 'application/octet-stream', 'content-length': String(data.length) } }),
     });
     const destination = path.join(temporary, 'Xcode.xip'); const progress = vi.fn();
-    await expect(downloadXcodeWithGrant(['ADCDownloadAuth=grant'], pinnedXcodeDownload('26.6'), destination, { fetch: fetcher, onProgress: progress })).resolves.toBe(destination);
+    await expect(downloadXcodeWithGrant(['ADCDownloadAuth=grant'], download26(), destination, { fetch: fetcher, onProgress: progress })).resolves.toBe(destination);
     expect(calls.map((call) => [call.url, (call.init.headers as Record<string, string>).Cookie])).toEqual([[ARCHIVE, 'ADCDownloadAuth=grant'], [CDN, 'ADCDownloadAuth=grant; edge=ok']]);
     expect(await readFile(destination)).toEqual(data); expect(progress).toHaveBeenLastCalledWith(data.length, data.length, undefined);
     // The grant is Apple's: no other host is sent it.

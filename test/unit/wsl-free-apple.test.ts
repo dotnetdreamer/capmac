@@ -103,22 +103,6 @@ describe('the free Apple backend runner', () => {
     runner.close();
   });
 
-  it('asks the helper for Apple’s Xcode download grant and keeps only that cookie', async () => {
-    const asked: unknown[] = [];
-    const { spawn } = fakeProcess((message, emit) => {
-      if (message.op !== 'download-grant') return;
-      asked.push(message.path);
-      emit({ id: message.id, ok: true, result: message.path === '/none.xip'
-        ? { cookies: ['dslang=US-EN'] }
-        : { cookies: ['ADCDownloadAuth=grant', 'dslang=US-EN', 'ADCDownloadAuth=bad value; Path=/'], location: null } });
-    });
-    const runner = new FreeApple({ stateDir: 'state', python, spawn });
-    expect(await runner.downloadGrant('/Developer_Tools/Xcode_26.6/Xcode_26.6_Apple_silicon.xip')).toEqual(['ADCDownloadAuth=grant']);
-    await expect(runner.downloadGrant('/none.xip')).rejects.toBeInstanceOf(UserError);
-    expect(asked).toEqual(['/Developer_Tools/Xcode_26.6/Xcode_26.6_Apple_silicon.xip', '/none.xip']);
-    runner.close();
-  });
-
   it('turns Apple’s sign-in block (-80045) into a clear next step', async () => {
     const { spawn } = fakeProcess((message, emit) => {
       if (message.op === 'login') emit({ id: message.id, ok: false, error: 'This action cannot be completed at this time. (-80045)', code: -80045 });

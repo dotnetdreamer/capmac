@@ -79,7 +79,7 @@ Apple's limits for a free Apple Account:
 
 The first time, iOS won't open the app until you trust its developer. On the iPhone, open Settings, tap General, then VPN & Device Management, tap your Apple Account, then Trust. CapMac says so when the iPhone refuses to open the app
 
-Setup downloads Xcode 26.6 with the free sign-in too, the way Xcode itself downloads (about 2.3 GB, once, into Downloads). If Apple turns that download down, setup says so: download Xcode 26.6 (the .xip file, free with any Apple Account) from [developer.apple.com/download/all](https://developer.apple.com/download/all/), leave it in Downloads and run setup again
+Setup downloads Xcode 26.6 too (about 2.3 GB, once, into Downloads). It comes from Apple's download site, which needs its own sign-in. CapMac opens the site in Edge, Chrome or Brave. Sign in there once with the same Apple Account, and CapMac remembers it and downloads the file. If that doesn't work, setup says so: download Xcode 26.6 (the .xip file) yourself from [developer.apple.com/download/all](https://developer.apple.com/download/all/), leave it in Downloads and run setup again
 
 ## Building in CapMac Studio
 

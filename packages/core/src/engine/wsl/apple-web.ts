@@ -15,7 +15,7 @@ import type { Readable, Writable } from 'node:stream';
 import { promisify } from 'node:util';
 import { log, throwIfAborted, type EngineContext } from '../context.js';
 import { CancelledError, UserError } from '../errors.js';
-import { loginAppleAccountWithCookies, type AppleAccountSession } from './apple-account.js';
+import { loginAppleAccountWithCookies, selectAppleXcodeDownload, type AppleAccountSession, type AppleXcodeDownload } from './apple-account.js';
 import { prepareAppleSigningDirectory } from './apple-signing.js';
 import { dpapi } from './protect.js';
 
@@ -290,10 +290,10 @@ export class WebPage {
     }
   }
 
-  /** The browser's cookies for apple.com. */
-  async cookies(): Promise<WebCookie[]> {
+  /** The browser's cookies for apple.com, and for `host` (in tests, a stand-in for Apple's site). */
+  async cookies(host?: string): Promise<WebCookie[]> {
     const { cookies } = await this.devtools.send<{ cookies: WebCookie[] }>('Storage.getCookies');
-    return cookies.filter((cookie) => isApple(cookie.domain));
+    return cookies.filter((cookie) => isApple(cookie.domain) || (!!host && cookie.domain.replace(/^\./, '') === host));
   }
 
   /** Puts back the saved cookies the profile doesn't have, such as the sign-in's session cookies. */
@@ -409,6 +409,8 @@ interface Run {
   notes: string[];
   /** What setup says when the developer stops at the sign-in window. */
   stopped: { message: string; hint: string };
+  /** For the Xcode download, which any Apple Account may make, a free one too. */
+  download?: boolean;
 }
 
 const CERTIFICATE_STOPPED = { message: 'Signing is waiting for your certificate from Apple’s website.', hint: 'Run setup again when you are ready. CapMac keeps its request, so the certificate still fits.' };
@@ -465,12 +467,15 @@ async function signInWithWindow(run: Run): Promise<'signed-in' | 'restart'> {
     await page.restore(await loadSignIn(run.root));
     page.goto(run.site.account, 120_000).catch(() => undefined);
     progress(ctx, `Opened Apple’s website in ${browser.name}. Waiting for you to sign in…`);
+    const who = run.team ? `the Apple Account of the team “${run.team.name}”` : run.download ? 'your Apple Account (a free one works)' : 'your Apple developer account';
+    const next = run.team ? 'makes the certificate' : run.download ? 'downloads Xcode' : 'carries on';
     const outcome = await new Promise<'signed-in' | 'restart' | 'stop' | 'closed'>((resolve, reject) => {
       ctx.prompter.confirm({
         message: `Sign in to Apple in ${browser.name}`,
         detail: [
-          `CapMac opened Apple’s website in a ${browser.name} window. Sign in there with ${run.team ? `the Apple Account of the team “${run.team.name}”` : 'your Apple developer account'}`,
-          `Once you are in, CapMac closes the window and ${run.team ? 'makes the certificate' : 'carries on'}. You sign in only once: CapMac remembers it for this Windows account`,
+          ...run.download ? ['Xcode comes from Apple’s website, which needs its own sign-in'] : [],
+          `CapMac opened Apple’s website in a ${browser.name} window. Sign in there with ${who}`,
+          `Once you are in, CapMac closes the window and ${next}. You sign in only once: CapMac remembers it for this Windows account`,
           'Something wrong? Restart opens a fresh window with nothing saved',
         ].join('\n'),
         waiting: 'Waiting for you to sign in…',
@@ -838,6 +843,73 @@ export async function signInOnAppleWebsite(ctx: EngineContext, options: AppleWeb
   if (session) return session;
   // A free Apple Account ends up here too: Apple's developer website is only for paid members.
   throw new UserError('Apple didn’t accept the sign-in from its website here.', 'Apple’s website only works for paid Apple Developer accounts. With a free Apple Account, run setup again and choose “Use a free Apple Account”. With a paid one, choose “Let CapMac do it with a fresh sign-in”, or “Do it myself” to sign in here in CapMac.');
+}
+
+// ---------------------------------------------------------------------------
+// The Xcode download, with any Apple Account. Apple's downloads page is open to
+// everyone signed in on its developer website, free accounts too (the signing
+// pages are for paid members only), while Xcode's own sign-in is turned away
+// there (HTTP 403). The hidden browser asks the way that page does, and CapMac
+// downloads the file itself with the permission Apple gave.
+
+/** What to download, and Apple's permission for it: cookies for CapMac's own download requests. */
+export interface AppleWebXcodeDownload { download: AppleXcodeDownload; cookies: string[] }
+
+/** Getting the archive without CapMac: setup takes it from Downloads. */
+export const xcodeByHand = (version: string) => `Run setup again to try once more. Or download it yourself: open developer.apple.com/download/all, sign in, accept Apple’s free developer agreement if it asks, download “Xcode ${version}” (the .xip file) and leave it in your Downloads folder, then run setup again.`;
+
+/** The downloads page's own list, cut down in the page to one release (the whole list is megabytes). */
+const CATALOG = (name: string) => `(async () => {
+  const response = await fetch('/services-account/QH65B2/downloadws/listDownloads.action', { method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json;charset=UTF-8', Accept: 'application/json, text/plain, */*' }, body: '{}' });
+  const text = await response.text();
+  let parsed; try { parsed = JSON.parse(text); } catch { parsed = undefined; }
+  const downloads = parsed && Array.isArray(parsed.downloads) ? parsed.downloads.filter((item) => item && item.name === ${JSON.stringify(name)}) : null;
+  return { status: response.status, downloads, body: downloads ? '' : text.slice(0, 4000) };
+})()`;
+
+/** Asks as a link on the downloads page does: Apple sets its cookie and sends the browser on to the file, which isn't followed. */
+const GRANT = (remotePath: string) => `(async () => {
+  const response = await fetch('/services-account/download?path=' + encodeURIComponent(${JSON.stringify(remotePath)}), { credentials: 'include', redirect: 'manual' });
+  const redirected = response.type === 'opaqueredirect';
+  return { status: response.status, redirected, body: redirected ? '' : (await response.text()).slice(0, 4000) };
+})()`;
+
+/**
+ * Apple's permission to download Xcode `version` from its website, for any Apple Account. The
+ * developer signs in once, in a window (later, not at all while the saved sign-in works); the
+ * rest happens in a hidden browser.
+ */
+export async function xcodeDownloadOnAppleWebsite(version: string, ctx: EngineContext, options: AppleWebOptions & { signal?: AbortSignal } = {}): Promise<AppleWebXcodeDownload> {
+  const browser = options.browser ?? await findWebBrowser();
+  if (!browser) throw new UserError('CapMac needs Microsoft Edge, Google Chrome or Brave to download Xcode from Apple’s website.', xcodeByHand(version));
+  const root = await prepareAppleSigningDirectory(webRoot(options.root));
+  const base = options.site ?? APPLE_SITE;
+  const run: Run = {
+    // The account's own page, which a free account may open (the certificates page is for paid members).
+    root, browser, site: { ...siteOf(base), account: `${base}/account` }, ctx, signal: options.signal, download: true,
+    notes: [`browser: ${browser.name}`, 'for: the Xcode download'],
+    stopped: { message: 'The Xcode download is waiting for you to sign in on Apple’s website.', hint: xcodeByHand(version) },
+  };
+  let page: WebPage | undefined;
+  try {
+    page = await signedInPage(run);
+    progress(ctx, `Finding Xcode ${version} on Apple’s download site…`);
+    const listed = await page.evaluate<{ status: number; downloads: unknown[] | null; body: string }>(CATALOG(`Xcode ${version}`), 180_000);
+    run.notes.push(`downloads list: HTTP ${listed.status}${listed.downloads ? `, ${listed.downloads.length} for Xcode ${version}` : ''}`);
+    if (!listed.downloads) throw new UserError('Apple’s website didn’t show its downloads.', xcodeByHand(version), [`Apple answered HTTP ${listed.status}`, ...appleSaid(listed.body)]);
+    const download = selectAppleXcodeDownload({ downloads: listed.downloads }, version);
+    const granted = await page.evaluate<{ status: number; redirected: boolean; body: string }>(GRANT(decodeURIComponent(new URL(download.url).pathname)), 60_000);
+    run.notes.push(`download permission: ${granted.redirected ? 'sent on to the file' : `HTTP ${granted.status}`}`);
+    const grant = granted.redirected ? (await page.cookies(run.site.host)).filter((cookie) => cookie.name === 'ADCDownloadAuth' && cookie.value) : [];
+    if (!grant.length) throw new UserError('Apple didn’t allow the Xcode download.', xcodeByHand(version), granted.redirected ? [] : [`Apple answered HTTP ${granted.status}`, ...appleSaid(granted.body)]);
+    await saveSignIn(root, await page.cookies());
+    return { download, cookies: grant.map((cookie) => `${cookie.name}=${cookie.value}`) };
+  } catch (error) {
+    throw await explained(run, page, error);
+  } finally {
+    await page?.close();
+  }
 }
 
 export type AppleSignInChoice = { way: 'password' } | { way: 'website'; fresh: boolean } | { way: 'free' };
