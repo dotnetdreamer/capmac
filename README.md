@@ -20,7 +20,7 @@ CapMac builds your app and runs it on the iOS Simulator or your own iPhone<br>Yo
 
 [Quick start](#quick-start) · [No Mac?](#no-mac-at-all) · [FAQ](#faq) · [Guide](docs/guide.md)
 
-https://github.com/user-attachments/assets/cea942bc-a90b-4a7b-bb6c-0837361bfee8
+https://github.com/user-attachments/assets/493ab852-f6a9-47f8-880d-6276d921718b
 
 </div>
 
